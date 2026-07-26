@@ -4,6 +4,7 @@ import { and, count, desc, eq, gte, inArray } from "drizzle-orm";
 import { Hono } from "hono";
 import { db } from "../db";
 import {
+  agentNotification,
   device,
   event,
   interaction,
@@ -157,29 +158,40 @@ export const hooksRoute = new Hono()
     }
 
     const since = new Date(Date.now() - 60_000);
-    const [[serviceUsage], [accountEventUsage], [accountInteractionUsage], [accountActivityUsage]] =
-      await Promise.all([
-        db
-          .select({ value: count() })
-          .from(event)
-          .where(and(eq(event.serviceId, svc.id), gte(event.createdAt, since))),
-        db
-          .select({ value: count() })
-          .from(event)
-          .innerJoin(serviceTable, eq(event.serviceId, serviceTable.id))
-          .where(and(eq(serviceTable.userId, svc.userId), gte(event.createdAt, since))),
-        db
-          .select({ value: count() })
-          .from(interaction)
-          .where(and(eq(interaction.userId, svc.userId), gte(interaction.createdAt, since))),
-        db
-          .select({ value: count() })
-          .from(liveActivityOperation)
-          .innerJoin(liveActivity, eq(liveActivity.id, liveActivityOperation.activityId))
-          .where(
-            and(eq(liveActivity.userId, svc.userId), gte(liveActivityOperation.createdAt, since)),
-          ),
-      ]);
+    const [
+      [serviceUsage],
+      [accountNotificationUsage],
+      [accountEventUsage],
+      [accountInteractionUsage],
+      [accountActivityUsage],
+    ] = await Promise.all([
+      db
+        .select({ value: count() })
+        .from(event)
+        .where(and(eq(event.serviceId, svc.id), gte(event.createdAt, since))),
+      db
+        .select({ value: count() })
+        .from(agentNotification)
+        .where(
+          and(eq(agentNotification.userId, svc.userId), gte(agentNotification.createdAt, since)),
+        ),
+      db
+        .select({ value: count() })
+        .from(event)
+        .innerJoin(serviceTable, eq(event.serviceId, serviceTable.id))
+        .where(and(eq(serviceTable.userId, svc.userId), gte(event.createdAt, since))),
+      db
+        .select({ value: count() })
+        .from(interaction)
+        .where(and(eq(interaction.userId, svc.userId), gte(interaction.createdAt, since))),
+      db
+        .select({ value: count() })
+        .from(liveActivityOperation)
+        .innerJoin(liveActivity, eq(liveActivity.id, liveActivityOperation.activityId))
+        .where(
+          and(eq(liveActivity.userId, svc.userId), gte(liveActivityOperation.createdAt, since)),
+        ),
+    ]);
 
     if ((serviceUsage?.value ?? 0) >= billing.limits.servicePerMinute) {
       c.header("Retry-After", "60");
@@ -196,7 +208,8 @@ export const hooksRoute = new Hono()
       );
     }
     if (
-      (accountEventUsage?.value ?? 0) +
+      (accountNotificationUsage?.value ?? 0) +
+        (accountEventUsage?.value ?? 0) +
         (accountInteractionUsage?.value ?? 0) +
         (accountActivityUsage?.value ?? 0) >=
       billing.limits.accountPerMinute

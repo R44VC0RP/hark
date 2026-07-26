@@ -1,13 +1,14 @@
 # harkctl
 
-`harkctl` creates Hark approval/text-reply interactions and controls finite agent task Live
-Activities from Node.js 22 or newer.
+`harkctl` sends one-shot Hark notifications, creates approval/text-reply interactions, and controls
+finite agent task Live Activities from Node.js 22 or newer.
 
 Start a browser authorization flow and approve the requested scopes with your signed-in Hark account:
 
 ```sh
 npx harkctl auth login
 harkctl auth status
+harkctl notify "Tests passed" --title "Mux" --url https://example.com/build/123
 harkctl ask "Deploy production?" --approval --wait --timeout 15m --json
 harkctl ask "What should the release note say?" --reply --device dev_... --wait
 harkctl activity start --key release-main --title "Release" --status "Building" --progress 0.1 \
@@ -39,6 +40,11 @@ stdout. All successful command output is one stable JSON object; diagnostics use
 
 Approval notifications always offer both Approve and Deny. Older scripts may use
 `--approve --deny` together; either flag by itself is rejected as ambiguous.
+
+`notify` sends a one-shot notification and exits immediately after Expo accepts or rejects the push
+request. The message may be positional or supplied as `body` with `--stdin`; optional `--title`,
+`--url`, `--image-url`, repeatable `--device`, and `--idempotency-key` values match the notification
+API. A targeted device requires Hark Pro.
 
 Activity commands accept flags or `--stdin` JSON. Use `activity get <id|key>` and `activity list` to
 inspect state, `--idempotency-key` for retries, and `--if-sequence` to reject stale updates. Progress

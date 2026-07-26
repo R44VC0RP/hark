@@ -159,6 +159,27 @@ export const webhookRequestSchema = z.object({
 });
 export type WebhookRequest = z.infer<typeof webhookRequestSchema>;
 
+/** One-shot notification sent by an authenticated agent token. */
+export const agentNotificationCreateSchema = webhookRequestSchema.omit({ response: true }).strict();
+export type AgentNotificationCreateInput = z.infer<typeof agentNotificationCreateSchema>;
+
+export interface AgentNotificationDto {
+  id: string;
+  title: string;
+  body: string;
+  status: string;
+  /** Number of notification requests accepted by Expo, not proof of device delivery. */
+  accepted: number;
+  createdAt: string;
+}
+
+export interface AgentNotificationCreateResponse {
+  notification: AgentNotificationDto;
+  accepted: number;
+  idempotent?: boolean;
+  message?: string;
+}
+
 export type WebhookResponse =
   | {
       ok: true;

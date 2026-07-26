@@ -15,6 +15,7 @@ import { and, count, desc, eq, gte, inArray, lte, or } from "drizzle-orm";
 import { Hono } from "hono";
 import { db } from "../db";
 import {
+  agentNotification,
   device,
   event,
   interaction,
@@ -126,12 +127,23 @@ async function enforceActivityRateLimit(
   const billing = await getBilling(owner, true);
   const since = new Date(Date.now() - 60_000);
   const [
+    [tokenNotifications],
     [tokenActivity],
     [tokenInteractions],
+    [accountNotifications],
     [accountActivity],
     [accountInteractions],
     [webhooks],
   ] = await Promise.all([
+    db
+      .select({ value: count() })
+      .from(agentNotification)
+      .where(
+        and(
+          eq(agentNotification.requesterTokenId, token.id),
+          gte(agentNotification.createdAt, since),
+        ),
+      ),
     db
       .select({ value: count() })
       .from(liveActivityOperation)
@@ -145,6 +157,12 @@ async function enforceActivityRateLimit(
       .select({ value: count() })
       .from(interaction)
       .where(and(eq(interaction.requesterTokenId, token.id), gte(interaction.createdAt, since))),
+    db
+      .select({ value: count() })
+      .from(agentNotification)
+      .where(
+        and(eq(agentNotification.userId, token.userId), gte(agentNotification.createdAt, since)),
+      ),
     db
       .select({ value: count() })
       .from(liveActivityOperation)
@@ -163,13 +181,18 @@ async function enforceActivityRateLimit(
       .where(and(eq(service.userId, token.userId), gte(event.createdAt, since))),
   ]);
   if (
-    (tokenActivity?.value ?? 0) + (tokenInteractions?.value ?? 0) >=
+    (tokenNotifications?.value ?? 0) +
+      (tokenActivity?.value ?? 0) +
+      (tokenInteractions?.value ?? 0) >=
     billing.limits.servicePerMinute
   ) {
     return { error: "Requester rate limit exceeded", retryAfterSeconds: 60 };
   }
   if (
-    (accountActivity?.value ?? 0) + (accountInteractions?.value ?? 0) + (webhooks?.value ?? 0) >=
+    (accountNotifications?.value ?? 0) +
+      (accountActivity?.value ?? 0) +
+      (accountInteractions?.value ?? 0) +
+      (webhooks?.value ?? 0) >=
     billing.limits.accountPerMinute
   ) {
     return { error: "Account rate limit exceeded", retryAfterSeconds: 60 };

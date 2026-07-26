@@ -323,6 +323,78 @@ test("writes one JSON object to stdout and diagnostics to stderr", async () => {
   }
 });
 
+test("notify sends a one-shot authenticated notification", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    assert.equal(url, "https://example.test/api/agent/notifications");
+    assert.equal(init.method, "POST");
+    assert.equal(init.headers["Idempotency-Key"], "build-123");
+    assert.deepEqual(JSON.parse(init.body), {
+      body: "Tests passed",
+      title: "Mux",
+      url: "https://example.com/build/123",
+      imageUrl: "https://example.com/mux.png",
+      deviceIds: ["dev_a"],
+    });
+    return Response.json({
+      accepted: 1,
+      notification: {
+        id: "ntf_1",
+        title: "Mux",
+        body: "Tests passed",
+        status: "accepted",
+        accepted: 1,
+      },
+    });
+  };
+  try {
+    const result = await execute(
+      [
+        "notify",
+        "Tests passed",
+        "--title",
+        "Mux",
+        "--url",
+        "https://example.com/build/123",
+        "--image-url",
+        "https://example.com/mux.png",
+        "--device",
+        "dev_a",
+        "--idempotency-key",
+        "build-123",
+      ],
+      { HARK_TOKEN: "hark_test", HARK_API_URL: "https://example.test" },
+    );
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.body.notification.id, "ntf_1");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("notify exits 7 when no push is accepted", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => {
+    assert.deepEqual(JSON.parse(init.body), { body: "No devices", title: "Mux" });
+    return Response.json({
+      accepted: 0,
+      notification: { id: "ntf_none", status: "no_devices", accepted: 0 },
+    });
+  };
+  try {
+    const result = await execute(["notify", "No devices", "--title", "Mux"], {
+      HARK_TOKEN: "hark_test",
+    });
+    assert.equal(result.exitCode, 7);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("notify requires a message", async () => {
+  await assert.rejects(execute(["notify"], { HARK_TOKEN: "hark_test" }), /requires a message/);
+});
+
 test("ask sends the normalized approval request body", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {

@@ -11,6 +11,7 @@ import { and, count, desc, eq, gt, gte, inArray, isNull, lte } from "drizzle-orm
 import { Hono } from "hono";
 import { db } from "../db";
 import {
+  agentNotification,
   apiToken,
   device,
   event,
@@ -264,12 +265,27 @@ export const agentRoute = new Hono<AgentEnv>()
 
     const since = new Date(Date.now() - 60_000);
     const [
+      [requesterNotifications],
       [requesterUsage],
       [requesterActivityUsage],
+      [accountNotifications],
       [webhookUsage],
       [interactionUsage],
       [activityUsage],
     ] = await Promise.all([
+      db
+        .select({ value: count() })
+        .from(agentNotification)
+        .where(
+          and(
+            eq(agentNotification.requesterTokenId, token.id),
+            gte(agentNotification.createdAt, since),
+          ),
+        ),
+      db
+        .select({ value: count() })
+        .from(interaction)
+        .where(and(eq(interaction.requesterTokenId, token.id), gte(interaction.createdAt, since))),
       db
         .select({ value: count() })
         .from(liveActivityOperation)
@@ -281,8 +297,10 @@ export const agentRoute = new Hono<AgentEnv>()
         ),
       db
         .select({ value: count() })
-        .from(interaction)
-        .where(and(eq(interaction.requesterTokenId, token.id), gte(interaction.createdAt, since))),
+        .from(agentNotification)
+        .where(
+          and(eq(agentNotification.userId, token.userId), gte(agentNotification.createdAt, since)),
+        ),
       db
         .select({ value: count() })
         .from(event)
@@ -301,14 +319,19 @@ export const agentRoute = new Hono<AgentEnv>()
         ),
     ]);
     if (
-      (requesterUsage?.value ?? 0) + (requesterActivityUsage?.value ?? 0) >=
+      (requesterNotifications?.value ?? 0) +
+        (requesterUsage?.value ?? 0) +
+        (requesterActivityUsage?.value ?? 0) >=
       billing.limits.servicePerMinute
     ) {
       c.header("Retry-After", "60");
       return c.json({ error: "Requester rate limit exceeded", retryAfterSeconds: 60 }, 429);
     }
     if (
-      (webhookUsage?.value ?? 0) + (interactionUsage?.value ?? 0) + (activityUsage?.value ?? 0) >=
+      (accountNotifications?.value ?? 0) +
+        (webhookUsage?.value ?? 0) +
+        (interactionUsage?.value ?? 0) +
+        (activityUsage?.value ?? 0) >=
       billing.limits.accountPerMinute
     ) {
       c.header("Retry-After", "60");

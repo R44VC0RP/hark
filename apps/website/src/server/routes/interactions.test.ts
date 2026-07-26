@@ -200,6 +200,14 @@ function agent(path: string, token = SECRET, init?: RequestInit) {
   });
 }
 
+async function createNotification(body: Record<string, unknown>, key?: string, token = SECRET) {
+  return agent("/notifications", token, {
+    method: "POST",
+    headers: key ? { "Idempotency-Key": key } : undefined,
+    body: JSON.stringify(body),
+  });
+}
+
 async function createInteraction(body: Record<string, unknown>, key?: string) {
   return agent("/interactions", SECRET, {
     method: "POST",
@@ -289,6 +297,90 @@ describe("agent token authentication", () => {
       .from(schema.apiToken)
       .where(eq(schema.apiToken.id, "tok_full"));
     expect(token?.lastUsedAt?.getTime()).toBe(recent.getTime());
+  });
+});
+
+describe("agent notifications", () => {
+  it("sends a one-shot notification using the token name as the default title", async () => {
+    sent.length = 0;
+    const response = await createNotification({ body: "Tests passed" });
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({
+      accepted: 2,
+      notification: {
+        title: "Full",
+        body: "Tests passed",
+        status: "accepted",
+        accepted: 2,
+      },
+    });
+    expect(sent).toHaveLength(2);
+    expect(sent[0]).toMatchObject({
+      title: "Full",
+      body: "Tests passed",
+      data: {
+        serviceId: "agent-tok_full",
+        sourceId: "agent-tok_full",
+        sourceName: "Full",
+      },
+    });
+    expect(tracked).toHaveLength(1);
+  });
+
+  it("requires notification scope and validates the payload", async () => {
+    expect((await createNotification({ body: "No" }, undefined, READ_SECRET)).status).toBe(403);
+    const invalid = await createNotification({ body: "", response: { type: "approval" } });
+    expect(invalid.status).toBe(400);
+  });
+
+  it("supports idempotency without sending the push twice", async () => {
+    sent.length = 0;
+    const payload = { body: "Build complete", title: "Mux" };
+    const first = await createNotification(payload, "build-1");
+    const firstBody = (await first.json()) as { notification: { id: string } };
+    const replay = await createNotification(payload, "build-1");
+    expect(await replay.json()).toMatchObject({
+      idempotent: true,
+      notification: { id: firstBody.notification.id },
+    });
+    expect(sent).toHaveLength(2);
+    const conflict = await createNotification({ ...payload, body: "Build failed" }, "build-1");
+    expect(conflict.status).toBe(409);
+  });
+
+  it("applies device routing rules and reports no accepted pushes", async () => {
+    billingState.pro = false;
+    sent.length = 0;
+    const free = await createNotification({ body: "One device" });
+    expect(await free.json()).toMatchObject({ accepted: 1 });
+    expect(sent).toHaveLength(1);
+    expect((await createNotification({ body: "Target", deviceIds: ["dev_2"] })).status).toBe(402);
+
+    billingState.pro = true;
+    sent.length = 0;
+    billingState.acceptPush = false;
+    const rejected = await createNotification({ body: "Rejected", deviceIds: ["dev_2"] });
+    expect(await rejected.json()).toMatchObject({
+      accepted: 0,
+      message: "No notifications were accepted by Expo.",
+      notification: { status: "failed" },
+    });
+    expect(tracked).toHaveLength(1);
+  });
+
+  it("enforces requester, account, and monthly limits", async () => {
+    billingState.servicePerMinute = 0;
+    const requester = await createNotification({ body: "Limited" });
+    expect(requester.status).toBe(429);
+    expect(requester.headers.get("Retry-After")).toBe("60");
+
+    billingState.servicePerMinute = 10_000;
+    billingState.accountPerMinute = 0;
+    expect((await createNotification({ body: "Limited" })).status).toBe(429);
+
+    billingState.accountPerMinute = 10_000;
+    billingState.allowance = false;
+    expect((await createNotification({ body: "Limited" })).status).toBe(429);
   });
 });
 

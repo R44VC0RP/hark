@@ -12,6 +12,7 @@ import { and, count, desc, eq, gte, inArray, or } from "drizzle-orm";
 import { Hono } from "hono";
 import { db } from "../db";
 import {
+  agentNotification,
   device,
   event,
   interaction,
@@ -114,6 +115,7 @@ async function enforceRateLimit(service: ServiceRow, owner: UserRow) {
   const [
     [serviceEvents],
     [serviceActivities],
+    [accountNotifications],
     [accountEvents],
     [accountInteractions],
     [accountActivities],
@@ -130,6 +132,12 @@ async function enforceRateLimit(service: ServiceRow, owner: UserRow) {
           eq(liveActivityOperation.requesterServiceId, service.id),
           gte(liveActivityOperation.createdAt, since),
         ),
+      ),
+    db
+      .select({ value: count() })
+      .from(agentNotification)
+      .where(
+        and(eq(agentNotification.userId, service.userId), gte(agentNotification.createdAt, since)),
       ),
     db
       .select({ value: count() })
@@ -155,7 +163,8 @@ async function enforceRateLimit(service: ServiceRow, owner: UserRow) {
     return { error: "Service rate limit exceeded", retryAfterSeconds: 60 as const };
   }
   if (
-    (accountEvents?.value ?? 0) +
+    (accountNotifications?.value ?? 0) +
+      (accountEvents?.value ?? 0) +
       (accountInteractions?.value ?? 0) +
       (accountActivities?.value ?? 0) >=
     billing.limits.accountPerMinute

@@ -47,6 +47,8 @@ export function parseArgs(argv) {
   const valueFlags = new Set([
     "title",
     "device",
+    "url",
+    "image-url",
     "expires-in",
     "idempotency-key",
     "timeout",
@@ -343,6 +345,7 @@ function help() {
                      [--timeout <duration>] [--open|--no-open] [--json]
   harkctl auth logout
   harkctl auth status
+  harkctl notify <message> [--title <title>] [--url <url>] [--image-url <url>] [--device <id>]
   harkctl ask <prompt> (--approval|--reply) [--title <title>] [--device <id>] [--wait]
   harkctl interaction get <id>
   harkctl interaction wait <id> [--timeout <duration>]
@@ -409,6 +412,29 @@ export async function execute(argv, env = process.env, overrides = {}) {
   }
   if (group === "services" && action === "list") {
     return { body: await request(config, "/api/agent/services"), exitCode: 0 };
+  }
+  if (group === "notify") {
+    const stdin = options.stdin ? await readStdinJson() : {};
+    const message = positionals.slice(1).join(" ") || stdin.body;
+    if (!message) throw new UsageError("notify requires a message");
+    const payload = {
+      ...stdin,
+      body: message,
+      ...((options.title ?? stdin.title) ? { title: options.title ?? stdin.title } : {}),
+      ...((options.url ?? stdin.url) ? { url: options.url ?? stdin.url } : {}),
+      ...((options["image-url"] ?? stdin.imageUrl)
+        ? { imageUrl: options["image-url"] ?? stdin.imageUrl }
+        : {}),
+      ...(options.device.length > 0 ? { deviceIds: options.device } : {}),
+    };
+    const body = await request(config, "/api/agent/notifications", {
+      method: "POST",
+      headers: options["idempotency-key"]
+        ? { "Idempotency-Key": options["idempotency-key"] }
+        : undefined,
+      body: JSON.stringify(payload),
+    });
+    return { body, exitCode: body.accepted === 0 ? 7 : 0 };
   }
   if (group === "activity" && action === "list") {
     const limit = options.limit ? Number.parseInt(options.limit, 10) : 50;

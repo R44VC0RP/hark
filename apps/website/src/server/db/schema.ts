@@ -147,6 +147,37 @@ export const apiToken = sqliteTable(
   ],
 );
 
+export const agentNotification = sqliteTable(
+  "agent_notification",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    requesterTokenId: text("requester_token_id")
+      .notNull()
+      .references(() => apiToken.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    imageUrl: text("image_url"),
+    url: text("url"),
+    status: text("status").notNull(),
+    acceptedCount: integer("accepted_count").notNull().default(0),
+    error: text("error"),
+    idempotencyKey: text("idempotency_key"),
+    requestHash: text("request_hash"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("agent_notification_token_idempotency_key_unique").on(
+      table.requesterTokenId,
+      table.idempotencyKey,
+    ),
+    index("agent_notification_user_created_at_idx").on(table.userId, table.createdAt),
+    index("agent_notification_token_created_at_idx").on(table.requesterTokenId, table.createdAt),
+  ],
+);
+
 export const deviceAuthorizationRequest = sqliteTable(
   "device_authorization_request",
   {

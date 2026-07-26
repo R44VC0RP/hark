@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  agentNotificationCreateSchema,
   deviceRegisterSchema,
   interactionCreateSchema,
   interactionResponseSchema,
@@ -122,6 +123,29 @@ describe("webhookRequestSchema", () => {
           type: "yes_no",
           callback: { url: "http://localhost/callback", token: "x".repeat(32) },
         },
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("agentNotificationCreateSchema", () => {
+  it("accepts one-shot notification fields but not interaction responses", () => {
+    expect(
+      agentNotificationCreateSchema.safeParse({
+        body: "Tests passed",
+        title: "Mux",
+        url: "https://example.com/build/123",
+        imageUrl: "https://example.com/mux.png",
+        deviceIds: ["dev_b", "dev_a", "dev_b"],
+      }),
+    ).toMatchObject({
+      success: true,
+      data: { deviceIds: ["dev_a", "dev_b"] },
+    });
+    expect(
+      agentNotificationCreateSchema.safeParse({
+        body: "Deploy?",
+        response: { type: "approval" },
       }).success,
     ).toBe(false);
   });
