@@ -77,6 +77,26 @@ describe("track", () => {
     expect(rollups[0]?.value).toBe(5);
   });
 
+  it("deduplicates retried client events before incrementing rollups", async () => {
+    const input = {
+      name: "page_view" as const,
+      clientEventId: "event_retry_123456",
+      anonymousId: "visitor_1234567890",
+      sessionId: "session_1234567890",
+      surface: "web" as const,
+      metadata: { path: "/pricing" },
+    };
+    expect(analytics.track(input)).toBe(true);
+    expect(analytics.track(input)).toBe(false);
+
+    expect(await db.select().from(schema.analyticsEvent)).toHaveLength(1);
+    const rollups = await db
+      .select()
+      .from(schema.analyticsDaily)
+      .where(eq(schema.analyticsDaily.metric, "page_view"));
+    expect(rollups[0]?.value).toBe(1);
+  });
+
   it("caps metadata size and keeps only primitive keys", async () => {
     analytics.track({
       name: "webhook_failed",

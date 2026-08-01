@@ -10,6 +10,7 @@ import { Hono } from "hono";
 import { db } from "../db";
 import { service } from "../db/schema";
 import { env } from "../env";
+import { track } from "../lib/analytics";
 import { newId } from "../lib/id";
 import {
   decryptWebhookToken,
@@ -60,6 +61,7 @@ export async function createServiceForUser(
     })
     .returning();
   if (!row) throw new Error("Failed to create service");
+  track({ name: "service_created", userId, serviceId: row.id });
   return {
     service: serviceToDto(row),
     webhookUrl: webhookUrlFor(token),
@@ -108,6 +110,7 @@ export const servicesRoute = new Hono<AuthedEnv>()
       .where(and(eq(service.id, c.req.param("id")), eq(service.userId, user.id)))
       .returning();
     if (!row) return c.json({ error: "Service not found" }, 404);
+    track({ name: "service_updated", userId: user.id, serviceId: row.id });
     return c.json({ service: serviceToDto(row) });
   })
   .post("/:id/rotate", async (c) => {
@@ -130,6 +133,7 @@ export const servicesRoute = new Hono<AuthedEnv>()
       service: serviceToDto(row),
       webhookUrl: webhookUrlFor(token),
     };
+    track({ name: "service_token_rotated", userId: user.id, serviceId: row.id });
     return c.json(response);
   })
   .delete("/:id", async (c) => {
@@ -142,5 +146,6 @@ export const servicesRoute = new Hono<AuthedEnv>()
     if (deleted.length === 0) {
       return c.json({ error: "Service not found" }, 404);
     }
+    track({ name: "service_deleted", userId: user.id, serviceId: deleted[0]?.id });
     return c.json({ ok: true });
   });

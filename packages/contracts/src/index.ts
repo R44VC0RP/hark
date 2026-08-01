@@ -203,6 +203,65 @@ export const deviceUnregisterSchema = z.object({
 });
 export type DeviceUnregisterInput = z.infer<typeof deviceUnregisterSchema>;
 
+// ---------------------------------------------------------------------------
+// Product analytics
+// ---------------------------------------------------------------------------
+
+export const CLIENT_ANALYTICS_EVENT_NAMES = [
+  "page_view",
+  "screen_view",
+  "outbound_clicked",
+  "auth_started",
+  "auth_completed",
+  "app_open",
+  "notification_opened",
+  "notification_permission_prompted",
+  "notification_permission_resolved",
+  "device_registration_started",
+  "device_registration_completed",
+  "onboarding_completed",
+] as const;
+export const clientAnalyticsEventNameSchema = z.enum(CLIENT_ANALYTICS_EVENT_NAMES);
+export type ClientAnalyticsEventName = z.infer<typeof clientAnalyticsEventNameSchema>;
+
+const analyticsIdentifierSchema = z.string().regex(/^[A-Za-z0-9_-]{16,80}$/);
+const analyticsLabelSchema = z.string().trim().min(1).max(64);
+
+export const clientAnalyticsEventSchema = z.object({
+  eventId: analyticsIdentifierSchema,
+  anonymousId: analyticsIdentifierSchema,
+  sessionId: analyticsIdentifierSchema,
+  surface: z.enum(["web", "ios"]),
+  name: clientAnalyticsEventNameSchema,
+  path: z
+    .string()
+    .trim()
+    .min(1)
+    .max(120)
+    .regex(/^\/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*$/, "Path must not include a query or fragment")
+    .optional(),
+  outcome: z
+    .enum(["granted", "denied", "undetermined", "registered", "failed", "cancelled", "success"])
+    .optional(),
+  properties: z
+    .object({
+      referrerHost: analyticsLabelSchema.optional(),
+      source: analyticsLabelSchema.optional(),
+      medium: analyticsLabelSchema.optional(),
+      campaign: analyticsLabelSchema.optional(),
+      content: analyticsLabelSchema.optional(),
+      term: analyticsLabelSchema.optional(),
+      destinationHost: analyticsLabelSchema.optional(),
+      provider: z.enum(["apple", "google"]).optional(),
+      appVersion: analyticsLabelSchema.optional(),
+      appBuild: analyticsLabelSchema.optional(),
+      permission: z.enum(["granted", "denied", "undetermined"]).optional(),
+    })
+    .strict()
+    .optional(),
+});
+export type ClientAnalyticsEventInput = z.infer<typeof clientAnalyticsEventSchema>;
+
 export const appleNativeTokenExchangeSchema = z.object({
   authorizationCode: z.string().min(1).max(4096),
   identityToken: z.string().min(1).max(8192),

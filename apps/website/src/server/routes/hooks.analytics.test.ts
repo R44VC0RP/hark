@@ -155,6 +155,8 @@ describe("webhook analytics", () => {
     // Only the documented columns are ever populated.
     for (const row of rows) {
       expect(Object.keys(row).sort()).toEqual([
+        "anonymousId",
+        "clientEventId",
         "createdAt",
         "deviceId",
         "id",
@@ -163,6 +165,8 @@ describe("webhook analytics", () => {
         "outcome",
         "plan",
         "serviceId",
+        "sessionId",
+        "surface",
         "userId",
         "value",
       ]);

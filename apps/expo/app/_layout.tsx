@@ -5,10 +5,11 @@ import {
   useFonts,
 } from "@expo-google-fonts/inter";
 import * as Notifications from "expo-notifications";
-import { Stack } from "expo-router";
+import { Stack, usePathname } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
 import { AppState } from "react-native";
+import { trackAppEvent } from "../src/lib/analytics";
 import { useSession } from "../src/lib/auth";
 import {
   flushInteractionResponses,
@@ -34,6 +35,7 @@ Notifications.setNotificationHandler({
 
 export default function RootLayout() {
   const { data: session } = useSession();
+  const pathname = usePathname();
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
@@ -45,6 +47,7 @@ export default function RootLayout() {
   }, [fontsLoaded, fontError]);
 
   useEffect(() => {
+    void trackAppEvent("app_open");
     // Handle both a cold launch from a notification and taps while the app is running.
     const initialResponse = Notifications.getLastNotificationResponse();
     if (initialResponse) {
@@ -57,7 +60,10 @@ export default function RootLayout() {
       void handleNotificationResponse(response);
     });
     const appState = AppState.addEventListener("change", (state) => {
-      if (state === "active") void flushInteractionResponses();
+      if (state === "active") {
+        void flushInteractionResponses();
+        void trackAppEvent("app_open");
+      }
     });
     const retryTimer = setInterval(() => void flushInteractionResponses(), 30_000);
     return () => {
@@ -66,6 +72,10 @@ export default function RootLayout() {
       clearInterval(retryTimer);
     };
   }, []);
+
+  useEffect(() => {
+    void trackAppEvent("screen_view", { path: pathname });
+  }, [pathname]);
 
   useEffect(() => {
     if (!session) return;

@@ -14,7 +14,7 @@ import { newId } from "./id";
  *   emails, IP addresses and user agents must never reach these tables.
  */
 
-/** Every event name written by the server. Keep this list in sync with the docs. */
+/** Every event name accepted from first-party clients or written by the server. */
 export const ANALYTICS_EVENT_NAMES = [
   "webhook_received",
   "webhook_delivered",
@@ -24,6 +24,10 @@ export const ANALYTICS_EVENT_NAMES = [
   "device_registered",
   "device_unregistered",
   "device_deactivated_stale",
+  "service_created",
+  "service_updated",
+  "service_token_rotated",
+  "service_deleted",
   "user_active",
   "notification_sent",
   "onboarding_welcome_sent",
@@ -40,6 +44,18 @@ export const ANALYTICS_EVENT_NAMES = [
   "api_token_created",
   "api_token_revoked",
   "cli_authorization_approved",
+  "page_view",
+  "screen_view",
+  "outbound_clicked",
+  "auth_started",
+  "auth_completed",
+  "app_open",
+  "notification_opened",
+  "notification_permission_prompted",
+  "notification_permission_resolved",
+  "device_registration_started",
+  "device_registration_completed",
+  "onboarding_completed",
 ] as const;
 
 export type AnalyticsEventName = (typeof ANALYTICS_EVENT_NAMES)[number];
@@ -57,6 +73,10 @@ const LOG_THROTTLE_MS = 60_000;
 
 export interface TrackInput {
   name: AnalyticsEventName;
+  clientEventId?: string | null;
+  anonymousId?: string | null;
+  sessionId?: string | null;
+  surface?: "web" | "ios" | "server" | null;
   userId?: string | null;
   serviceId?: string | null;
   deviceId?: string | null;
@@ -148,16 +168,21 @@ function bumpDaily(day: string, metric: string, delta: number, now: Date): void 
  * Rollups written per event: `<name>` counts occurrences and `<name>:value`
  * sums the carried counter when it is non-zero.
  */
-export function track(input: TrackInput): void {
+export function track(input: TrackInput): boolean {
   try {
     const now = new Date();
     const day = analyticsDay(now);
     const value = Number.isFinite(input.value) ? Math.trunc(input.value as number) : 0;
     const metadata = serializeMetadata(input.metadata);
-    db.insert(analyticsEvent)
+    const inserted = db
+      .insert(analyticsEvent)
       .values({
         id: newId("anl"),
+        clientEventId: input.clientEventId ?? null,
         name: input.name,
+        anonymousId: input.anonymousId ?? null,
+        sessionId: input.sessionId ?? null,
+        surface: input.surface ?? "server",
         userId: input.userId ?? null,
         serviceId: input.serviceId ?? null,
         deviceId: input.deviceId ?? null,
@@ -167,12 +192,16 @@ export function track(input: TrackInput): void {
         metadata: metadata.ok ? metadata.value : null,
         createdAt: now,
       })
+      .onConflictDoNothing({ target: analyticsEvent.clientEventId })
       .run();
+    if (inserted.changes === 0) return false;
     bumpDaily(day, input.name, 1, now);
     if (value !== 0) bumpDaily(day, `${input.name}:value`, value, now);
     maybePrune(now);
+    return true;
   } catch (error) {
     warn(error);
+    return false;
   }
 }
 

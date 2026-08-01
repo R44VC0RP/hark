@@ -18,6 +18,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { trackAppEvent, trackOnboardingCompleted } from "../src/lib/analytics";
 import { api } from "../src/lib/api";
 import { authClient, useSession } from "../src/lib/auth";
 import {
@@ -68,13 +69,22 @@ export default function HomeScreen() {
   }, []);
 
   const requestPermission = async () => {
+    void trackAppEvent("notification_permission_prompted", { path: "/home" });
     const result = await Notifications.requestPermissionsAsync({
       ios: { allowAlert: true, allowBadge: true, allowSound: true },
     });
     setPermission(result.granted ? "granted" : result.canAskAgain ? "undetermined" : "denied");
+    void trackAppEvent("notification_permission_resolved", {
+      path: "/home",
+      outcome: result.granted ? "granted" : result.canAskAgain ? "undetermined" : "denied",
+      properties: {
+        permission: result.granted ? "granted" : result.canAskAgain ? "undetermined" : "denied",
+      },
+    });
   };
 
   const registerDevice = useCallback(async (preserveReadyState = false) => {
+    void trackAppEvent("device_registration_started", { path: "/home" });
     if (!preserveReadyState) setRegistration("working");
     setLastError(null);
     try {
@@ -118,9 +128,15 @@ export default function HomeScreen() {
 
       setExpoPushToken(expoToken);
       setRegistration("registered");
+      void trackAppEvent("device_registration_completed", {
+        path: "/home",
+        outcome: "registered",
+      });
+      void trackOnboardingCompleted();
       void flushInteractionResponses();
       refreshLiveActivityTokenSync(registered.device.id);
     } catch (err) {
+      void trackAppEvent("device_registration_completed", { path: "/home", outcome: "failed" });
       if (!preserveReadyState) {
         setRegistration("error");
         setLastError(err instanceof Error ? err.message : "Registration failed");

@@ -102,9 +102,11 @@ export function Privacy() {
           </li>
           <li>Limited technical logs used to secure, operate, and troubleshoot the service.</li>
           <li>
-            Aggregate usage counts for product analytics, such as event names, coarse outcome
-            buckets, counters, and the related account, service, or device identifiers — never
-            notification content, prompts, replies, tokens, or addresses.
+            Product analytics such as page and app-screen visits, feature lifecycle events,
+            first-touch campaign labels, referring and outbound hostnames, app version, coarse
+            outcomes, and related account, service, device, anonymous-install, or session
+            identifiers. Hark never puts notification content, prompts, replies, tokens, full URLs,
+            IP addresses, email addresses, or user-agent strings in analytics.
           </li>
         </ul>
       </Section>

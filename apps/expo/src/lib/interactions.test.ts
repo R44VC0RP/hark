@@ -26,6 +26,7 @@ vi.mock("expo-notifications", () => ({
 
 vi.mock("react-native", () => ({ Linking: { openURL: vi.fn() } }));
 
+vi.mock("./analytics", () => ({ trackAppEvent: vi.fn() }));
 vi.mock("./auth", () => ({ getCookie: () => state.cookie }));
 vi.mock("./api", () => ({
   ApiError: class ApiError extends Error {

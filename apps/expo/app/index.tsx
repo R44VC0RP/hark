@@ -4,6 +4,7 @@ import { StatusBar } from "expo-status-bar";
 import { useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { trackAppEvent } from "../src/lib/analytics";
 import { signInWithApple } from "../src/lib/apple-auth";
 import { authClient, useSession } from "../src/lib/auth";
 import { colors, fonts, tightTracking } from "../src/lib/theme";
@@ -21,8 +22,10 @@ export default function SignInScreen() {
     setBusy("google");
     setError(null);
     try {
+      void trackAppEvent("auth_started", { path: "/", properties: { provider: "google" } });
       const result = await authClient.signIn.social({ provider: "google", callbackURL: "/home" });
       if (result.error) throw new Error(result.error.message ?? "Google sign-in failed");
+      void trackAppEvent("auth_completed", { path: "/home", properties: { provider: "google" } });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign-in failed");
     } finally {
@@ -34,7 +37,11 @@ export default function SignInScreen() {
     setBusy("apple");
     setError(null);
     try {
-      await signInWithApple();
+      void trackAppEvent("auth_started", { path: "/", properties: { provider: "apple" } });
+      const result = await signInWithApple();
+      if (result === "signed-in") {
+        void trackAppEvent("auth_completed", { path: "/home", properties: { provider: "apple" } });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Apple sign-in failed");
     } finally {

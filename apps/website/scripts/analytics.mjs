@@ -25,6 +25,9 @@ Commands:
   notifications [--days 30]   Accepted pushes per day and per surface
   errors [--days 7]           Failures, rate limits and quota blocks
   plans                       Last observed plan mix and billing intent
+  acquisition [--days 30]     First-touch sources, campaigns, and referrers
+  funnel [--days 30]          Acquisition through onboarding conversion
+  journeys [--days 30]        Common page/screen transitions and exits
   events --name <name>        Daily counts for one analytics event
          [--days 30]
   names                       Event names present in the database
@@ -418,6 +421,100 @@ function commandPlans(database, flags) {
   };
 }
 
+function commandAcquisition(database, flags) {
+  const days = intFlag(flags, "days", 30);
+  const grouped = (field) =>
+    all(
+      database,
+      `SELECT COALESCE(json_extract(metadata, ?), 'unknown') AS label,
+              COUNT(*) AS visits,
+              COUNT(DISTINCT anonymous_id) AS visitors,
+              COUNT(DISTINCT user_id) AS knownUsers
+       FROM analytics_event
+       WHERE name IN ('page_view', 'app_open') AND created_at >= ?
+       GROUP BY label ORDER BY visitors DESC, visits DESC LIMIT 50`,
+      `$.${field}`,
+      msAgo(days),
+    );
+  return {
+    windowDays: days,
+    sources: grouped("source"),
+    campaigns: grouped("campaign"),
+    referrers: grouped("referrerHost"),
+  };
+}
+
+function commandFunnel(database, flags) {
+  const days = intFlag(flags, "days", 30);
+  const names = [
+    "page_view",
+    "outbound_clicked",
+    "app_open",
+    "auth_started",
+    "auth_completed",
+    "notification_permission_resolved",
+    "device_registration_completed",
+    "onboarding_completed",
+    "service_created",
+    "webhook_delivered",
+  ];
+  const rows = all(
+    database,
+    `SELECT name, COUNT(*) AS events,
+            COUNT(DISTINCT COALESCE(user_id, anonymous_id)) AS actors
+     FROM analytics_event
+     WHERE name IN (${names.map(() => "?").join(",")}) AND created_at >= ?
+     GROUP BY name`,
+    ...names,
+    msAgo(days),
+  );
+  const byName = new Map(rows.map((row) => [row.name, row]));
+  return {
+    windowDays: days,
+    steps: names.map((name) => ({
+      name,
+      events: byName.get(name)?.events ?? 0,
+      actors: byName.get(name)?.actors ?? 0,
+    })),
+  };
+}
+
+function commandJourneys(database, flags) {
+  const days = intFlag(flags, "days", 30);
+  const limit = intFlag(flags, "limit", 30, 500);
+  return {
+    windowDays: days,
+    transitions: all(
+      database,
+      `WITH route_events AS (
+         SELECT session_id, created_at, json_extract(metadata, '$.path') AS path,
+                LEAD(json_extract(metadata, '$.path')) OVER (
+                  PARTITION BY session_id ORDER BY created_at, id
+                ) AS nextPath
+         FROM analytics_event
+         WHERE name IN ('page_view', 'screen_view') AND session_id IS NOT NULL
+           AND created_at >= ?
+       )
+       SELECT path AS fromPath, COALESCE(nextPath, '[exit]') AS toPath, COUNT(*) AS transitions
+       FROM route_events WHERE path IS NOT NULL
+       GROUP BY fromPath, toPath ORDER BY transitions DESC LIMIT ?`,
+      msAgo(days),
+      limit,
+    ),
+    outbound: all(
+      database,
+      `SELECT json_extract(metadata, '$.path') AS fromPath,
+              json_extract(metadata, '$.destinationHost') AS destinationHost,
+              COUNT(*) AS clicks
+       FROM analytics_event
+       WHERE name IN ('outbound_clicked', 'notification_opened') AND created_at >= ?
+       GROUP BY fromPath, destinationHost ORDER BY clicks DESC LIMIT ?`,
+      msAgo(days),
+      limit,
+    ),
+  };
+}
+
 function commandEvents(database, flags) {
   const name = flags.name;
   if (!name) fail("events requires --name <event-name>");
@@ -493,6 +590,9 @@ const COMMANDS = {
   notifications: commandNotifications,
   errors: commandErrors,
   plans: commandPlans,
+  acquisition: commandAcquisition,
+  funnel: commandFunnel,
+  journeys: commandJourneys,
   events: commandEvents,
   names: commandNames,
 };

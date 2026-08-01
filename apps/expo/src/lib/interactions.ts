@@ -12,6 +12,7 @@ import {
 import * as Notifications from "expo-notifications";
 import * as SecureStore from "expo-secure-store";
 import { Linking } from "react-native";
+import { trackAppEvent } from "./analytics";
 import { ApiError, api } from "./api";
 import { getCookie } from "./auth";
 
@@ -203,6 +204,18 @@ export async function handleNotificationResponse(
     | { interactionId?: string; actionDigest?: string; responseToken?: string; url?: string }
     | undefined;
   if (response.actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER) {
+    let destinationHost: string | undefined;
+    if (data?.url) {
+      try {
+        destinationHost = new URL(data.url).hostname.slice(0, 64);
+      } catch {
+        // The contracts reject non-web URLs; malformed legacy payloads are ignored.
+      }
+    }
+    void trackAppEvent("notification_opened", {
+      path: "/inbox",
+      properties: { destinationHost },
+    });
     if (data?.url) await Linking.openURL(data.url).catch(() => {});
     return;
   }

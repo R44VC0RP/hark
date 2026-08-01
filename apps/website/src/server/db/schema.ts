@@ -493,8 +493,13 @@ export const analyticsEvent = sqliteTable(
   "analytics_event",
   {
     id: text("id").primaryKey(),
+    /** Client-generated retry key. Null for server-authoritative events. */
+    clientEventId: text("client_event_id").unique(),
     /** Stable event name, e.g. `webhook_delivered`. See lib/analytics.ts. */
     name: text("name").notNull(),
+    anonymousId: text("anonymous_id"),
+    sessionId: text("session_id"),
+    surface: text("surface"),
     userId: text("user_id"),
     serviceId: text("service_id"),
     deviceId: text("device_id"),
@@ -511,6 +516,8 @@ export const analyticsEvent = sqliteTable(
   (table) => [
     index("analytics_event_name_created_at_idx").on(table.name, table.createdAt),
     index("analytics_event_user_created_at_idx").on(table.userId, table.createdAt),
+    index("analytics_event_anonymous_created_at_idx").on(table.anonymousId, table.createdAt),
+    index("analytics_event_session_created_at_idx").on(table.sessionId, table.createdAt),
     index("analytics_event_created_at_idx").on(table.createdAt),
   ],
 );
