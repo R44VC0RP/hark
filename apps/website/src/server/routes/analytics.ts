@@ -1,6 +1,7 @@
 import { clientAnalyticsEventSchema } from "@hark/contracts";
 import { Hono } from "hono";
 import { auth } from "../auth";
+import { env } from "../env";
 import { track, trackUserActive } from "../lib/analytics";
 
 const RATE_WINDOW_MS = 60_000;
@@ -21,7 +22,7 @@ function rateLimited(key: string): boolean {
 
 export const analyticsRoute = new Hono().post("/events", async (c) => {
   const origin = c.req.header("origin");
-  if (origin && origin !== new URL(c.req.url).origin) {
+  if (origin && origin !== new URL(env.APP_URL).origin) {
     return c.json({ error: "Cross-origin analytics are not accepted" }, 403);
   }
 

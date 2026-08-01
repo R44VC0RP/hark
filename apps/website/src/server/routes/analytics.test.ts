@@ -58,7 +58,7 @@ async function send(body: unknown, headers: Record<string, string> = {}) {
 
 describe("POST /api/analytics/events", () => {
   it("accepts anonymous events and deduplicates retries", async () => {
-    expect((await send(event())).status).toBe(200);
+    expect((await send(event(), { origin: "http://localhost:5173" })).status).toBe(200);
     expect(await (await send(event())).json()).toMatchObject({ ok: true, accepted: false });
     const rows = await db.select().from(schema.analyticsEvent);
     expect(rows).toHaveLength(1);
