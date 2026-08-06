@@ -88,6 +88,18 @@ Successful requests return an event ID and the number of push requests accepted 
 
 Use an `Idempotency-Key` header when retrying requests to prevent duplicate notifications.
 
+### Withdraw a Delivered Notification
+
+Use the returned event ID to remove a notification from registered iPhones:
+
+```sh
+curl -X POST \
+  'https://hark.ryan.ceo/hooks/whk_your_token/events/evt_your_event/withdraw'
+```
+
+Hark sends a silent background command to each active device. iOS treats background delivery as
+best effort, so a withdrawal can be delayed or skipped by the system.
+
 ## Live Activities
 
 Start a stateful Live Activity using the same service webhook token:

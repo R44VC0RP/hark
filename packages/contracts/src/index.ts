@@ -980,9 +980,19 @@ export const interactionPushDataSchema = z.object({
   avatarUrl: z.url().optional(),
   url: z.url().optional(),
 });
-export const pushDataSchema = z.union([webhookPushDataSchema, interactionPushDataSchema]);
+export const notificationWithdrawalPushDataSchema = z.object({
+  v: z.literal(PUSH_SCHEMA_VERSION),
+  command: z.literal("notification.withdraw"),
+  eventId: z.string(),
+});
+export const pushDataSchema = z.union([
+  webhookPushDataSchema,
+  interactionPushDataSchema,
+  notificationWithdrawalPushDataSchema,
+]);
 export type PushData = z.infer<typeof pushDataSchema>;
 export type InteractionPushData = z.infer<typeof interactionPushDataSchema>;
+export type NotificationWithdrawalPushData = z.infer<typeof notificationWithdrawalPushDataSchema>;
 
 // ---------------------------------------------------------------------------
 // Generic API envelope

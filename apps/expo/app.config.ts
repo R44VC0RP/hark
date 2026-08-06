@@ -31,7 +31,12 @@ export default ({ config: _config }: ConfigContext): ExpoConfig => ({
     "expo-router",
     "expo-apple-authentication",
     "expo-secure-store",
-    "expo-notifications",
+    [
+      "expo-notifications",
+      {
+        enableBackgroundRemoteNotifications: true,
+      },
+    ],
     "expo-web-browser",
     [
       "expo-splash-screen",

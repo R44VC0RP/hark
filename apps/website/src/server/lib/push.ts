@@ -4,6 +4,7 @@ import {
   HARK_YES_NO_CATEGORY_ID,
   type InteractionKind,
   type InteractionPushData,
+  type NotificationWithdrawalPushData,
   PUSH_SCHEMA_VERSION,
   type PushData,
   type WebhookRequest,
@@ -108,6 +109,22 @@ export function buildPushMessages(input: BuildPushInput): ExpoPushMessage[] {
     mutableContent: true,
     ...(resolved.imageUrl ? { richContent: { image: resolved.imageUrl } } : {}),
     data,
+  }));
+}
+
+export function buildNotificationWithdrawalPushMessages(
+  to: string[],
+  eventId: string,
+): ExpoPushMessage[] {
+  const data: NotificationWithdrawalPushData = {
+    v: PUSH_SCHEMA_VERSION,
+    command: "notification.withdraw",
+    eventId,
+  };
+  return to.map((token) => ({
+    to: token,
+    data,
+    _contentAvailable: true,
   }));
 }
 

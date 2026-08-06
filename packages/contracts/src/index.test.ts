@@ -507,4 +507,14 @@ describe("pushDataSchema", () => {
     });
     expect(result.success).toBe(true);
   });
+
+  it("accepts a notification withdrawal command", () => {
+    expect(
+      pushDataSchema.safeParse({
+        v: 1,
+        command: "notification.withdraw",
+        eventId: "evt_1",
+      }).success,
+    ).toBe(true);
+  });
 });

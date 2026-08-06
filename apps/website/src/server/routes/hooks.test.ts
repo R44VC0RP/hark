@@ -540,3 +540,50 @@ describe("POST /hooks/:token", () => {
     expect(await response.json()).toMatchObject({ error: "Account rate limit exceeded" });
   });
 });
+
+describe("POST /hooks/:token/events/:eventId/withdraw", () => {
+  it("sends a silent withdrawal command and marks the event withdrawn", async () => {
+    const now = new Date();
+    const eventId = "evt_withdraw_test";
+    await db.insert(schema.event).values({
+      id: eventId,
+      serviceId: "svc_1",
+      title: "CI",
+      body: "Old result",
+      status: "accepted",
+      deliveredCount: 1,
+      createdAt: now,
+    });
+
+    sent.length = 0;
+    const res = await app.request(`/hooks/${TOKEN}/events/${eventId}/withdraw`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      eventId,
+      status: "withdrawn",
+    });
+    expect(sent.length).toBeGreaterThan(0);
+    expect(sent.every((message) => message._contentAvailable === true)).toBe(true);
+    expect(sent.every((message) => !("title" in message) && !("body" in message))).toBe(true);
+    expect(sent[0]?.data).toEqual({
+      v: 1,
+      command: "notification.withdraw",
+      eventId,
+    });
+
+    const { eq } = await import("drizzle-orm");
+    const [saved] = await db.select().from(schema.event).where(eq(schema.event.id, eventId));
+    expect(saved?.status).toBe("withdrawn");
+  });
+
+  it("does not let another webhook withdraw an event", async () => {
+    const res = await app.request(`/hooks/whk_wrong/events/evt_withdraw_test/withdraw`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ ok: false, error: "Event not found" });
+  });
+});

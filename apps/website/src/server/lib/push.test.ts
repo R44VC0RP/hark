@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildInteractionPushMessages,
+  buildNotificationWithdrawalPushMessages,
   buildPushMessages,
   buildWelcomePushMessages,
   resolveNotification,
@@ -175,5 +176,28 @@ describe("buildPushMessages", () => {
     expect(message?.richContent).toBeUndefined();
     const data = (message?.data ?? {}) as Record<string, unknown>;
     expect(data.avatarUrl).toBeUndefined();
+  });
+});
+
+describe("buildNotificationWithdrawalPushMessages", () => {
+  it("builds silent background commands without presentational fields", () => {
+    const messages = buildNotificationWithdrawalPushMessages(
+      ["ExponentPushToken[a]", "ExponentPushToken[b]"],
+      "evt_1",
+    );
+
+    expect(messages).toEqual([
+      {
+        to: "ExponentPushToken[a]",
+        _contentAvailable: true,
+        data: { v: 1, command: "notification.withdraw", eventId: "evt_1" },
+      },
+      {
+        to: "ExponentPushToken[b]",
+        _contentAvailable: true,
+        data: { v: 1, command: "notification.withdraw", eventId: "evt_1" },
+      },
+    ]);
+    expect(messages.every((message) => !("title" in message) && !("body" in message))).toBe(true);
   });
 });
