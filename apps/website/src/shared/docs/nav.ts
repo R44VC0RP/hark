@@ -23,6 +23,7 @@ export const DOC_NAV = [
     items: [
       { id: "notification-endpoint", label: "Endpoint" },
       { id: "notification-payload", label: "Request payload" },
+      { id: "tap-destinations", label: "Deep links and Shortcuts" },
       { id: "notification-idempotency", label: "Idempotency" },
       { id: "device-routing", label: "Device routing" },
       { id: "rate-limits", label: "Rate limits" },

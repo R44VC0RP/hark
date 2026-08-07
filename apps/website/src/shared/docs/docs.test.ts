@@ -152,6 +152,15 @@ describe("docsMarkdown", () => {
   --wait --timeout 15m`);
   });
 
+  it("documents app deep links and Shortcuts tap destinations", () => {
+    expect(markdown).toContain("### Deep links and Shortcuts");
+    expect(markdown).toContain('"url": "your-app://incidents/INC-42"');
+    expect(markdown).toContain(
+      "shortcuts://run-shortcut?name=Deployment%20Follow-up&input=text&text=production%20deployed",
+    );
+    expect(markdown).toContain("Hark cannot run a shortcut merely because a notification arrived");
+  });
+
   it("flags Hark Pro sections", () => {
     expect(markdown).toContain("**Hark Pro**");
   });

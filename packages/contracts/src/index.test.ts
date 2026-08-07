@@ -70,21 +70,24 @@ describe("webhookRequestSchema", () => {
     ).toBe(true);
   });
 
-  it("only accepts http and https tap destinations", () => {
+  it("accepts web and app-link tap destinations while blocking unsafe schemes", () => {
     for (const url of [
       "javascript:alert(1)",
       "data:text/html,x",
       "file:///etc/passwd",
-      "hark://open",
+      "blob:https://example.com/id",
+      "about:blank",
     ]) {
       expect(webhookRequestSchema.safeParse({ body: "x", url }).success).toBe(false);
     }
-    expect(webhookRequestSchema.safeParse({ body: "x", url: "http://example.com" }).success).toBe(
-      true,
-    );
-    expect(webhookRequestSchema.safeParse({ body: "x", url: "https://example.com" }).success).toBe(
-      true,
-    );
+    for (const url of [
+      "http://example.com",
+      "https://example.com",
+      "hark://inbox/evt_1",
+      "shortcuts://run-shortcut?name=Deploy%20Finished&input=text&text=production",
+    ]) {
+      expect(webhookRequestSchema.safeParse({ body: "x", url }).success).toBe(true);
+    }
   });
 
   it("rejects image URLs on mapped and carrier-grade private ranges", () => {
@@ -162,7 +165,7 @@ describe("agentNotificationCreateSchema", () => {
     }
   });
 
-  it("only accepts public HTTPS image URLs and web tap URLs", () => {
+  it("only accepts public HTTPS image URLs and safe tap destinations", () => {
     expect(agentNotificationCreateSchema.safeParse({ body: "" }).success).toBe(false);
     expect(
       agentNotificationCreateSchema.safeParse({ body: "x", imageUrl: "http://example.com/a.png" })
@@ -179,7 +182,7 @@ describe("agentNotificationCreateSchema", () => {
       agentNotificationCreateSchema.safeParse({
         body: "x",
         imageUrl: "https://example.com/a.png",
-        url: "https://example.com/run",
+        url: "shortcuts://run-shortcut?name=Process%20Alert",
       }).success,
     ).toBe(true);
   });
@@ -476,6 +479,12 @@ describe("serviceCreateSchema", () => {
     const result = serviceCreateSchema.safeParse({ title: "CI", imageUrl: null, url: null });
     expect(result.success).toBe(true);
   });
+
+  it("accepts a custom app deep link as the default destination", () => {
+    expect(
+      serviceCreateSchema.safeParse({ title: "CI", url: "example-app://builds/48" }).success,
+    ).toBe(true);
+  });
 });
 
 describe("deviceRegisterSchema", () => {
@@ -502,9 +511,22 @@ describe("pushDataSchema", () => {
       sourceId: "svc_1",
       sourceName: "Acme CRM",
       avatarUrl: "https://example.com/a.png",
-      url: "https://example.com",
+      url: "shortcuts://run-shortcut?name=Process%20Alert",
       conversationId: "hark-svc_1",
     });
     expect(result.success).toBe(true);
+  });
+
+  it("rejects an unsafe destination from a legacy or forged push", () => {
+    const result = pushDataSchema.safeParse({
+      v: 1,
+      eventId: "evt_1",
+      serviceId: "svc_1",
+      sourceId: "svc_1",
+      sourceName: "Acme CRM",
+      url: "javascript:alert(1)",
+      conversationId: "hark-svc_1",
+    });
+    expect(result.success).toBe(false);
   });
 });

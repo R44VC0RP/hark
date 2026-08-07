@@ -851,6 +851,9 @@ function ServiceModal({
               onChange={(e) => setUrl(e.target.value)}
               placeholder="https://example.com/dashboard"
             />
+            <span className="mt-1.5 block text-xs text-ink-faint">
+              Supports web URLs, app deep links, and shortcuts://run-shortcut URLs.
+            </span>
           </label>
         </div>
         {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
