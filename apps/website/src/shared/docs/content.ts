@@ -202,6 +202,11 @@ export const DOC_CONTENT: DocSection[] = [
                 path: "/hooks/:token/events/:eventId/cancel",
                 detail: "Withdraw a pending interactive response.",
               },
+              {
+                method: "POST",
+                path: "/hooks/:token/events/:eventId/withdraw",
+                detail: "Request removal of a delivered notification.",
+              },
             ],
           },
           {
@@ -252,6 +257,35 @@ export const DOC_CONTENT: DocSection[] = [
                 detail: "Turns the notification into an approval, yes/no, or text prompt.",
               },
             ],
+          },
+        ],
+      },
+      {
+        id: "notification-withdrawal",
+        blocks: [
+          {
+            kind: "p",
+            text: "Keep the `eventId` returned when you send a notification, then use it to request removal of that notification from the account's registered iPhones.",
+          },
+          {
+            kind: "code",
+            language: "bash",
+            code: `curl -X POST \\
+  '${EXAMPLE_ENDPOINT}/events/evt_Cxns2IdbF4H0TJYq/withdraw'`,
+          },
+          {
+            kind: "code",
+            language: "json",
+            code: `{
+  "ok": true,
+  "eventId": "evt_Cxns2IdbF4H0TJYq",
+  "status": "withdrawn",
+  "accepted": 1
+}`,
+          },
+          {
+            kind: "note",
+            text: "`accepted` means Expo accepted the silent removal command; it does not guarantee that iOS ran it. Background delivery is best effort and may be delayed or skipped, particularly after the user force-quits Hark. The same webhook token must own the event. Repeating a completed withdrawal is idempotent and does not send another command.",
           },
         ],
       },
