@@ -7,8 +7,8 @@ import {
   HARK_REPLY_CATEGORY_ID,
   HARK_YES_ACTION_ID,
   HARK_YES_NO_CATEGORY_ID,
-  tapDestinationUrlSchema,
   type InteractionResponseInput,
+  tapDestinationUrlSchema,
 } from "@hark/contracts";
 import * as Notifications from "expo-notifications";
 import * as SecureStore from "expo-secure-store";

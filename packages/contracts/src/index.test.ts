@@ -481,9 +481,9 @@ describe("serviceCreateSchema", () => {
   });
 
   it("accepts a custom app deep link as the default destination", () => {
-    expect(serviceCreateSchema.safeParse({ title: "CI", url: "example-app://builds/48" }).success).toBe(
-      true,
-    );
+    expect(
+      serviceCreateSchema.safeParse({ title: "CI", url: "example-app://builds/48" }).success,
+    ).toBe(true);
   });
 });
 
