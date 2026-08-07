@@ -12,4 +12,4 @@ minimumReleaseAge: 0
 
 patchedDependencies:
   '@better-auth/core@1.6.25': patches/@better-auth__core@1.6.25.patch
-  expo-widgets@57.0.7: patches/expo-widgets@57.0.7.patch
+  expo-widgets@57.0.8: patches/expo-widgets@57.0.8.patch

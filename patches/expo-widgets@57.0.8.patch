@@ -1,4 +1,4 @@
-# Carried forward from expo-widgets 57.0.6.
+# Carried forward from expo-widgets 57.0.7.
 diff --git a/ios/HarkLiveActivityTokenRegistrar.swift b/ios/HarkLiveActivityTokenRegistrar.swift
 new file mode 100644
 index 0000000000000000000000000000000000000000..90f1cc52fcbadc1d64d1d2859223a457c899fcf8
