@@ -24,7 +24,7 @@ vi.mock("expo-notifications", () => ({
   setNotificationCategoryAsync: vi.fn(),
 }));
 
-vi.mock("react-native", () => ({ Linking: { openURL: vi.fn() } }));
+vi.mock("react-native", () => ({ Linking: { openURL: vi.fn(async () => undefined) } }));
 
 vi.mock("./analytics", () => ({ trackAppEvent: vi.fn() }));
 vi.mock("./auth", () => ({ getCookie: () => state.cookie }));
@@ -49,6 +49,7 @@ vi.mock("./api", () => ({
   },
 }));
 
+import { Linking } from "react-native";
 import {
   clearInteractionResponses,
   DEVICE_ID_KEY,
@@ -82,12 +83,41 @@ function credentialResponse(interactionId: string) {
   } as never;
 }
 
+function defaultResponse(url: string) {
+  return {
+    actionIdentifier: "expo.modules.notifications.actions.DEFAULT",
+    notification: {
+      request: { content: { data: { url } } },
+    },
+  } as never;
+}
+
 afterEach(async () => {
+  vi.clearAllMocks();
   state.cookie = "session";
   state.submit = undefined;
   state.submissions.length = 0;
   await clearInteractionResponses();
   state.store.clear();
+});
+
+describe("notification tap destinations", () => {
+  it.each([
+    "https://example.com/builds/48",
+    "example-app://builds/48",
+    "shortcuts://run-shortcut?name=Process%20Alert&input=text&text=build%2048",
+  ])("opens a validated destination: %s", async (url) => {
+    await handleNotificationResponse(defaultResponse(url));
+    expect(Linking.openURL).toHaveBeenCalledWith(url);
+  });
+
+  it.each(["javascript:alert(1)", "data:text/html,x", "file:///etc/passwd", "not a url"])(
+    "ignores an unsafe or malformed destination: %s",
+    async (url) => {
+      await handleNotificationResponse(defaultResponse(url));
+      expect(Linking.openURL).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("interaction response queue", () => {

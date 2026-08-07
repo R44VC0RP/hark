@@ -238,7 +238,7 @@ export const DOC_CONTENT: DocSection[] = [
                 name: "url",
                 type: "string",
                 detail:
-                  "Destination opened when the notification is tapped. http and https only, so custom app schemes and javascript: or data: URLs never reach a device.",
+                  "Web URL, universal link, app deep link, or Shortcuts URL opened when the notification is tapped. Up to 2,048 characters.",
               },
               {
                 name: "deviceIds",
@@ -252,6 +252,47 @@ export const DOC_CONTENT: DocSection[] = [
                 detail: "Turns the notification into an approval, yes/no, or text prompt.",
               },
             ],
+          },
+        ],
+      },
+      {
+        id: "tap-destinations",
+        blocks: [
+          {
+            kind: "p",
+            text: "Set `url` per notification or as the service default. Hark opens it only after the recipient explicitly taps the notification; receiving a push does not launch an app or run background automation.",
+          },
+          {
+            kind: "bullets",
+            items: [
+              "Use an `https://` universal link when the destination app supports one. iOS opens the installed app and otherwise falls back to its website.",
+              "Use the destination app's documented custom scheme for app-only routes, such as `your-app://incidents/INC-42`. If no installed app handles the scheme, Hark remains open.",
+              "Percent-encode names, paths, and query values that contain spaces or reserved characters.",
+            ],
+          },
+          {
+            kind: "code",
+            language: "json",
+            code: `{
+  "body": "Incident INC-42 needs attention.",
+  "url": "your-app://incidents/INC-42"
+}`,
+          },
+          {
+            kind: "p",
+            text: "To run a shortcut saved on the recipient's iPhone, use Apple's [Shortcuts URL scheme](https://support.apple.com/guide/shortcuts/run-a-shortcut-from-a-url-apd624386f42/ios). The shortcut name must match exactly. Set `input=text` and provide URL-encoded `text`, or set `input=clipboard` to pass the current clipboard.",
+          },
+          {
+            kind: "code",
+            language: "json",
+            code: `{
+  "body": "Production deployed. Tap to run the follow-up.",
+  "url": "shortcuts://run-shortcut?name=Deployment%20Follow-up&input=text&text=production%20deployed"
+}`,
+          },
+          {
+            kind: "note",
+            text: "iOS may require the device to be unlocked, and the shortcut can still show its own permission or confirmation prompts. Hark cannot run a shortcut merely because a notification arrived. Unsafe local or executable schemes such as `javascript:`, `data:`, `file:`, `blob:`, and `about:` are rejected.",
           },
         ],
       },
@@ -927,7 +968,11 @@ harkctl permissions doctor`,
                 type: "url",
                 detail: "Public HTTPS avatar, same rules as the webhook `imageUrl`.",
               },
-              { name: "--url", type: "url", detail: "Opened when the notification is tapped." },
+              {
+                name: "--url",
+                type: "url",
+                detail: "Web URL, app deep link, or Shortcuts URL opened when tapped.",
+              },
               {
                 name: "--device",
                 type: "id, repeatable",

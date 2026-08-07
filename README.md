@@ -73,7 +73,7 @@ Only `body` is required.
 | `body` | Notification text. |
 | `title` | Optional sender-name override. |
 | `imageUrl` | Optional public HTTPS avatar URL. |
-| `url` | Optional destination opened when tapped. |
+| `url` | Optional web URL, app deep link, or Shortcuts URL opened when tapped. |
 | `deviceIds` | Optional Pro routing to specific devices. |
 
 Successful requests return an event ID and the number of push requests accepted for delivery:
@@ -87,6 +87,16 @@ Successful requests return an event ID and the number of push requests accepted 
 ```
 
 Use an `Idempotency-Key` header when retrying requests to prevent duplicate notifications.
+
+Tap destinations support HTTPS universal links, custom app schemes such as
+`your-app://incidents/INC-42`, and Apple Shortcuts:
+
+```text
+shortcuts://run-shortcut?name=Deployment%20Follow-up&input=text&text=production%20deployed
+```
+
+Names and input must be URL-encoded. iOS opens the destination only after the recipient taps the
+notification; delivery alone does not launch an app or run a shortcut.
 
 ## Live Activities
 

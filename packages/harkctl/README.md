@@ -51,6 +51,17 @@ when the notification is tapped, and repeatable `--device` routes to specific de
 Use `--idempotency-key` for safe retries and `--stdin` to merge a JSON payload from stdin under any
 explicit flags. The command exits `7` when no push was accepted.
 
+`--url` accepts HTTPS universal links, app deep links, and Apple Shortcuts URLs. Quote destinations
+that contain `&` in a shell:
+
+```bash
+harkctl notify "Production deployed" \
+  --url 'shortcuts://run-shortcut?name=Deployment%20Follow-up&input=text&text=production'
+```
+
+The shortcut name and text must be URL-encoded. The destination opens only after the recipient taps
+the notification, and iOS can require an unlock or shortcut-specific permission.
+
 `harkctl notify ask <prompt>` sends a push that elicits an answer. Pass exactly one of `--approval`
 (Approve/Deny buttons), `--yes-no` (Yes/No buttons), or `--text` (a short free-form reply). It
 shares the appearance flags above

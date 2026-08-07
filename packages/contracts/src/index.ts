@@ -63,22 +63,30 @@ const publicHttpsUrlSchema = z
   .max(2048)
   .refine(isPublicHttpsUrl, "Must be a public HTTPS URL");
 
+const blockedTapDestinationProtocols = new Set([
+  "about:",
+  "blob:",
+  "data:",
+  "file:",
+  "javascript:",
+]);
+
 /**
- * Tap destinations are handed to the iOS app and opened with `Linking.openURL`,
- * so only web schemes are accepted: `javascript:`, `data:`, `file:` and custom
- * app schemes must never reach a device.
+ * Tap destinations are opened only after an explicit notification tap.
+ * Web URLs, universal links, and custom app schemes are supported, while
+ * executable or local-content schemes never reach a device.
  */
-const webUrlSchema = z
+export const tapDestinationUrlSchema = z
   .url()
   .max(2048)
   .refine((value) => {
     try {
       const { protocol } = new URL(value);
-      return protocol === "https:" || protocol === "http:";
+      return !blockedTapDestinationProtocols.has(protocol);
     } catch {
       return false;
     }
-  }, "Must be an http or https URL");
+  }, "Must be a web URL or app deep link");
 
 // ---------------------------------------------------------------------------
 // Services
@@ -87,7 +95,7 @@ const webUrlSchema = z
 export const serviceCreateSchema = z.object({
   title: z.string().trim().min(1, "Title is required").max(80),
   imageUrl: publicHttpsUrlSchema.nullish(),
-  url: webUrlSchema.nullish(),
+  url: tapDestinationUrlSchema.nullish(),
 });
 export type ServiceCreateInput = z.infer<typeof serviceCreateSchema>;
 
@@ -148,7 +156,7 @@ export const webhookRequestSchema = z.object({
   body: z.string().trim().min(1, "body is required").max(2000),
   title: z.string().trim().min(1).max(80).optional(),
   imageUrl: publicHttpsUrlSchema.optional(),
-  url: webUrlSchema.optional(),
+  url: tapDestinationUrlSchema.optional(),
   deviceIds: z
     .array(z.string().trim().min(1).max(100))
     .min(1)
@@ -693,7 +701,7 @@ export const interactionCreateSchema = z
     prompt: z.string().trim().min(1, "Prompt is required").max(2000),
     kind: interactionKindSchema,
     imageUrl: publicHttpsUrlSchema.optional(),
-    url: webUrlSchema.optional(),
+    url: tapDestinationUrlSchema.optional(),
     deviceIds: z
       .array(z.string().trim().min(1).max(100))
       .min(1)
@@ -872,7 +880,7 @@ export const agentNotificationCreateSchema = z.object({
   body: z.string().trim().min(1, "body is required").max(2000),
   title: z.string().trim().min(1).max(80).default("Hark"),
   imageUrl: publicHttpsUrlSchema.optional(),
-  url: webUrlSchema.optional(),
+  url: tapDestinationUrlSchema.optional(),
   deviceIds: z
     .array(z.string().trim().min(1).max(100))
     .min(1)
@@ -961,7 +969,7 @@ export const webhookPushDataSchema = z.object({
   sourceName: z.string(),
   avatarUrl: z.url().optional(),
   /** Destination URL to open when the notification is tapped. */
-  url: z.url().optional(),
+  url: tapDestinationUrlSchema.optional(),
   conversationId: z.string(),
 });
 export const interactionPushDataSchema = z.object({
@@ -978,7 +986,7 @@ export const interactionPushDataSchema = z.object({
     .regex(/^[a-zA-Z0-9_-]{43}$/)
     .optional(),
   avatarUrl: z.url().optional(),
-  url: z.url().optional(),
+  url: tapDestinationUrlSchema.optional(),
 });
 export const pushDataSchema = z.union([webhookPushDataSchema, interactionPushDataSchema]);
 export type PushData = z.infer<typeof pushDataSchema>;

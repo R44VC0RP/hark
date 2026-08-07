@@ -7,6 +7,7 @@ import {
   HARK_REPLY_CATEGORY_ID,
   HARK_YES_ACTION_ID,
   HARK_YES_NO_CATEGORY_ID,
+  tapDestinationUrlSchema,
   type InteractionResponseInput,
 } from "@hark/contracts";
 import * as Notifications from "expo-notifications";
@@ -204,19 +205,23 @@ export async function handleNotificationResponse(
     | { interactionId?: string; actionDigest?: string; responseToken?: string; url?: string }
     | undefined;
   if (response.actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER) {
+    const destination = tapDestinationUrlSchema.safeParse(data?.url);
     let destinationHost: string | undefined;
-    if (data?.url) {
+    if (destination.success) {
       try {
-        destinationHost = new URL(data.url).hostname.slice(0, 64);
+        const parsed = new URL(destination.data);
+        if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+          destinationHost = parsed.hostname.slice(0, 64);
+        }
       } catch {
-        // The contracts reject non-web URLs; malformed legacy payloads are ignored.
+        // The shared schema already rejects malformed URLs.
       }
     }
     void trackAppEvent("notification_opened", {
       path: "/inbox",
       properties: { destinationHost },
     });
-    if (data?.url) await Linking.openURL(data.url).catch(() => {});
+    if (destination.success) await Linking.openURL(destination.data).catch(() => {});
     return;
   }
   if (!data?.interactionId || !data.actionDigest) return;
