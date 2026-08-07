@@ -41,7 +41,7 @@ vi.mock("expo-server-sdk", () => {
     async sendPushNotificationsAsync(chunk: Array<Record<string, unknown>>) {
       sent.push(...chunk);
       return chunk.map((message) =>
-        message.to === "ExponentPushToken[stale]"
+        typeof message.to === "string" && message.to.includes("stale")
           ? {
               status: "error",
               message: "device gone",
@@ -654,7 +654,7 @@ describe("POST /hooks/:token/events/:eventId/withdraw", () => {
     await db.insert(schema.device).values({
       id: "dev_withdraw_fail",
       userId: "user_withdraw_fail",
-      expoPushToken: "ExponentPushToken[stale]",
+      expoPushToken: "ExponentPushToken[withdraw-stale]",
       platform: "ios",
       active: true,
       createdAt: now,
