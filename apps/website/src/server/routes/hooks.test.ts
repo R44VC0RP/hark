@@ -540,3 +540,152 @@ describe("POST /hooks/:token", () => {
     expect(await response.json()).toMatchObject({ error: "Account rate limit exceeded" });
   });
 });
+
+describe("POST /hooks/:token/events/:eventId/withdraw", () => {
+  it("authenticates ownership, sends a silent command, and cancels a pending response", async () => {
+    const now = new Date();
+    const token = "whk_withdraw-test-abcdefghijklmnopqr";
+    const eventId = "evt_withdraw_test";
+    await db.insert(schema.user).values({
+      id: "user_withdraw",
+      name: "Withdraw Test",
+      email: "withdraw@example.com",
+      emailVerified: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(schema.service).values({
+      id: "svc_withdraw",
+      userId: "user_withdraw",
+      title: "Withdraw Test",
+      tokenHash: hashWebhookToken(token),
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(schema.device).values({
+      id: "dev_withdraw",
+      userId: "user_withdraw",
+      expoPushToken: "ExponentPushToken[withdraw]",
+      platform: "ios",
+      active: true,
+      createdAt: now,
+      lastSeenAt: now,
+    });
+    await db.insert(schema.event).values({
+      id: eventId,
+      serviceId: "svc_withdraw",
+      title: "CI",
+      body: "Old result",
+      status: "accepted",
+      deliveredCount: 1,
+      createdAt: now,
+    });
+    await db.insert(schema.interaction).values({
+      id: "int_withdraw",
+      userId: "user_withdraw",
+      requesterServiceId: "svc_withdraw",
+      eventId,
+      title: "CI",
+      prompt: "Continue?",
+      kind: "approval",
+      status: "pending",
+      choices: ["approve", "deny"],
+      actionDigest: "withdraw-digest",
+      expiresAt: new Date(now.getTime() + 60_000),
+      createdAt: now,
+    });
+
+    const denied = await app.request(`/hooks/whk_wrong/events/${eventId}/withdraw`, {
+      method: "POST",
+    });
+    expect(denied.status).toBe(404);
+    expect(await denied.json()).toEqual({ ok: false, error: "Event not found" });
+
+    sent.length = 0;
+    const response = await app.request(`/hooks/${token}/events/${eventId}/withdraw`, {
+      method: "POST",
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      eventId,
+      status: "withdrawn",
+      accepted: 1,
+    });
+    expect(sent).toEqual([
+      {
+        to: "ExponentPushToken[withdraw]",
+        data: { v: 1, command: "notification.withdraw", eventId },
+        _contentAvailable: true,
+      },
+    ]);
+
+    const { eq } = await import("drizzle-orm");
+    const [savedEvent] = await db.select().from(schema.event).where(eq(schema.event.id, eventId));
+    const [savedInteraction] = await db
+      .select()
+      .from(schema.interaction)
+      .where(eq(schema.interaction.id, "int_withdraw"));
+    expect(savedEvent?.status).toBe("withdrawn");
+    expect(savedInteraction).toMatchObject({ status: "canceled" });
+    expect(savedInteraction?.canceledAt).toBeInstanceOf(Date);
+  });
+
+  it("does not mark an event withdrawn when Expo rejects every command", async () => {
+    const now = new Date();
+    const token = "whk_withdraw-fail-abcdefghijklmnopqr";
+    const eventId = "evt_withdraw_fail";
+    await db.insert(schema.user).values({
+      id: "user_withdraw_fail",
+      name: "Withdraw Failure",
+      email: "withdraw-fail@example.com",
+      emailVerified: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(schema.service).values({
+      id: "svc_withdraw_fail",
+      userId: "user_withdraw_fail",
+      title: "Withdraw Failure",
+      tokenHash: hashWebhookToken(token),
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(schema.device).values({
+      id: "dev_withdraw_fail",
+      userId: "user_withdraw_fail",
+      expoPushToken: "ExponentPushToken[stale]",
+      platform: "ios",
+      active: true,
+      createdAt: now,
+      lastSeenAt: now,
+    });
+    await db.insert(schema.event).values({
+      id: eventId,
+      serviceId: "svc_withdraw_fail",
+      title: "CI",
+      body: "Old result",
+      status: "accepted",
+      deliveredCount: 1,
+      createdAt: now,
+    });
+
+    const response = await app.request(`/hooks/${token}/events/${eventId}/withdraw`, {
+      method: "POST",
+    });
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: "Withdrawal delivery failed",
+    });
+
+    const { eq } = await import("drizzle-orm");
+    const [savedEvent] = await db.select().from(schema.event).where(eq(schema.event.id, eventId));
+    const [savedDevice] = await db
+      .select()
+      .from(schema.device)
+      .where(eq(schema.device.id, "dev_withdraw_fail"));
+    expect(savedEvent?.status).toBe("accepted");
+    expect(savedDevice?.active).toBe(false);
+  });
+});

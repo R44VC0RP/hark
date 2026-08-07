@@ -529,4 +529,21 @@ describe("pushDataSchema", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it("accepts only versioned notification withdrawal commands", () => {
+    expect(
+      pushDataSchema.safeParse({
+        v: 1,
+        command: "notification.withdraw",
+        eventId: "evt_1",
+      }).success,
+    ).toBe(true);
+    expect(
+      pushDataSchema.safeParse({
+        v: 2,
+        command: "notification.withdraw",
+        eventId: "evt_1",
+      }).success,
+    ).toBe(false);
+  });
 });

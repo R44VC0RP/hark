@@ -467,8 +467,11 @@ function ActivityLogRow({ activityEvent }: { activityEvent: EventDto }) {
 
 function activityDotStyle(status: string) {
   if (status === "accepted" || status === "delivered") return { backgroundColor: colors.accent };
+  if (status === "withdrawn") return { backgroundColor: colors.soft };
   if (status === "failed") return { backgroundColor: colors.danger };
-  if (status === "partial") return { backgroundColor: "#D48A16" };
+  if (status === "partial" || status === "withdraw_partial") {
+    return { backgroundColor: "#D48A16" };
+  }
   return { backgroundColor: colors.line };
 }
 
@@ -476,6 +479,8 @@ function activityStatus(activityEvent: EventDto): string {
   if (activityEvent.status === "accepted" || activityEvent.status === "delivered") {
     return `Accepted for ${activityEvent.deliveredCount} ${activityEvent.deliveredCount === 1 ? "device" : "devices"}`;
   }
+  if (activityEvent.status === "withdrawn") return "Withdrawal requested";
+  if (activityEvent.status === "withdraw_partial") return "Withdrawal partially accepted";
   if (activityEvent.status === "partial") return "Partially accepted";
   if (activityEvent.status === "no_devices") return "No active devices";
   if (activityEvent.status === "processing") return "Processing";

@@ -979,13 +979,15 @@ function StatusDot({ status }: { status: string }) {
   const color =
     status === "accepted" || status === "delivered"
       ? "bg-accent"
-      : status === "failed"
-        ? "bg-danger-strong"
-        : status === "partial"
-          ? "bg-warn"
-          : status === "processing"
-            ? "bg-info"
-            : "bg-idle";
+      : status === "withdrawn"
+        ? "bg-info"
+        : status === "failed"
+          ? "bg-danger-strong"
+          : status === "partial" || status === "withdraw_partial"
+            ? "bg-warn"
+            : status === "processing"
+              ? "bg-info"
+              : "bg-idle";
   return <span className={`${color} size-2 rounded-full`} aria-hidden="true" />;
 }
 
@@ -1014,6 +1016,8 @@ function activityLabel(activityEvent: EventDto): string {
   if (activityEvent.status === "accepted" || activityEvent.status === "delivered") {
     return `Accepted for ${activityEvent.deliveredCount} ${activityEvent.deliveredCount === 1 ? "device" : "devices"}`;
   }
+  if (activityEvent.status === "withdrawn") return "Withdrawal requested";
+  if (activityEvent.status === "withdraw_partial") return "Withdrawal partially accepted";
   if (activityEvent.status === "partial") {
     return `Partially accepted for ${activityEvent.deliveredCount} devices`;
   }
