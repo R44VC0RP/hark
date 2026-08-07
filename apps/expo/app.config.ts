@@ -3,7 +3,7 @@ import type { ConfigContext, ExpoConfig } from "expo/config";
 export default ({ config: _config }: ConfigContext): ExpoConfig => ({
   name: "Hark",
   slug: "hark",
-  version: "1.0.2",
+  version: "1.1",
   icon: "./assets/icon.png",
   scheme: "hark",
   orientation: "portrait",
