@@ -285,7 +285,7 @@ export const DOC_CONTENT: DocSection[] = [
           },
           {
             kind: "note",
-            text: "`accepted` means Expo accepted the silent removal command; it does not guarantee that iOS ran it. Background delivery is best effort and may be delayed or skipped, particularly after the user force-quits Hark. The same webhook token must own the event.",
+            text: "`accepted` means Expo accepted the silent removal command; it does not guarantee that iOS ran it. Background delivery is best effort and may be delayed or skipped, particularly after the user force-quits Hark. The same webhook token must own the event. Repeating a completed withdrawal is idempotent and does not send another command.",
           },
         ],
       },

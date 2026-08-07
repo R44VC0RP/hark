@@ -629,6 +629,19 @@ describe("POST /hooks/:token/events/:eventId/withdraw", () => {
     expect(savedEvent?.status).toBe("withdrawn");
     expect(savedInteraction).toMatchObject({ status: "canceled" });
     expect(savedInteraction?.canceledAt).toBeInstanceOf(Date);
+
+    const repeated = await app.request(`/hooks/${token}/events/${eventId}/withdraw`, {
+      method: "POST",
+    });
+    expect(repeated.status).toBe(200);
+    expect(await repeated.json()).toEqual({
+      ok: true,
+      eventId,
+      status: "withdrawn",
+      accepted: 0,
+      idempotent: true,
+    });
+    expect(sent).toHaveLength(1);
   });
 
   it("does not mark an event withdrawn when Expo rejects every command", async () => {

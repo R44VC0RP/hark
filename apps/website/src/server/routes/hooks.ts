@@ -517,40 +517,66 @@ export const hooksRoute = new Hono()
       .limit(1);
     if (!match) return c.json({ ok: false, error: "Event not found" }, 404);
 
-    const devices = await db
-      .select()
-      .from(device)
-      .where(
-        and(
-          eq(device.userId, match.service.userId),
-          eq(device.active, true),
-          eq(device.platform, "ios"),
-        ),
+    if (match.event.status === "processing" || match.event.status === "withdraw_processing") {
+      return c.json({ ok: false, error: "Event is still processing" }, 409);
+    }
+    if (match.event.status === "withdrawn" || match.event.status === "withdraw_partial") {
+      return c.json({
+        ok: true,
+        eventId,
+        status: match.event.status,
+        accepted: 0,
+        idempotent: true,
+      });
+    }
+
+    const [claimed] = await db
+      .update(event)
+      .set({ status: "withdraw_processing" })
+      .where(and(eq(event.id, eventId), eq(event.status, match.event.status)))
+      .returning({ id: event.id });
+    if (!claimed) return c.json({ ok: false, error: "Withdrawal already in progress" }, 409);
+
+    try {
+      const devices = await db
+        .select()
+        .from(device)
+        .where(
+          and(
+            eq(device.userId, match.service.userId),
+            eq(device.active, true),
+            eq(device.platform, "ios"),
+          ),
+        );
+      const messages = buildNotificationWithdrawalPushMessages(
+        devices.map((registeredDevice) => registeredDevice.expoPushToken),
+        eventId,
       );
-    const messages = buildNotificationWithdrawalPushMessages(
-      devices.map((registeredDevice) => registeredDevice.expoPushToken),
-      eventId,
-    );
 
-    if (messages.length === 0) {
-      await markEventWithdrawn(eventId, "withdrawn");
-      return c.json({ ok: true, eventId, status: "withdrawn", accepted: 0 });
-    }
+      if (messages.length === 0) {
+        await markEventWithdrawn(eventId, "withdrawn");
+        return c.json({ ok: true, eventId, status: "withdrawn", accepted: 0 });
+      }
 
-    const result = await sendPushMessages(messages);
-    if (result.staleTokens.length > 0) {
-      await db
-        .update(device)
-        .set({ active: false })
-        .where(inArray(device.expoPushToken, result.staleTokens));
-    }
-    if (result.accepted === 0) {
-      return c.json({ ok: false, error: "Withdrawal delivery failed" }, 502);
-    }
+      const result = await sendPushMessages(messages);
+      if (result.staleTokens.length > 0) {
+        await db
+          .update(device)
+          .set({ active: false })
+          .where(inArray(device.expoPushToken, result.staleTokens));
+      }
+      if (result.accepted === 0) {
+        await restoreEventAfterFailedWithdrawal(eventId, match.event.status);
+        return c.json({ ok: false, error: "Withdrawal delivery failed" }, 502);
+      }
 
-    const status = result.accepted === messages.length ? "withdrawn" : "withdraw_partial";
-    await markEventWithdrawn(eventId, status);
-    return c.json({ ok: true, eventId, status, accepted: result.accepted });
+      const status = result.accepted === messages.length ? "withdrawn" : "withdraw_partial";
+      await markEventWithdrawn(eventId, status);
+      return c.json({ ok: true, eventId, status, accepted: result.accepted });
+    } catch (error) {
+      await restoreEventAfterFailedWithdrawal(eventId, match.event.status);
+      throw error;
+    }
   });
 
 async function markEventWithdrawn(eventId: string, status: string): Promise<void> {
@@ -561,6 +587,13 @@ async function markEventWithdrawn(eventId: string, status: string): Promise<void
       .set({ status: "canceled", canceledAt: new Date() })
       .where(and(eq(interaction.eventId, eventId), eq(interaction.status, "pending"))),
   ]);
+}
+
+async function restoreEventAfterFailedWithdrawal(eventId: string, status: string): Promise<void> {
+  await db
+    .update(event)
+    .set({ status })
+    .where(and(eq(event.id, eventId), eq(event.status, "withdraw_processing")));
 }
 
 async function expireIfNeededForWebhook(row: typeof interaction.$inferSelect) {
