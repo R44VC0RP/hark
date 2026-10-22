@@ -18,7 +18,9 @@ import * as subscriptions from "aws-cdk-lib/aws-sns-subscriptions";
 import * as ssm from "aws-cdk-lib/aws-ssm";
 import type { Construct } from "constructs";
 
-const GITHUB_REPO = "R44VC0RP/hark";
+const GITHUB_OWNER = "R44VC0RP";
+const GITHUB_REPO_NAME = "hark";
+const GITHUB_REPO = `${GITHUB_OWNER}/${GITHUB_REPO_NAME}`;
 const GITHUB_OIDC_URL = "https://token.actions.githubusercontent.com";
 /** The only workflow (and branch) allowed to assume the deploy role. */
 const GITHUB_DEPLOY_WORKFLOW = `${GITHUB_REPO}/.github/workflows/production-update.yml@refs/heads/main`;
@@ -430,7 +432,9 @@ export class HarkStack extends cdk.Stack {
         {
           StringEquals: {
             "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-            "token.actions.githubusercontent.com:sub": `repo:${GITHUB_REPO}:environment:production`,
+            // The repo uses GitHub's immutable subject format (owner@id/repo@id),
+            // so a rename or a re-created repo with the same name cannot match.
+            "token.actions.githubusercontent.com:sub": `repo:${GITHUB_OWNER}@${props.githubRepositoryOwnerId}/${GITHUB_REPO_NAME}@${props.githubRepositoryId}:environment:production`,
             "token.actions.githubusercontent.com:job_workflow_ref": GITHUB_DEPLOY_WORKFLOW,
             "token.actions.githubusercontent.com:repository_id": props.githubRepositoryId,
             "token.actions.githubusercontent.com:repository_owner_id":
