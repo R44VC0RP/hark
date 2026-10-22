@@ -28,7 +28,7 @@ import {
 } from "../lib/apps";
 import { newId } from "../lib/id";
 import { resolveProjectForDelivery } from "../lib/projects";
-import { memberIds, membership, returnAppToAdder, sendNotice } from "../lib/teams";
+import { hasRole, memberIds, membership, returnAppToAdder, sendNotice } from "../lib/teams";
 import {
   type AgentEnv,
   type AuthedEnv,
@@ -225,7 +225,7 @@ export const appsAgentRoute = new Hono<AgentEnv>()
     // cannot interleave with another request on the single SQLite connection.
     const outcome = db.transaction((tx) => {
       const existing = tx
-        .select({ id: app.id, teamId: app.teamId })
+        .select({ id: app.id, teamId: app.teamId, userId: app.userId })
         .from(app)
         .where(
           teamId
@@ -234,11 +234,19 @@ export const appsAgentRoute = new Hono<AgentEnv>()
         )
         .get();
       if (existing && existing.teamId === teamId) {
+        // Same rule as PATCH: only whoever added the app or a team admin may
+        // change it, and only the app's owner may move it to their project.
+        const ownsExisting = existing.userId === token.userId;
+        if (!ownsExisting && !(destination && hasRole(destination.role, "admin"))) {
+          return { kind: "forbidden" as const };
+        }
         tx.update(app)
           .set({
             name: input.name,
             ...(input.iconUrl !== undefined ? { iconUrl: input.iconUrl } : {}),
-            ...(projectResolution ? { projectId: projectResolution.projectId } : {}),
+            ...(projectResolution && ownsExisting
+              ? { projectId: projectResolution.projectId }
+              : {}),
             updatedAt: now,
           })
           .where(eq(app.id, existing.id))
@@ -278,6 +286,15 @@ export const appsAgentRoute = new Hono<AgentEnv>()
     });
 
     if (outcome.kind === "limit") return c.json({ error: APP_LIMIT_ERROR }, 409);
+    if (outcome.kind === "forbidden") {
+      return c.json(
+        {
+          error:
+            "This team already has an app at this URL, added by someone else; only they or a team admin can change it",
+        },
+        409,
+      );
+    }
     if (outcome.kind === "shared_elsewhere")
       return c.json({ error: "Another app already uses this URL" }, 409);
     if (outcome.kind === "conflict") {

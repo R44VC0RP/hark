@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { type WebhookResponse, webhookRequestSchema } from "@hark/contracts";
 import { and, count, desc, eq, gte, inArray, isNull } from "drizzle-orm";
 import { Hono } from "hono";
@@ -12,6 +12,7 @@ import {
   service as serviceTable,
   user as userTable,
 } from "../db/schema";
+import { env } from "../env";
 import { failureBucket, track } from "../lib/analytics";
 import { resolveNotificationApp } from "../lib/apps";
 import { checkNotificationAllowance, getBilling, trackNotification } from "../lib/billing";
@@ -24,15 +25,34 @@ import {
   resolveNotification,
   sendPushMessages,
 } from "../lib/push";
-import {
-  encryptCallbackToken,
-  generateInteractionResponseToken,
-  hashInteractionResponseToken,
-  hashWebhookToken,
-} from "../lib/token";
+import { encryptCallbackToken, hashWebhookToken } from "../lib/token";
 import { raisePageFor } from "./oncall";
 
 type EventRow = typeof event.$inferSelect;
+
+/**
+ * Lock-screen response credential for one device. Each device gets its own,
+ * so a response is attributed to the device whose push carried the token
+ * rather than to whichever device id the caller names.
+ */
+export function interactionDeviceResponseToken(interactionId: string, deviceId: string): string {
+  return createHmac("sha256", env.BETTER_AUTH_SECRET)
+    .update("hark:interaction-device-response:v1\0", "utf8")
+    .update(interactionId, "utf8")
+    .update("\0", "utf8")
+    .update(deviceId, "utf8")
+    .digest("base64url");
+}
+
+export function verifyInteractionDeviceResponseToken(
+  supplied: string,
+  interactionId: string,
+  deviceId: string,
+): boolean {
+  const expected = Buffer.from(interactionDeviceResponseToken(interactionId, deviceId), "utf8");
+  const suppliedBytes = Buffer.from(supplied, "utf8");
+  return suppliedBytes.length === expected.length && timingSafeEqual(suppliedBytes, expected);
+}
 
 function hashRequest(payload: unknown): string {
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
@@ -132,11 +152,15 @@ export const hooksRoute = new Hono()
         svc.title,
       );
       if (!paged.ok) {
+        const retryAfterSeconds =
+          "retryAfterSeconds" in paged ? paged.retryAfterSeconds : undefined;
+        if (retryAfterSeconds) c.header("Retry-After", String(retryAfterSeconds));
         return c.json<WebhookResponse>(
           {
             ok: false,
             error: paged.error,
             ...("issues" in paged ? { issues: paged.issues } : {}),
+            ...(retryAfterSeconds ? { retryAfterSeconds } : {}),
           },
           paged.status,
         );
@@ -367,7 +391,6 @@ export const hooksRoute = new Hono()
     }
 
     let interactionId: string | undefined;
-    let responseToken: string | undefined;
     let interactionActionDigest: string | undefined;
     let interactionExpiresAt: Date | undefined;
     if (parsed.data.response) {
@@ -376,7 +399,6 @@ export const hooksRoute = new Hono()
       );
       const response = parsed.data.response;
       interactionId = newId("int");
-      responseToken = generateInteractionResponseToken();
       interactionExpiresAt = new Date(Date.now() + response.expiresInSeconds * 1000);
       const kind = response.type === "text" ? "reply" : response.type;
       const choices =
@@ -403,7 +425,6 @@ export const hooksRoute = new Hono()
         imageUrl: resolved.imageUrl ?? null,
         correlationId: response.correlationId ?? null,
         actionDigest: interactionActionDigest,
-        responseTokenHash: hashInteractionResponseToken(responseToken),
         callbackUrl: response.callback?.url ?? null,
         callbackTokenCiphertext: response.callback
           ? encryptCallbackToken(response.callback.token)
@@ -445,19 +466,25 @@ export const hooksRoute = new Hono()
       });
     }
 
-    const messages = parsed.data.response
-      ? buildInteractionPushMessages({
-          to: devices.map((registeredDevice) => registeredDevice.expoPushToken),
-          interactionId: interactionId as string,
-          eventId,
-          kind: parsed.data.response.type === "text" ? "reply" : parsed.data.response.type,
-          title: resolved.title,
-          prompt: resolved.body,
-          actionDigest: interactionActionDigest as string,
-          responseToken,
-          imageUrl: resolved.imageUrl,
-          url: resolved.url,
-        })
+    const interactionResponse = parsed.data.response;
+    const messages = interactionResponse
+      ? devices.flatMap((registeredDevice) =>
+          buildInteractionPushMessages({
+            to: [registeredDevice.expoPushToken],
+            interactionId: interactionId as string,
+            eventId,
+            kind: interactionResponse.type === "text" ? "reply" : interactionResponse.type,
+            title: resolved.title,
+            prompt: resolved.body,
+            actionDigest: interactionActionDigest as string,
+            responseToken: interactionDeviceResponseToken(
+              interactionId as string,
+              registeredDevice.id,
+            ),
+            imageUrl: resolved.imageUrl,
+            url: resolved.url,
+          }),
+        )
       : buildPushMessages({
           to: devices.map((registeredDevice) => registeredDevice.expoPushToken),
           eventId,

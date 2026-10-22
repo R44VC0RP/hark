@@ -49,7 +49,7 @@ import {
   resolveInteractionLiveActivity,
   startInteractionLiveActivity,
 } from "./activities";
-import { pushWithdrawalCommand } from "./hooks";
+import { pushWithdrawalCommand, verifyInteractionDeviceResponseToken } from "./hooks";
 import { raisePageFor } from "./oncall";
 
 type InteractionRow = typeof interaction.$inferSelect;
@@ -306,8 +306,15 @@ export const agentRoute = new Hono<AgentEnv>()
         token.name,
       );
       if (!paged.ok) {
+        const retryAfterSeconds =
+          "retryAfterSeconds" in paged ? paged.retryAfterSeconds : undefined;
+        if (retryAfterSeconds) c.header("Retry-After", String(retryAfterSeconds));
         return c.json(
-          { error: paged.error, ...("issues" in paged ? { issues: paged.issues } : {}) },
+          {
+            error: paged.error,
+            ...("issues" in paged ? { issues: paged.issues } : {}),
+            ...(retryAfterSeconds ? { retryAfterSeconds } : {}),
+          },
           paged.status,
         );
       }
@@ -1062,14 +1069,24 @@ export const interactionCredentialResponseRoute = new Hono().post("/:id/respond"
   const [current] = await db
     .select()
     .from(interaction)
-    .where(
-      and(
-        eq(interaction.id, c.req.param("id")),
-        eq(interaction.responseTokenHash, hashInteractionResponseToken(parsed.data.responseToken)),
-      ),
-    )
+    .where(eq(interaction.id, c.req.param("id")))
     .limit(1);
-  if (!current) return c.json({ error: "Interaction not found" }, 404);
+  // Tokens are per device, so the token itself proves which device answered.
+  // Interactions pushed before per-device tokens carry one shared token.
+  if (
+    !current ||
+    !(
+      verifyInteractionDeviceResponseToken(
+        parsed.data.responseToken,
+        current.id,
+        parsed.data.deviceId,
+      ) ||
+      (current.responseTokenHash !== null &&
+        current.responseTokenHash === hashInteractionResponseToken(parsed.data.responseToken))
+    )
+  ) {
+    return c.json({ error: "Interaction not found" }, 404);
+  }
   const [registeredDevice] = await db
     .select({ id: device.id })
     .from(device)

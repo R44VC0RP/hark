@@ -332,6 +332,11 @@ async function openInvite(code: string) {
 async function acceptInvite(actor: Actor, code: string): Promise<Outcome> {
   const found = await openInvite(code);
   if (!found) return failure(404, "This invite is invalid, used, or expired");
+  // An invite addressed to an email binds to that account, not to whoever
+  // holds the code.
+  if (found.invite.email && found.invite.email.toLowerCase() !== actor.email.toLowerCase()) {
+    return failure(403, "This invite was sent to a different email address");
+  }
   const existing = await membership(found.team.id, actor.id);
   if (existing) {
     const body: TeamJoinResponse = {

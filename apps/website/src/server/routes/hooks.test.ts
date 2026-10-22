@@ -238,9 +238,22 @@ describe("POST /hooks/:token", () => {
     };
     expect(data.avatarUrl).toBe("https://example.com/ci.png");
 
-    const callbackFetch = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(new Response(null, { status: 204 }));
+    const { default: dns } = await import("node:dns/promises");
+    const { default: https } = await import("node:https");
+    const { EventEmitter } = await import("node:events");
+    const callbackLookup = vi
+      .spyOn(dns, "lookup")
+      .mockResolvedValue([{ address: "93.184.216.34", family: 4 }] as never);
+    const callbackRequest = vi.spyOn(https, "request").mockImplementation(((
+      _url: unknown,
+      _options: unknown,
+      onResponse: (response: { statusCode: number; resume(): void }) => void,
+    ) => {
+      const request = Object.assign(new EventEmitter(), {
+        end: () => onResponse({ statusCode: 204, resume: () => undefined }),
+      });
+      return request;
+    }) as never);
     const response = await app.request(`/api/interaction-responses/${data.interactionId}/respond`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -251,15 +264,16 @@ describe("POST /hooks/:token", () => {
       }),
     });
     expect(response.status).toBe(200);
-    await vi.waitFor(() => expect(callbackFetch).toHaveBeenCalledOnce());
-    const callbackCall = callbackFetch.mock.calls[0];
+    await vi.waitFor(() => expect(callbackRequest).toHaveBeenCalledOnce());
+    const callbackCall = callbackRequest.mock.calls[0] as unknown as
+      | [URL, { headers: Record<string, string> }]
+      | undefined;
     if (!callbackCall) throw new Error("Expected callback request");
-    if (!callbackCall[1]) throw new Error("Expected callback request options");
-    expect(callbackCall[0]).toBe("https://ci.example.com/hark-response");
-    expect((callbackCall[1].headers as Record<string, string>).authorization).toBe(
-      "Bearer private-callback-token",
-    );
-    callbackFetch.mockRestore();
+    expect(String(callbackCall[0])).toBe("https://ci.example.com/hark-response");
+    expect(callbackCall[1].headers.authorization).toBe("Bearer private-callback-token");
+    expect(callbackLookup).toHaveBeenCalledWith("ci.example.com", { all: true, verbatim: true });
+    callbackRequest.mockRestore();
+    callbackLookup.mockRestore();
     const status = await app.request(`/hooks/${TOKEN}/events/${createdBody.eventId}`);
     expect(await status.json()).toMatchObject({
       ok: true,
@@ -293,6 +307,21 @@ describe("POST /hooks/:token", () => {
     billingTestState.pro = false;
     const createdBody = (await created.json()) as { eventId: string };
     const data = sent[0]?.data as { interactionId: string; responseToken: string };
+    // The token belongs to dev_1's push; naming another device does not work.
+    const otherDevice = await app.request(
+      `/api/interaction-responses/${data.interactionId}/respond`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "reply",
+          response: "Not mine",
+          deviceId: "dev_2",
+          responseToken: data.responseToken,
+        }),
+      },
+    );
+    expect(otherDevice.status).toBe(404);
     const response = await app.request(`/api/interaction-responses/${data.interactionId}/respond`, {
       method: "POST",
       headers: { "content-type": "application/json" },

@@ -87,13 +87,26 @@ describe("webhookRequestSchema", () => {
       "file:///etc/passwd",
       "blob:https://example.com/id",
       "about:blank",
+      "hark://inbox/evt_1",
+      "HARK://web/app_12345678?url=/x",
+      "ceo.ryan.hark://notification/evt_1",
+      "exp+hark://expo-development-client/?url=http://10.0.0.1:8081",
+      "exp://192.168.1.2:8081",
+      "exps://u.expo.dev/x",
+      "myapp://expo-development-client/?url=http://10.0.0.1:8081",
+      "itms-services://?action=download-manifest&url=https://example.com/m.plist",
+      "App-prefs:root=General",
+      "prefs:root=WIFI",
     ]) {
       expect(webhookRequestSchema.safeParse({ body: "x", url }).success).toBe(false);
     }
     for (const url of [
       "http://example.com",
       "https://example.com",
-      "hark://inbox/evt_1",
+      "tel:+15555550100",
+      "sms:+15555550100",
+      "mailto:ops@example.com",
+      "linear://issue/ENG-1",
       "shortcuts://run-shortcut?name=Deploy%20Finished&input=text&text=production",
     ]) {
       expect(webhookRequestSchema.safeParse({ body: "x", url }).success).toBe(true);
@@ -106,8 +119,27 @@ describe("webhookRequestSchema", () => {
       "https://100.64.0.1/a.png",
       "https://192.0.0.1/a.png",
       "https://198.18.0.1/a.png",
+      "https://localhost./a.png",
+      "https://app.localhost./a.png",
+      "https://metadata.google.internal/a.png",
+      "https://[::]/a.png",
+      "https://[::1]/a.png",
+      "https://[::7f00:1]/a.png",
+      "https://[64:ff9b::7f00:1]/a.png",
+      "https://[64:ff9b:1::a00:1]/a.png",
+      "https://[fe80::1]/a.png",
+      "https://0x7f000001/a.png",
+      "https://2130706433/a.png",
+      "https://169.254.169.254./a.png",
     ]) {
       expect(webhookRequestSchema.safeParse({ body: "x", imageUrl }).success).toBe(false);
+    }
+    for (const imageUrl of [
+      "https://example.com./a.png",
+      "https://fcbarcelona.example/a.png",
+      "https://[2606:4700::1111]/a.png",
+    ]) {
+      expect(webhookRequestSchema.safeParse({ body: "x", imageUrl }).success).toBe(true);
     }
   });
 
@@ -237,7 +269,7 @@ describe("agentNotificationCreateSchema", () => {
       agentNotificationCreateSchema.safeParse({
         body: "x",
         imageUrl: "https://example.com/a.png",
-        url: "shortcuts://run-shortcut?name=Process%20Alert",
+        url: "linear://issue/ENG-1",
       }).success,
     ).toBe(true);
   });
@@ -566,7 +598,7 @@ describe("pushDataSchema", () => {
       sourceId: "svc_1",
       sourceName: "Acme CRM",
       avatarUrl: "https://example.com/a.png",
-      url: "shortcuts://run-shortcut?name=Process%20Alert",
+      url: "linear://issue/ENG-1",
       conversationId: "hark-svc_1",
     });
     expect(result.success).toBe(true);

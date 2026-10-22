@@ -16,6 +16,7 @@ import {
   desc,
   eq,
   gt,
+  gte,
   inArray,
   isNotNull,
   isNull,
@@ -36,6 +37,7 @@ import {
   teamMember,
   user as userTable,
 } from "../db/schema";
+import { env } from "../env";
 import { checkAppUrl, toAppSummaryDto } from "./apps";
 import { checkNotificationAllowance, trackNotification } from "./billing";
 import { newId } from "./id";
@@ -391,7 +393,32 @@ export interface RaisePageInput {
 
 export type RaisePageOutcome =
   | { ok: true; status: 200 | 201; body: OncallPageCreateResponse }
-  | { ok: false; status: 400 | 429; error: string };
+  | { ok: false; status: 400 | 429; error: string; retryAfterSeconds?: number };
+
+/**
+ * Pages push high-priority alerts to other people, so every entry point
+ * (webhooks, agent notifications, the on-call API) shares one per-minute
+ * limit per group and per requesting user.
+ */
+async function pageRateLimited(
+  group: GroupRow,
+  creatorUserId: string,
+): Promise<"group" | "account" | null> {
+  const since = new Date(Date.now() - 60_000);
+  const [[groupUsage], [accountUsage]] = await Promise.all([
+    db
+      .select({ value: count() })
+      .from(oncallPage)
+      .where(and(eq(oncallPage.groupId, group.id), gte(oncallPage.createdAt, since))),
+    db
+      .select({ value: count() })
+      .from(oncallPage)
+      .where(and(eq(oncallPage.createdByUserId, creatorUserId), gte(oncallPage.createdAt, since))),
+  ]);
+  if ((groupUsage?.value ?? 0) >= env.SERVICE_RATE_LIMIT_PER_MINUTE) return "group";
+  if ((accountUsage?.value ?? 0) >= env.ACCOUNT_RATE_LIMIT_PER_MINUTE) return "account";
+  return null;
+}
 
 async function mergeDuplicate(group: GroupRow, dedupKey: string): Promise<PageRow | undefined> {
   const [merged] = await db
@@ -444,6 +471,19 @@ export async function raisePage({
         body: { page: await toPageDto(merged), deduplicated: true, accepted: 0 },
       };
     }
+  }
+
+  const limited = await pageRateLimited(group, creatorUserId);
+  if (limited) {
+    return {
+      ok: false,
+      status: 429,
+      error:
+        limited === "group"
+          ? "On-call group page rate limit exceeded"
+          : "Account page rate limit exceeded",
+      retryAfterSeconds: 60,
+    };
   }
 
   if (!(await checkNotificationAllowance(creatorUserId))) {

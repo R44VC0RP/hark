@@ -92,11 +92,18 @@ function isPublicHttpsUrl(value: string): boolean {
     const url = new URL(value);
     if (url.protocol !== "https:") return false;
 
-    const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    // A trailing dot (`localhost.`) names the same host as without it.
+    const hostname = url.hostname
+      .toLowerCase()
+      .replace(/^\[|\]$/g, "")
+      .replace(/\.+$/, "");
     if (
+      hostname === "" ||
       hostname === "localhost" ||
       hostname.endsWith(".localhost") ||
-      hostname.endsWith(".local")
+      hostname.endsWith(".local") ||
+      hostname === "internal" ||
+      hostname.endsWith(".internal")
     ) {
       return false;
     }
@@ -126,12 +133,19 @@ function isPublicHttpsUrl(value: string): boolean {
     }
 
     if (
-      hostname === "::1" ||
-      hostname.startsWith("fc") ||
-      hostname.startsWith("fd") ||
-      hostname.startsWith("fe80:") ||
-      // IPv4-mapped IPv6 (::ffff:127.0.0.1) otherwise bypasses the checks above.
-      hostname.startsWith("::ffff:")
+      hostname.includes(":") &&
+      // `::`, `::1`, IPv4-compatible and IPv4-mapped (::ffff:127.0.0.1) forms
+      // all start with `::` once the URL parser has compressed them.
+      (hostname.startsWith("::") ||
+        hostname.startsWith("fc") ||
+        hostname.startsWith("fd") ||
+        hostname.startsWith("fe8") ||
+        hostname.startsWith("fe9") ||
+        hostname.startsWith("fea") ||
+        hostname.startsWith("feb") ||
+        hostname.startsWith("ff") ||
+        // NAT64 (64:ff9b::/96 and 64:ff9b:1::/48) translates to IPv4 hosts.
+        hostname.startsWith("64:ff9b:"))
     ) {
       return false;
     }
@@ -153,6 +167,16 @@ const blockedTapDestinationProtocols = new Set([
   "data:",
   "file:",
   "javascript:",
+  // Hark's own schemes re-enter the app (and the dev launcher) from a push.
+  "hark:",
+  "ceo.ryan.hark:",
+  "exp+hark:",
+  "exp:",
+  "exps:",
+  // Install or settings schemes; `shortcuts:` stays supported (the app confirms).
+  "itms-services:",
+  "app-prefs:",
+  "prefs:",
 ]);
 
 /**
@@ -165,8 +189,11 @@ export const tapDestinationUrlSchema = z
   .max(2048)
   .refine((value) => {
     try {
-      const { protocol } = new URL(value);
-      return !blockedTapDestinationProtocols.has(protocol);
+      const { protocol, hostname } = new URL(value);
+      return (
+        !blockedTapDestinationProtocols.has(protocol.toLowerCase()) &&
+        hostname.toLowerCase() !== "expo-development-client"
+      );
     } catch {
       return false;
     }
@@ -357,8 +384,14 @@ export interface EventDto {
 // Devices
 // ---------------------------------------------------------------------------
 
+/** Same prefixes as expo-server-sdk's `Expo.isExpoPushToken`, with a strict body. */
+const expoPushTokenSchema = z
+  .string()
+  .max(400)
+  .regex(/^(?:ExponentPushToken|ExpoPushToken)\[[A-Za-z0-9_-]+\]$/, "Must be an Expo push token");
+
 export const deviceRegisterSchema = z.object({
-  expoPushToken: z.string().min(1).max(400),
+  expoPushToken: expoPushTokenSchema,
   apnsToken: z.string().min(1).max(400).optional(),
   platform: z.literal("ios"),
   deviceName: z.string().trim().max(80).optional(),
@@ -1456,7 +1489,10 @@ export const teamMemberUpdateSchema = z.strictObject({ role: teamRoleSchema });
 export type TeamMemberUpdateInput = z.infer<typeof teamMemberUpdateSchema>;
 
 export const teamInviteCreateSchema = z.strictObject({
-  /** Optional: an existing Hark user with this email also gets a push notification. */
+  /**
+   * Optional: binds the invite to this email, so only the account with it can
+   * accept; an existing Hark user with this email also gets a push notification.
+   */
   email: z.email().max(254).optional(),
   role: z.enum(["admin", "member"]).default("member"),
 });

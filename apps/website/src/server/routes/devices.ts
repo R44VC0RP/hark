@@ -23,6 +23,8 @@ import {
   requireScopes,
 } from "../middleware";
 
+const DEVICE_OWNER_CHANGE_IDLE_MS = 30 * 24 * 60 * 60 * 1000;
+
 function toDto(row: typeof device.$inferSelect): DeviceDto {
   return {
     id: row.id,
@@ -215,7 +217,13 @@ export const devicesRoute = new Hono<AuthedEnv>()
     }
     const [existing, activeDevices, billing] = await Promise.all([
       db
-        .select({ id: device.id, userId: device.userId, active: device.active })
+        .select({
+          id: device.id,
+          userId: device.userId,
+          active: device.active,
+          apnsToken: device.apnsToken,
+          lastSeenAt: device.lastSeenAt,
+        })
         .from(device)
         .where(eq(device.expoPushToken, parsed.data.expoPushToken))
         .limit(1),
@@ -225,6 +233,33 @@ export const devicesRoute = new Hono<AuthedEnv>()
         .where(and(eq(device.userId, user.id), eq(device.active, true))),
       getBilling(user),
     ]);
+    // A push token alone is not proof of holding the phone, so it never moves
+    // an active device off another account. Signing out removes the row;
+    // otherwise the phone proves itself with its APNs token, or the old row
+    // must be inactive or unused for 30 days.
+    const previousOwner = existing[0];
+    if (previousOwner && previousOwner.userId !== user.id) {
+      const stale =
+        !previousOwner.active ||
+        previousOwner.lastSeenAt.getTime() < Date.now() - DEVICE_OWNER_CHANGE_IDLE_MS;
+      const proven =
+        previousOwner.apnsToken !== null && parsed.data.apnsToken === previousOwner.apnsToken;
+      if (!stale && !proven) {
+        return c.json(
+          {
+            error:
+              "This device is registered to another Hark account. Sign out of Hark there first.",
+          },
+          409,
+        );
+      }
+      console.warn("[devices] Device moved to another account", {
+        deviceId: previousOwner.id,
+        fromUserId: previousOwner.userId,
+        toUserId: user.id,
+        reason: proven ? "apns_token" : "stale",
+      });
+    }
     const isAlreadyActiveForUser = existing[0]?.userId === user.id && existing[0].active;
     if (
       !isAlreadyActiveForUser &&
