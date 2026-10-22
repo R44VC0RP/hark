@@ -1,13 +1,14 @@
-import type {
-  OncallGroupDto,
-  OncallOverrideDto,
-  OncallPageCreateInput,
-  OncallPageCreateResponse,
-  OncallPageDto,
-  OncallPageStatus,
-  OncallPersonDto,
-  OncallRotationInput,
-  OncallShiftDto,
+import {
+  type OncallGroupDto,
+  type OncallOverrideDto,
+  type OncallPageCreateInput,
+  type OncallPageCreateResponse,
+  type OncallPageDto,
+  type OncallPageStatus,
+  type OncallPersonDto,
+  type OncallRotationInput,
+  type OncallShiftDto,
+  oncallPageCreateSchema,
 } from "@hark/contracts";
 import {
   and,
@@ -395,29 +396,69 @@ export type RaisePageOutcome =
   | { ok: true; status: 200 | 201; body: OncallPageCreateResponse }
   | { ok: false; status: 400 | 429; error: string; retryAfterSeconds?: number };
 
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 /**
  * Pages push high-priority alerts to other people, so every entry point
  * (webhooks, agent notifications, the on-call API) shares one per-minute
- * limit per group and per requesting user.
+ * limit per group and per requesting user. Runs synchronously inside the
+ * page insert's transaction, so a concurrent burst cannot all pass the count.
  */
-async function pageRateLimited(
+function pageRateLimited(
+  tx: Tx,
   group: GroupRow,
   creatorUserId: string,
-): Promise<"group" | "account" | null> {
+): "group" | "account" | null {
   const since = new Date(Date.now() - 60_000);
-  const [[groupUsage], [accountUsage]] = await Promise.all([
-    db
-      .select({ value: count() })
-      .from(oncallPage)
-      .where(and(eq(oncallPage.groupId, group.id), gte(oncallPage.createdAt, since))),
-    db
-      .select({ value: count() })
-      .from(oncallPage)
-      .where(and(eq(oncallPage.createdByUserId, creatorUserId), gte(oncallPage.createdAt, since))),
-  ]);
+  const groupUsage = tx
+    .select({ value: count() })
+    .from(oncallPage)
+    .where(and(eq(oncallPage.groupId, group.id), gte(oncallPage.createdAt, since)))
+    .get();
   if ((groupUsage?.value ?? 0) >= env.SERVICE_RATE_LIMIT_PER_MINUTE) return "group";
+  const accountUsage = tx
+    .select({ value: count() })
+    .from(oncallPage)
+    .where(and(eq(oncallPage.createdByUserId, creatorUserId), gte(oncallPage.createdAt, since)))
+    .get();
   if ((accountUsage?.value ?? 0) >= env.ACCOUNT_RATE_LIMIT_PER_MINUTE) return "account";
   return null;
+}
+
+/**
+ * Whether an Idempotency-Key retry (`dedupKey`) would merge into an open
+ * page that `userId` can see but that was raised with a different payload.
+ * Webhook and agent callers answer 409 then, like their non-paging paths.
+ */
+export async function idempotentPageConflict(
+  userId: string,
+  groupId: string,
+  input: unknown,
+): Promise<boolean> {
+  const parsed = oncallPageCreateSchema.safeParse(input);
+  if (!parsed.success || !parsed.data.dedupKey) return false;
+  const [open] = await db
+    .select({ page: oncallPage })
+    .from(oncallPage)
+    .innerJoin(
+      teamMember,
+      and(eq(teamMember.teamId, oncallPage.teamId), eq(teamMember.userId, userId)),
+    )
+    .where(
+      and(
+        eq(oncallPage.groupId, groupId),
+        eq(oncallPage.dedupKey, parsed.data.dedupKey),
+        inArray(oncallPage.status, [...OPEN_STATUSES]),
+      ),
+    )
+    .limit(1);
+  if (!open) return false;
+  return (
+    open.page.title !== parsed.data.title ||
+    open.page.body !== (parsed.data.body ?? null) ||
+    open.page.url !== (parsed.data.url ?? null) ||
+    open.page.appId !== (parsed.data.appId ?? null)
+  );
 }
 
 async function mergeDuplicate(group: GroupRow, dedupKey: string): Promise<PageRow | undefined> {
@@ -473,19 +514,6 @@ export async function raisePage({
     }
   }
 
-  const limited = await pageRateLimited(group, creatorUserId);
-  if (limited) {
-    return {
-      ok: false,
-      status: 429,
-      error:
-        limited === "group"
-          ? "On-call group page rate limit exceeded"
-          : "Account page rate limit exceeded",
-      retryAfterSeconds: 60,
-    };
-  }
-
   if (!(await checkNotificationAllowance(creatorUserId))) {
     return { ok: false, status: 429, error: "Monthly notification limit reached" };
   }
@@ -513,11 +541,15 @@ export async function raisePage({
     createdAt: new Date(now),
     updatedAt: new Date(now),
   };
-  let page: PageRow;
+  let created: PageRow | "group" | "account";
   try {
-    const [inserted] = await db.insert(oncallPage).values(values).returning();
-    if (!inserted) throw new Error("Failed to create page");
-    page = inserted;
+    created = db.transaction((tx) => {
+      const limited = pageRateLimited(tx, group, creatorUserId);
+      if (limited) return limited;
+      const inserted = tx.insert(oncallPage).values(values).returning().get();
+      if (!inserted) throw new Error("Failed to create page");
+      return inserted;
+    });
   } catch (error) {
     // A concurrent page with the same key won the open-page unique index.
     if (input.dedupKey) {
@@ -532,6 +564,18 @@ export async function raisePage({
     }
     throw error;
   }
+  if (typeof created === "string") {
+    return {
+      ok: false,
+      status: 429,
+      error:
+        created === "group"
+          ? "On-call group page rate limit exceeded"
+          : "Account page rate limit exceeded",
+      retryAfterSeconds: 60,
+    };
+  }
+  const page = created;
 
   const accepted = await notifyRecipients(page, group.name, initial, 0);
   if (accepted > 0) await trackNotification(creatorUserId, page.id);

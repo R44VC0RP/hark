@@ -17,6 +17,7 @@ import { failureBucket, track } from "../lib/analytics";
 import { resolveNotificationApp } from "../lib/apps";
 import { checkNotificationAllowance, getBilling, trackNotification } from "../lib/billing";
 import { newId } from "../lib/id";
+import { idempotentPageConflict } from "../lib/oncall";
 import { resolveProjectForDelivery } from "../lib/projects";
 import {
   buildInteractionPushMessages,
@@ -56,6 +57,52 @@ export function verifyInteractionDeviceResponseToken(
 
 function hashRequest(payload: unknown): string {
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Per-minute service and account windows for webhook notifications. Runs
+ * synchronously inside the insert's transaction.
+ */
+function webhookRateLimited(
+  tx: Tx,
+  svc: typeof serviceTable.$inferSelect,
+  billing: Awaited<ReturnType<typeof getBilling>>,
+): "service" | "account" | null {
+  const since = new Date(Date.now() - 60_000);
+  const serviceUsage = tx
+    .select({ value: count() })
+    .from(event)
+    .where(and(eq(event.serviceId, svc.id), gte(event.createdAt, since)))
+    .get();
+  if ((serviceUsage?.value ?? 0) >= billing.limits.servicePerMinute) return "service";
+  const accountEventUsage = tx
+    .select({ value: count() })
+    .from(event)
+    .innerJoin(serviceTable, eq(event.serviceId, serviceTable.id))
+    .where(and(eq(serviceTable.userId, svc.userId), gte(event.createdAt, since)))
+    .get();
+  const accountInteractionUsage = tx
+    .select({ value: count() })
+    .from(interaction)
+    .where(and(eq(interaction.userId, svc.userId), gte(interaction.createdAt, since)))
+    .get();
+  const accountActivityUsage = tx
+    .select({ value: count() })
+    .from(liveActivityOperation)
+    .innerJoin(liveActivity, eq(liveActivity.id, liveActivityOperation.activityId))
+    .where(and(eq(liveActivity.userId, svc.userId), gte(liveActivityOperation.createdAt, since)))
+    .get();
+  if (
+    (accountEventUsage?.value ?? 0) +
+      (accountInteractionUsage?.value ?? 0) +
+      (accountActivityUsage?.value ?? 0) >=
+    billing.limits.accountPerMinute
+  ) {
+    return "account";
+  }
+  return null;
 }
 
 function replayResponse(row: EventRow): {
@@ -138,19 +185,25 @@ export const hooksRoute = new Hono()
         );
       }
       // Pages merge on their dedup key, so an Idempotency-Key retry folds into
-      // the open page instead of paging again.
-      const paged = await raisePageFor(
-        svc.userId,
-        parsed.data.oncall,
-        {
-          title: parsed.data.title ?? svc.title,
-          body: parsed.data.body,
-          ...(parsed.data.url ? { url: parsed.data.url } : {}),
-          ...(parsed.data.appId ? { appId: parsed.data.appId } : {}),
-          ...(idempotencyKey ? { dedupKey: idempotencyKey } : {}),
-        },
-        svc.title,
-      );
+      // the open page instead of paging again. A retry with a different
+      // payload is a client error, as on the non-paging path.
+      const pageInput = {
+        title: parsed.data.title ?? svc.title,
+        body: parsed.data.body,
+        ...(parsed.data.url ? { url: parsed.data.url } : {}),
+        ...(parsed.data.appId ? { appId: parsed.data.appId } : {}),
+        ...(idempotencyKey ? { dedupKey: idempotencyKey } : {}),
+      };
+      if (
+        idempotencyKey &&
+        (await idempotentPageConflict(svc.userId, parsed.data.oncall, pageInput))
+      ) {
+        return c.json<WebhookResponse>(
+          { ok: false, error: "Idempotency-Key was already used with a different payload" },
+          409,
+        );
+      }
+      const paged = await raisePageFor(svc.userId, parsed.data.oncall, pageInput, svc.title);
       if (!paged.ok) {
         const retryAfterSeconds =
           "retryAfterSeconds" in paged ? paged.retryAfterSeconds : undefined;
@@ -250,65 +303,6 @@ export const hooksRoute = new Hono()
       );
     }
 
-    const since = new Date(Date.now() - 60_000);
-    const [[serviceUsage], [accountEventUsage], [accountInteractionUsage], [accountActivityUsage]] =
-      await Promise.all([
-        db
-          .select({ value: count() })
-          .from(event)
-          .where(and(eq(event.serviceId, svc.id), gte(event.createdAt, since))),
-        db
-          .select({ value: count() })
-          .from(event)
-          .innerJoin(serviceTable, eq(event.serviceId, serviceTable.id))
-          .where(and(eq(serviceTable.userId, svc.userId), gte(event.createdAt, since))),
-        db
-          .select({ value: count() })
-          .from(interaction)
-          .where(and(eq(interaction.userId, svc.userId), gte(interaction.createdAt, since))),
-        db
-          .select({ value: count() })
-          .from(liveActivityOperation)
-          .innerJoin(liveActivity, eq(liveActivity.id, liveActivityOperation.activityId))
-          .where(
-            and(eq(liveActivity.userId, svc.userId), gte(liveActivityOperation.createdAt, since)),
-          ),
-      ]);
-
-    if ((serviceUsage?.value ?? 0) >= billing.limits.servicePerMinute) {
-      c.header("Retry-After", "60");
-      track({
-        name: "webhook_rate_limited",
-        userId: svc.userId,
-        serviceId: svc.id,
-        plan: billing.plan,
-        outcome: "service",
-      });
-      return c.json<WebhookResponse>(
-        { ok: false, error: "Service rate limit exceeded", retryAfterSeconds: 60 },
-        429,
-      );
-    }
-    if (
-      (accountEventUsage?.value ?? 0) +
-        (accountInteractionUsage?.value ?? 0) +
-        (accountActivityUsage?.value ?? 0) >=
-      billing.limits.accountPerMinute
-    ) {
-      c.header("Retry-After", "60");
-      track({
-        name: "webhook_rate_limited",
-        userId: svc.userId,
-        serviceId: svc.id,
-        plan: billing.plan,
-        outcome: "account",
-      });
-      return c.json<WebhookResponse>(
-        { ok: false, error: "Account rate limit exceeded", retryAfterSeconds: 60 },
-        429,
-      );
-    }
-
     if (!(await checkNotificationAllowance(svc.userId))) {
       track({
         name: "webhook_quota_exceeded",
@@ -356,8 +350,16 @@ export const hooksRoute = new Hono()
       createdAt: new Date(),
     };
 
+    let limited: "service" | "account" | null;
     try {
-      await db.insert(event).values(eventValues);
+      // Count and insert in one synchronous transaction: no other request
+      // can run between them, so a concurrent burst cannot all pass the
+      // count before any of them has inserted.
+      limited = db.transaction((tx) => {
+        const reason = webhookRateLimited(tx, svc, billing);
+        if (!reason) tx.insert(event).values(eventValues).run();
+        return reason;
+      });
     } catch (error) {
       if (idempotencyKey) {
         const [existing] = await db
@@ -371,6 +373,25 @@ export const hooksRoute = new Hono()
         }
       }
       throw error;
+    }
+    if (limited) {
+      c.header("Retry-After", "60");
+      track({
+        name: "webhook_rate_limited",
+        userId: svc.userId,
+        serviceId: svc.id,
+        plan: billing.plan,
+        outcome: limited,
+      });
+      return c.json<WebhookResponse>(
+        {
+          ok: false,
+          error:
+            limited === "service" ? "Service rate limit exceeded" : "Account rate limit exceeded",
+          retryAfterSeconds: 60,
+        },
+        429,
+      );
     }
 
     let devices: (typeof device.$inferSelect)[];

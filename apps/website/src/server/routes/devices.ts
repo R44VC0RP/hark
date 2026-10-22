@@ -6,7 +6,7 @@ import {
   liveActivityPushToStartTokenSchema,
   liveActivityUpdateTokenSchema,
 } from "@hark/contracts";
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { db } from "../db";
 import { device, liveActivity, liveActivityDelivery, user as userTable } from "../db/schema";
@@ -271,10 +271,20 @@ export const devicesRoute = new Hono<AuthedEnv>()
     const now = new Date();
     const registration = db.transaction((tx) => {
       const previous = tx
-        .select({ id: device.id, userId: device.userId })
+        .select({ id: device.id, userId: device.userId, active: device.active })
         .from(device)
         .where(eq(device.expoPushToken, parsed.data.expoPushToken))
         .get();
+      // Re-counted here, after `getBilling` resolved: concurrent registrations
+      // cannot all pass the check above before any of them has inserted.
+      if (billing.limits.devices !== null && !(previous?.userId === user.id && previous.active)) {
+        const active = tx
+          .select({ value: count() })
+          .from(device)
+          .where(and(eq(device.userId, user.id), eq(device.active, true)))
+          .get();
+        if ((active?.value ?? 0) >= billing.limits.devices) return { limited: true as const };
+      }
       const ownerChanged = Boolean(previous && previous.userId !== user.id);
       const registered = tx
         .insert(device)
@@ -338,6 +348,9 @@ export const devicesRoute = new Hono<AuthedEnv>()
         .get();
       return { row: registered, shouldSendWelcome: Boolean(welcomeClaim) };
     });
+    if ("limited" in registration) {
+      return c.json({ error: "This account has reached its active device limit." }, 402);
+    }
     const { row, shouldSendWelcome } = registration;
     if (!row) {
       return c.json({ error: "Failed to register device" }, 500);

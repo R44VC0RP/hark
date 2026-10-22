@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  type BillingDto,
   LIVE_ACTIVITY_DEFAULT_STALE_AFTER_SECONDS,
   LIVE_ACTIVITY_SCHEMA_VERSION,
   type LiveActivityProps,
@@ -31,6 +32,7 @@ import {
   findBlockingDeliveries,
   liveKeyedActivity,
   replaceBlockingDeliveries,
+  type Tx,
   toLiveActivityDto,
   trackActivityOutcome,
 } from "./activities";
@@ -108,59 +110,67 @@ async function operationReplay(serviceId: string, key: string | undefined, reque
   return row ? ({ conflict: false, operation, row } as const) : undefined;
 }
 
-async function enforceRateLimit(service: ServiceRow, owner: UserRow) {
-  const billing = await getBilling(owner, true);
+type RateLimit = { error: string; retryAfterSeconds: 60 };
+
+/**
+ * Per-minute service and account windows for webhook Live Activities.
+ * Synchronous, so it runs in the same `db.transaction` as the operation
+ * insert it guards and a concurrent burst cannot all pass the count.
+ */
+function rateLimited(tx: Tx, service: ServiceRow, billing: BillingDto): RateLimit | null {
   const since = new Date(Date.now() - 60_000);
-  const [
-    [serviceEvents],
-    [serviceActivities],
-    [accountEvents],
-    [accountInteractions],
-    [accountActivities],
-  ] = await Promise.all([
-    db
-      .select({ value: count() })
-      .from(event)
-      .where(and(eq(event.serviceId, service.id), gte(event.createdAt, since))),
-    db
-      .select({ value: count() })
-      .from(liveActivityOperation)
-      .where(
-        and(
-          eq(liveActivityOperation.requesterServiceId, service.id),
-          gte(liveActivityOperation.createdAt, since),
-        ),
-      ),
-    db
-      .select({ value: count() })
-      .from(event)
-      .innerJoin(serviceTable, eq(event.serviceId, serviceTable.id))
-      .where(and(eq(serviceTable.userId, service.userId), gte(event.createdAt, since))),
-    db
-      .select({ value: count() })
-      .from(interaction)
-      .where(and(eq(interaction.userId, service.userId), gte(interaction.createdAt, since))),
-    db
-      .select({ value: count() })
-      .from(liveActivityOperation)
-      .innerJoin(liveActivity, eq(liveActivity.id, liveActivityOperation.activityId))
-      .where(
-        and(eq(liveActivity.userId, service.userId), gte(liveActivityOperation.createdAt, since)),
-      ),
-  ]);
-  if (
-    (serviceEvents?.value ?? 0) + (serviceActivities?.value ?? 0) >=
-    billing.limits.servicePerMinute
-  ) {
-    return { error: "Service rate limit exceeded", retryAfterSeconds: 60 as const };
+  const value = (row: { value: number } | undefined) => row?.value ?? 0;
+  const serviceUsage =
+    value(
+      tx
+        .select({ value: count() })
+        .from(event)
+        .where(and(eq(event.serviceId, service.id), gte(event.createdAt, since)))
+        .get(),
+    ) +
+    value(
+      tx
+        .select({ value: count() })
+        .from(liveActivityOperation)
+        .where(
+          and(
+            eq(liveActivityOperation.requesterServiceId, service.id),
+            gte(liveActivityOperation.createdAt, since),
+          ),
+        )
+        .get(),
+    );
+  if (serviceUsage >= billing.limits.servicePerMinute) {
+    return { error: "Service rate limit exceeded", retryAfterSeconds: 60 };
   }
-  if (
-    (accountEvents?.value ?? 0) +
-      (accountInteractions?.value ?? 0) +
-      (accountActivities?.value ?? 0) >=
-    billing.limits.accountPerMinute
-  ) {
-    return { error: "Account rate limit exceeded", retryAfterSeconds: 60 as const };
+  const accountUsage =
+    value(
+      tx
+        .select({ value: count() })
+        .from(event)
+        .innerJoin(serviceTable, eq(event.serviceId, serviceTable.id))
+        .where(and(eq(serviceTable.userId, service.userId), gte(event.createdAt, since)))
+        .get(),
+    ) +
+    value(
+      tx
+        .select({ value: count() })
+        .from(interaction)
+        .where(and(eq(interaction.userId, service.userId), gte(interaction.createdAt, since)))
+        .get(),
+    ) +
+    value(
+      tx
+        .select({ value: count() })
+        .from(liveActivityOperation)
+        .innerJoin(liveActivity, eq(liveActivity.id, liveActivityOperation.activityId))
+        .where(
+          and(eq(liveActivity.userId, service.userId), gte(liveActivityOperation.createdAt, since)),
+        )
+        .get(),
+    );
+  if (accountUsage >= billing.limits.accountPerMinute) {
+    return { error: "Account rate limit exceeded", retryAfterSeconds: 60 };
   }
   return null;
 }
@@ -278,13 +288,15 @@ export const activityHooksRoute = new Hono()
     if (billing.plan !== "pro") {
       return c.json({ ok: false, error: "Live Activities require Hark Pro" }, 402);
     }
-    const limited = await enforceRateLimit(service, owner);
+    if (!(await checkNotificationAllowance(service.userId))) {
+      return c.json({ ok: false, error: "Monthly notification limit reached" }, 429);
+    }
+    // Early check so a limited start does not replace anything; the insert
+    // transaction below re-counts and is what actually holds the limit.
+    const limited = db.transaction((tx) => rateLimited(tx, service, billing));
     if (limited) {
       c.header("Retry-After", "60");
       return c.json({ ok: false, ...limited }, 429);
-    }
-    if (!(await checkNotificationAllowance(service.userId))) {
-      return c.json({ ok: false, error: "Monthly notification limit reached" }, 429);
     }
     const targetResult = await eligibleDevices(service, owner, parsed.data.deviceIds);
     if ("error" in targetResult) {
@@ -351,9 +363,11 @@ export const activityHooksRoute = new Hono()
       accentColor: parsed.data.accentColor,
       style: parsed.data.style,
     };
-    let created: { row: ActivityRow; deliveries: DeliveryRow[] };
+    let created: { row: ActivityRow; deliveries: DeliveryRow[] } | RateLimit;
     try {
       created = db.transaction((tx) => {
+        const limitedNow = rateLimited(tx, service, billing);
+        if (limitedNow) return limitedNow;
         const row = tx
           .insert(liveActivity)
           .values({
@@ -452,6 +466,10 @@ export const activityHooksRoute = new Hono()
       }
       throw error;
     }
+    if ("error" in created) {
+      c.header("Retry-After", "60");
+      return c.json({ ok: false, ...created }, 429);
+    }
 
     const result = await dispatchLiveActivity(
       created.row,
@@ -537,11 +555,7 @@ export const activityHooksRoute = new Hono()
     if (parsed.data.ifSequence !== undefined && parsed.data.ifSequence !== current.sequence) {
       return c.json({ ...response(current), ok: false, error: "Sequence conflict" }, 409);
     }
-    const limited = await enforceRateLimit(service, owner);
-    if (limited) {
-      c.header("Retry-After", "60");
-      return c.json({ ok: false, ...limited }, 429);
-    }
+    const billing = await getBilling(owner, true);
     if (!(await checkNotificationAllowance(service.userId))) {
       return c.json({ ok: false, error: "Monthly notification limit reached" }, 429);
     }
@@ -576,8 +590,11 @@ export const activityHooksRoute = new Hono()
     );
     const operationId = newId("lao");
     let row: ActivityRow | undefined;
+    let limited: RateLimit | null;
     try {
-      row = db.transaction((tx) => {
+      ({ row, limited } = db.transaction((tx) => {
+        const limitedNow = rateLimited(tx, service, billing);
+        if (limitedNow) return { row: undefined, limited: limitedNow };
         const updated = tx
           .update(liveActivity)
           .set({
@@ -596,7 +613,7 @@ export const activityHooksRoute = new Hono()
           )
           .returning()
           .get();
-        if (!updated) return undefined;
+        if (!updated) return { row: undefined, limited: null };
         tx.insert(liveActivityOperation)
           .values({
             id: operationId,
@@ -610,8 +627,8 @@ export const activityHooksRoute = new Hono()
             createdAt: now,
           })
           .run();
-        return updated;
-      });
+        return { row: updated, limited: null };
+      }));
     } catch (error) {
       const raced = await operationReplay(service.id, key, requestHash);
       if (raced?.conflict) {
@@ -634,6 +651,10 @@ export const activityHooksRoute = new Hono()
         );
       }
       throw error;
+    }
+    if (limited) {
+      c.header("Retry-After", "60");
+      return c.json({ ok: false, ...limited }, 429);
     }
     if (!row) return c.json({ ok: false, error: "Sequence conflict" }, 409);
     const deliveries = await deliveriesFor(row.id);
@@ -715,11 +736,7 @@ export const activityHooksRoute = new Hono()
     if (parsed.data.ifSequence !== undefined && parsed.data.ifSequence !== current.sequence) {
       return c.json({ ...response(current), ok: false, error: "Sequence conflict" }, 409);
     }
-    const limited = await enforceRateLimit(service, owner);
-    if (limited) {
-      c.header("Retry-After", "60");
-      return c.json({ ok: false, ...limited }, 429);
-    }
+    const billing = await getBilling(owner, true);
     const now = new Date();
     const previous = liveActivityPropsSchema.parse(current.props);
     const nextProps: Record<string, unknown> = {
@@ -741,8 +758,11 @@ export const activityHooksRoute = new Hono()
     const operationId = newId("lao");
     const dismissalAt = new Date(now.getTime() + parsed.data.dismissAfterSeconds * 1000);
     let row: ActivityRow | undefined;
+    let limited: RateLimit | null;
     try {
-      row = db.transaction((tx) => {
+      ({ row, limited } = db.transaction((tx) => {
+        const limitedNow = rateLimited(tx, service, billing);
+        if (limitedNow) return { row: undefined, limited: limitedNow };
         const updated = tx
           .update(liveActivity)
           .set({
@@ -763,7 +783,7 @@ export const activityHooksRoute = new Hono()
           )
           .returning()
           .get();
-        if (!updated) return undefined;
+        if (!updated) return { row: undefined, limited: null };
         tx.insert(liveActivityOperation)
           .values({
             id: operationId,
@@ -777,8 +797,8 @@ export const activityHooksRoute = new Hono()
             createdAt: now,
           })
           .run();
-        return updated;
-      });
+        return { row: updated, limited: null };
+      }));
     } catch (error) {
       const raced = await operationReplay(service.id, key, requestHash);
       if (raced?.conflict) {
@@ -801,6 +821,10 @@ export const activityHooksRoute = new Hono()
         );
       }
       throw error;
+    }
+    if (limited) {
+      c.header("Retry-After", "60");
+      return c.json({ ok: false, ...limited }, 429);
     }
     if (!row) return c.json({ ok: false, error: "Sequence conflict" }, 409);
     const deliveries = await deliveriesFor(row.id);

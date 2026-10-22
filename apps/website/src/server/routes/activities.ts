@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  type BillingDto,
   type InteractiveLiveActivityStyle,
   LIVE_ACTIVITY_DEFAULT_STALE_AFTER_SECONDS,
   LIVE_ACTIVITY_SCHEMA_VERSION,
@@ -124,93 +125,102 @@ async function ownedActivity(
   return row ? expireLiveActivity(row) : undefined;
 }
 
+export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+export type AgentRateLimit = { error: string; retryAfterSeconds: 60 };
+
 /**
  * Shared per-minute budget for the whole agent surface: Live Activity
  * operations, interactions, and one-shot agent notifications count against
  * the same per-token and per-account windows, mirroring how webhook events
- * share the service and account counters.
+ * share the service and account counters. Synchronous, so callers run it in
+ * the same `db.transaction` as the insert it guards: no other request can
+ * insert between the count and that insert.
  */
-export async function enforceAgentRateLimit(
+export function agentRateLimited(
+  tx: Tx,
   token: AgentEnv["Variables"]["apiToken"],
-  owner: AuthedEnv["Variables"]["user"],
-): Promise<{ error: string; retryAfterSeconds: 60 } | null> {
-  const billing = await getBilling(owner, true);
+  billing: BillingDto,
+): AgentRateLimit | null {
   const since = new Date(Date.now() - 60_000);
-  const [
-    [tokenActivity],
-    [tokenInteractions],
-    [tokenNotifications],
-    [accountActivity],
-    [accountInteractions],
-    [accountNotifications],
-    [webhooks],
-  ] = await Promise.all([
-    db
-      .select({ value: count() })
-      .from(liveActivityOperation)
-      .innerJoin(liveActivity, eq(liveActivity.id, liveActivityOperation.activityId))
-      .where(
-        and(
-          eq(liveActivityOperation.requesterTokenId, token.id),
-          gte(liveActivityOperation.createdAt, since),
-          isNull(liveActivity.interactionId),
-        ),
-      ),
-    db
-      .select({ value: count() })
-      .from(interaction)
-      .where(and(eq(interaction.requesterTokenId, token.id), gte(interaction.createdAt, since))),
-    db
-      .select({ value: count() })
-      .from(agentNotification)
-      .where(
-        and(
-          eq(agentNotification.requesterTokenId, token.id),
-          gte(agentNotification.createdAt, since),
-        ),
-      ),
-    db
-      .select({ value: count() })
-      .from(liveActivityOperation)
-      .innerJoin(liveActivity, eq(liveActivity.id, liveActivityOperation.activityId))
-      .where(
-        and(
-          eq(liveActivity.userId, token.userId),
-          gte(liveActivityOperation.createdAt, since),
-          isNull(liveActivity.interactionId),
-        ),
-      ),
-    db
-      .select({ value: count() })
-      .from(interaction)
-      .where(and(eq(interaction.userId, token.userId), gte(interaction.createdAt, since))),
-    db
-      .select({ value: count() })
-      .from(agentNotification)
-      .where(
-        and(eq(agentNotification.userId, token.userId), gte(agentNotification.createdAt, since)),
-      ),
-    db
-      .select({ value: count() })
-      .from(event)
-      .innerJoin(service, eq(event.serviceId, service.id))
-      .where(and(eq(service.userId, token.userId), gte(event.createdAt, since))),
-  ]);
-  if (
-    (tokenActivity?.value ?? 0) +
-      (tokenInteractions?.value ?? 0) +
-      (tokenNotifications?.value ?? 0) >=
-    billing.limits.servicePerMinute
-  ) {
+  const value = (row: { value: number } | undefined) => row?.value ?? 0;
+  const tokenUsage =
+    value(
+      tx
+        .select({ value: count() })
+        .from(liveActivityOperation)
+        .innerJoin(liveActivity, eq(liveActivity.id, liveActivityOperation.activityId))
+        .where(
+          and(
+            eq(liveActivityOperation.requesterTokenId, token.id),
+            gte(liveActivityOperation.createdAt, since),
+            isNull(liveActivity.interactionId),
+          ),
+        )
+        .get(),
+    ) +
+    value(
+      tx
+        .select({ value: count() })
+        .from(interaction)
+        .where(and(eq(interaction.requesterTokenId, token.id), gte(interaction.createdAt, since)))
+        .get(),
+    ) +
+    value(
+      tx
+        .select({ value: count() })
+        .from(agentNotification)
+        .where(
+          and(
+            eq(agentNotification.requesterTokenId, token.id),
+            gte(agentNotification.createdAt, since),
+          ),
+        )
+        .get(),
+    );
+  if (tokenUsage >= billing.limits.servicePerMinute) {
     return { error: "Requester rate limit exceeded", retryAfterSeconds: 60 };
   }
-  if (
-    (accountActivity?.value ?? 0) +
-      (accountInteractions?.value ?? 0) +
-      (accountNotifications?.value ?? 0) +
-      (webhooks?.value ?? 0) >=
-    billing.limits.accountPerMinute
-  ) {
+  const accountUsage =
+    value(
+      tx
+        .select({ value: count() })
+        .from(liveActivityOperation)
+        .innerJoin(liveActivity, eq(liveActivity.id, liveActivityOperation.activityId))
+        .where(
+          and(
+            eq(liveActivity.userId, token.userId),
+            gte(liveActivityOperation.createdAt, since),
+            isNull(liveActivity.interactionId),
+          ),
+        )
+        .get(),
+    ) +
+    value(
+      tx
+        .select({ value: count() })
+        .from(interaction)
+        .where(and(eq(interaction.userId, token.userId), gte(interaction.createdAt, since)))
+        .get(),
+    ) +
+    value(
+      tx
+        .select({ value: count() })
+        .from(agentNotification)
+        .where(
+          and(eq(agentNotification.userId, token.userId), gte(agentNotification.createdAt, since)),
+        )
+        .get(),
+    ) +
+    value(
+      tx
+        .select({ value: count() })
+        .from(event)
+        .innerJoin(service, eq(event.serviceId, service.id))
+        .where(and(eq(service.userId, token.userId), gte(event.createdAt, since)))
+        .get(),
+    );
+  if (accountUsage >= billing.limits.accountPerMinute) {
     return { error: "Account rate limit exceeded", retryAfterSeconds: 60 };
   }
   return null;
@@ -932,13 +942,15 @@ export const activitiesAgentRoute = new Hono<AgentEnv>()
     if (parsed.data.deviceIds && !billing.features.deviceRouting) {
       return c.json({ error: "Device routing requires Hark Pro" }, 402);
     }
-    const limited = await enforceAgentRateLimit(token, owner);
+    if (!(await checkNotificationAllowance(token.userId))) {
+      return c.json({ error: "Monthly notification limit reached" }, 429);
+    }
+    // Early check so a limited start does not replace anything; the insert
+    // transaction below re-counts and is what actually holds the limit.
+    const limited = db.transaction((tx) => agentRateLimited(tx, token, billing));
     if (limited) {
       c.header("Retry-After", "60");
       return c.json(limited, 429);
-    }
-    if (!(await checkNotificationAllowance(token.userId))) {
-      return c.json({ error: "Monthly notification limit reached" }, 429);
     }
 
     let targets = await db
@@ -1038,9 +1050,29 @@ export const activitiesAgentRoute = new Hono<AgentEnv>()
       createdAt: now,
       updatedAt: now,
     };
+    const operationId = newId("lao");
     let row: ActivityRow | undefined;
+    let insertLimited: AgentRateLimit | null;
     try {
-      [row] = await db.insert(liveActivity).values(values).returning();
+      ({ row, limited: insertLimited } = db.transaction((tx) => {
+        const limitedNow = agentRateLimited(tx, token, billing);
+        if (limitedNow) return { row: undefined, limited: limitedNow };
+        const inserted = tx.insert(liveActivity).values(values).returning().get();
+        tx.insert(liveActivityOperation)
+          .values({
+            id: operationId,
+            activityId: inserted.id,
+            requesterTokenId: token.id,
+            event: "start",
+            sequence: inserted.sequence,
+            props: inserted.props,
+            idempotencyKey: key ?? null,
+            requestHash: key ? requestHash : null,
+            createdAt: now,
+          })
+          .run();
+        return { row: inserted, limited: null };
+      }));
     } catch (error) {
       if (key) {
         const [existing] = await db
@@ -1095,20 +1127,12 @@ export const activitiesAgentRoute = new Hono<AgentEnv>()
       }
       throw error;
     }
+    if (insertLimited) {
+      c.header("Retry-After", "60");
+      return c.json(insertLimited, 429);
+    }
     if (!row) return c.json({ error: "Failed to create Live Activity" }, 500);
     const createdActivityId = row.id;
-    const operationId = newId("lao");
-    await db.insert(liveActivityOperation).values({
-      id: operationId,
-      activityId: row.id,
-      requesterTokenId: token.id,
-      event: "start",
-      sequence: row.sequence,
-      props: row.props,
-      idempotencyKey: key ?? null,
-      requestHash: key ? requestHash : null,
-      createdAt: now,
-    });
     const deliveries =
       targets.length === 0
         ? []
@@ -1203,11 +1227,7 @@ export const activitiesAgentRoute = new Hono<AgentEnv>()
       .where(eq(userTable.id, token.userId))
       .limit(1);
     if (!owner) return c.json({ error: "Account not found" }, 404);
-    const limited = await enforceAgentRateLimit(token, owner);
-    if (limited) {
-      c.header("Retry-After", "60");
-      return c.json(limited, 429);
-    }
+    const billing = await getBilling(owner, true);
     if (!(await checkNotificationAllowance(token.userId))) {
       return c.json({ error: "Monthly notification limit reached" }, 429);
     }
@@ -1243,8 +1263,11 @@ export const activitiesAgentRoute = new Hono<AgentEnv>()
     );
     const operationId = newId("lao");
     let row: ActivityRow | undefined;
+    let limited: AgentRateLimit | null;
     try {
-      row = db.transaction((tx) => {
+      ({ row, limited } = db.transaction((tx) => {
+        const limitedNow = agentRateLimited(tx, token, billing);
+        if (limitedNow) return { row: undefined, limited: limitedNow };
         const updated = tx
           .update(liveActivity)
           .set({
@@ -1263,7 +1286,7 @@ export const activitiesAgentRoute = new Hono<AgentEnv>()
           )
           .returning()
           .get();
-        if (!updated) return undefined;
+        if (!updated) return { row: undefined, limited: null };
         tx.insert(liveActivityOperation)
           .values({
             id: operationId,
@@ -1277,8 +1300,8 @@ export const activitiesAgentRoute = new Hono<AgentEnv>()
             createdAt: now,
           })
           .run();
-        return updated;
-      });
+        return { row: updated, limited: null };
+      }));
     } catch (error) {
       const raced = await operationReplay(token.id, key, requestHash);
       if (raced?.conflict) {
@@ -1293,6 +1316,10 @@ export const activitiesAgentRoute = new Hono<AgentEnv>()
         });
       }
       throw error;
+    }
+    if (limited) {
+      c.header("Retry-After", "60");
+      return c.json(limited, 429);
     }
     if (!row) return c.json({ error: "Sequence conflict" }, 409);
     const deliveries = await db
@@ -1372,11 +1399,7 @@ export const activitiesAgentRoute = new Hono<AgentEnv>()
       .where(eq(userTable.id, token.userId))
       .limit(1);
     if (!owner) return c.json({ error: "Account not found" }, 404);
-    const limited = await enforceAgentRateLimit(token, owner);
-    if (limited) {
-      c.header("Retry-After", "60");
-      return c.json(limited, 429);
-    }
+    const billing = await getBilling(owner, true);
     // Ending intentionally bypasses the monthly allowance so an agent can always clear Lock Screen UI.
     const now = new Date();
     const apnsTimestamp = Math.max(Math.floor(now.getTime() / 1000), current.apnsTimestamp + 1);
@@ -1399,8 +1422,11 @@ export const activitiesAgentRoute = new Hono<AgentEnv>()
     const props = liveActivityPropsSchema.parse(nextProps);
     const operationId = newId("lao");
     let row: ActivityRow | undefined;
+    let limited: AgentRateLimit | null;
     try {
-      row = db.transaction((tx) => {
+      ({ row, limited } = db.transaction((tx) => {
+        const limitedNow = agentRateLimited(tx, token, billing);
+        if (limitedNow) return { row: undefined, limited: limitedNow };
         const updated = tx
           .update(liveActivity)
           .set({
@@ -1421,7 +1447,7 @@ export const activitiesAgentRoute = new Hono<AgentEnv>()
           )
           .returning()
           .get();
-        if (!updated) return undefined;
+        if (!updated) return { row: undefined, limited: null };
         tx.insert(liveActivityOperation)
           .values({
             id: operationId,
@@ -1435,8 +1461,8 @@ export const activitiesAgentRoute = new Hono<AgentEnv>()
             createdAt: now,
           })
           .run();
-        return updated;
-      });
+        return { row: updated, limited: null };
+      }));
     } catch (error) {
       const raced = await operationReplay(token.id, key, requestHash);
       if (raced?.conflict) {
@@ -1451,6 +1477,10 @@ export const activitiesAgentRoute = new Hono<AgentEnv>()
         });
       }
       throw error;
+    }
+    if (limited) {
+      c.header("Retry-After", "60");
+      return c.json(limited, 429);
     }
     if (!row) return c.json({ error: "Sequence conflict" }, 409);
     const deliveries = await db

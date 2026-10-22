@@ -12,8 +12,11 @@ import { track } from "./analytics";
 
 const CACHE_TTL_MS = 60_000;
 
+// `failOpen: false`: the SDK otherwise answers a 5xx or network failure
+// with a synthetic free customer (and `allowed: true`). Errors reach the
+// catch blocks below instead, which keep the last known plan.
 const autumn = env.AUTUMN_API_KEY
-  ? new Autumn({ secretKey: env.AUTUMN_API_KEY, timeoutMs: 5_000 })
+  ? new Autumn({ secretKey: env.AUTUMN_API_KEY, timeoutMs: 5_000, failOpen: false })
   : null;
 
 const cache = new Map<string, { value: BillingDto; expiresAt: number }>();

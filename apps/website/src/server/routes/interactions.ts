@@ -3,6 +3,7 @@ import {
   type AgentNotificationDto,
   type AgentNotificationWithdrawResponse,
   agentNotificationCreateSchema,
+  type BillingDto,
   type InboxInteractionDto,
   type InteractionDto,
   type InteractionKind,
@@ -12,7 +13,7 @@ import {
   interactionResponseSchema,
   liveActivityInteractionResponseSchema,
 } from "@hark/contracts";
-import { and, count, desc, eq, gt, gte, inArray, isNull, lte } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, lte } from "drizzle-orm";
 import { Hono } from "hono";
 import { db } from "../db";
 import {
@@ -23,7 +24,6 @@ import {
   interaction,
   liveActivity,
   liveActivityDelivery,
-  liveActivityOperation,
   service,
   user as userTable,
 } from "../db/schema";
@@ -34,6 +34,7 @@ import { newId } from "../lib/id";
 import { deliverInteractionCallbacks } from "../lib/interaction-callbacks";
 import { verifyLiveActivityInteractionCredential } from "../lib/live-activity-interaction";
 import { revokeOAuthGrant } from "../lib/oauth";
+import { idempotentPageConflict } from "../lib/oncall";
 import { resolveProjectForDelivery } from "../lib/projects";
 import { buildInteractionPushMessages, buildPushMessages, sendPushMessages } from "../lib/push";
 import { hashInteractionResponseToken } from "../lib/token";
@@ -45,7 +46,8 @@ import {
   requireScopes,
 } from "../middleware";
 import {
-  enforceAgentRateLimit,
+  type AgentRateLimit,
+  agentRateLimited,
   resolveInteractionLiveActivity,
   startInteractionLiveActivity,
 } from "./activities";
@@ -53,6 +55,10 @@ import { pushWithdrawalCommand, verifyInteractionDeviceResponseToken } from "./h
 import { raisePageFor } from "./oncall";
 
 type InteractionRow = typeof interaction.$inferSelect;
+
+const MAX_OPEN_WAITS_PER_TOKEN = 20;
+/** Open `/interactions/:id/wait` long-polls per API token. */
+const openWaits = new Map<string, number>();
 
 function digest(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -148,18 +154,27 @@ function toNotificationDto(row: NotificationRow): AgentNotificationDto {
 type NotificationInsertOutcome =
   | { kind: "inserted"; row: NotificationRow }
   | { kind: "replayed"; row: NotificationRow }
-  | { kind: "conflict" };
+  | { kind: "conflict" }
+  | { kind: "limited"; limited: AgentRateLimit };
 
-/** Inserts and absorbs idempotency-key races the same way the interaction insert does. */
+/**
+ * Counts the agent rate windows and inserts in one synchronous transaction,
+ * and absorbs idempotency-key races the same way the interaction insert does.
+ */
 async function insertAgentNotification(
-  tokenId: string,
+  token: AgentEnv["Variables"]["apiToken"],
+  billing: BillingDto,
   requestHash: string,
   values: typeof agentNotification.$inferInsert,
 ): Promise<NotificationInsertOutcome> {
   try {
-    const [inserted] = await db.insert(agentNotification).values(values).returning();
-    if (!inserted) throw new Error("Failed to create agent notification");
-    return { kind: "inserted", row: inserted };
+    return db.transaction((tx): NotificationInsertOutcome => {
+      const limited = agentRateLimited(tx, token, billing);
+      if (limited) return { kind: "limited", limited };
+      const inserted = tx.insert(agentNotification).values(values).returning().get();
+      if (!inserted) throw new Error("Failed to create agent notification");
+      return { kind: "inserted", row: inserted };
+    });
   } catch (error) {
     if (values.idempotencyKey) {
       const [existing] = await db
@@ -167,7 +182,7 @@ async function insertAgentNotification(
         .from(agentNotification)
         .where(
           and(
-            eq(agentNotification.requesterTokenId, tokenId),
+            eq(agentNotification.requesterTokenId, token.id),
             eq(agentNotification.idempotencyKey, values.idempotencyKey),
           ),
         )
@@ -293,18 +308,20 @@ export const agentRoute = new Hono<AgentEnv>()
       }
       // Pages merge on their dedup key, so an Idempotency-Key retry folds
       // into the open page instead of paging again.
-      const paged = await raisePageFor(
-        token.userId,
-        parsed.data.oncall,
-        {
-          title: parsed.data.title,
-          body: parsed.data.body,
-          ...(parsed.data.url ? { url: parsed.data.url } : {}),
-          ...(parsed.data.appId ? { appId: parsed.data.appId } : {}),
-          ...(idempotencyKey ? { dedupKey: idempotencyKey } : {}),
-        },
-        token.name,
-      );
+      const pageInput = {
+        title: parsed.data.title,
+        body: parsed.data.body,
+        ...(parsed.data.url ? { url: parsed.data.url } : {}),
+        ...(parsed.data.appId ? { appId: parsed.data.appId } : {}),
+        ...(idempotencyKey ? { dedupKey: idempotencyKey } : {}),
+      };
+      if (
+        idempotencyKey &&
+        (await idempotentPageConflict(token.userId, parsed.data.oncall, pageInput))
+      ) {
+        return c.json({ error: "Idempotency-Key was already used with a different payload" }, 409);
+      }
+      const paged = await raisePageFor(token.userId, parsed.data.oncall, pageInput, token.name);
       if (!paged.ok) {
         const retryAfterSeconds =
           "retryAfterSeconds" in paged ? paged.retryAfterSeconds : undefined;
@@ -390,11 +407,6 @@ export const agentRoute = new Hono<AgentEnv>()
       }
     }
 
-    const limited = await enforceAgentRateLimit(token, owner);
-    if (limited) {
-      c.header("Retry-After", "60");
-      return c.json(limited, 429);
-    }
     if (!(await checkNotificationAllowance(token.userId))) {
       return c.json({ error: "Monthly notification limit reached" }, 429);
     }
@@ -427,7 +439,11 @@ export const agentRoute = new Hono<AgentEnv>()
 
     // Insert before sending so a raced duplicate replays the stored row
     // instead of double-pushing; accepted_count is settled after the send.
-    const outcome = await insertAgentNotification(token.id, requestHash, values);
+    const outcome = await insertAgentNotification(token, billing, requestHash, values);
+    if (outcome.kind === "limited") {
+      c.header("Retry-After", "60");
+      return c.json(outcome.limited, 429);
+    }
     if (outcome.kind === "replayed") {
       return c.json({
         notification: toNotificationDto(outcome.row),
@@ -641,69 +657,6 @@ export const agentRoute = new Hono<AgentEnv>()
       }
     }
 
-    const since = new Date(Date.now() - 60_000);
-    const [
-      [requesterUsage],
-      [requesterActivityUsage],
-      [webhookUsage],
-      [interactionUsage],
-      [activityUsage],
-    ] = await Promise.all([
-      db
-        .select({ value: count() })
-        .from(liveActivityOperation)
-        .innerJoin(liveActivity, eq(liveActivity.id, liveActivityOperation.activityId))
-        .where(
-          and(
-            eq(liveActivityOperation.requesterTokenId, token.id),
-            gte(liveActivityOperation.createdAt, since),
-            isNull(liveActivity.interactionId),
-          ),
-        ),
-      db
-        .select({ value: count() })
-        .from(interaction)
-        .where(and(eq(interaction.requesterTokenId, token.id), gte(interaction.createdAt, since))),
-      db
-        .select({ value: count() })
-        .from(event)
-        .innerJoin(service, eq(event.serviceId, service.id))
-        .where(and(eq(service.userId, token.userId), gte(event.createdAt, since))),
-      db
-        .select({ value: count() })
-        .from(interaction)
-        .where(and(eq(interaction.userId, token.userId), gte(interaction.createdAt, since))),
-      db
-        .select({ value: count() })
-        .from(liveActivityOperation)
-        .innerJoin(liveActivity, eq(liveActivity.id, liveActivityOperation.activityId))
-        .where(
-          and(
-            eq(liveActivity.userId, token.userId),
-            gte(liveActivityOperation.createdAt, since),
-            isNull(liveActivity.interactionId),
-          ),
-        ),
-    ]);
-    if (
-      (requesterUsage?.value ?? 0) + (requesterActivityUsage?.value ?? 0) >=
-      billing.limits.servicePerMinute
-    ) {
-      c.header("Retry-After", "60");
-      return c.json({ error: "Requester rate limit exceeded", retryAfterSeconds: 60 }, 429);
-    }
-    if (
-      (webhookUsage?.value ?? 0) + (interactionUsage?.value ?? 0) + (activityUsage?.value ?? 0) >=
-      billing.limits.accountPerMinute
-    ) {
-      c.header("Retry-After", "60");
-      return c.json({ error: "Account rate limit exceeded", retryAfterSeconds: 60 }, 429);
-    }
-    const limited = await enforceAgentRateLimit(token, owner);
-    if (limited) {
-      c.header("Retry-After", "60");
-      return c.json(limited, 429);
-    }
     if (!(await checkNotificationAllowance(token.userId))) {
       return c.json({ error: "Monthly notification limit reached" }, 429);
     }
@@ -761,11 +714,15 @@ export const agentRoute = new Hono<AgentEnv>()
       expiresAt: new Date(now.getTime() + parsed.data.expiresInSeconds * 1000),
       createdAt: now,
     };
-    let row: InteractionRow;
+    let created: { row?: InteractionRow; limited: AgentRateLimit | null };
     try {
-      const [inserted] = await db.insert(interaction).values(values).returning();
-      if (!inserted) return c.json({ error: "Failed to create interaction" }, 500);
-      row = inserted;
+      // Count and insert in one synchronous transaction, so a concurrent
+      // burst cannot all pass the count before any of them has inserted.
+      created = db.transaction((tx) => {
+        const limited = agentRateLimited(tx, token, billing);
+        if (limited) return { limited };
+        return { row: tx.insert(interaction).values(values).returning().get(), limited: null };
+      });
     } catch (error) {
       if (idempotencyKey) {
         const [existing] = await db
@@ -796,6 +753,12 @@ export const agentRoute = new Hono<AgentEnv>()
       }
       throw error;
     }
+    if (created.limited) {
+      c.header("Retry-After", "60");
+      return c.json(created.limited, 429);
+    }
+    if (!created.row) return c.json({ error: "Failed to create interaction" }, 500);
+    let row = created.row;
     if (selectedDevices.length === 0) {
       track({
         name: "interaction_created",
@@ -923,25 +886,40 @@ export const agentRoute = new Hono<AgentEnv>()
     const timeoutMs = Math.min(Math.max(Number.isFinite(requested) ? requested : 20, 0), 25) * 1000;
     const deadline = Date.now() + timeoutMs;
     const signal = c.req.raw.signal;
-    while (true) {
-      if (signal.aborted) return new Response(null, { status: 499 });
-      const row = await ownedInteraction(c.get("apiToken").id, c.req.param("id"));
-      if (!row) return c.json({ error: "Interaction not found" }, 404);
-      if (row.status !== "pending" || Date.now() >= deadline) {
-        return c.json({ interaction: toDto(row), timedOut: row.status === "pending" });
+    // Each wait polls the database until it returns, so one token may hold
+    // only a bounded number open at a time.
+    const tokenId = c.get("apiToken").id;
+    const open = openWaits.get(tokenId) ?? 0;
+    if (open >= MAX_OPEN_WAITS_PER_TOKEN) {
+      c.header("Retry-After", "1");
+      return c.json({ error: "Too many concurrent waits for this token" }, 429);
+    }
+    openWaits.set(tokenId, open + 1);
+    try {
+      while (true) {
+        if (signal.aborted) return new Response(null, { status: 499 });
+        const row = await ownedInteraction(tokenId, c.req.param("id"));
+        if (!row) return c.json({ error: "Interaction not found" }, 404);
+        if (row.status !== "pending" || Date.now() >= deadline) {
+          return c.json({ interaction: toDto(row), timedOut: row.status === "pending" });
+        }
+        const delay = Math.min(250, deadline - Date.now());
+        await new Promise<void>((resolve) => {
+          const onAbort = () => {
+            clearTimeout(timeout);
+            resolve();
+          };
+          const timeout = setTimeout(() => {
+            signal.removeEventListener("abort", onAbort);
+            resolve();
+          }, delay);
+          signal.addEventListener("abort", onAbort, { once: true });
+        });
       }
-      const delay = Math.min(250, deadline - Date.now());
-      await new Promise<void>((resolve) => {
-        const onAbort = () => {
-          clearTimeout(timeout);
-          resolve();
-        };
-        const timeout = setTimeout(() => {
-          signal.removeEventListener("abort", onAbort);
-          resolve();
-        }, delay);
-        signal.addEventListener("abort", onAbort, { once: true });
-      });
+    } finally {
+      const remaining = (openWaits.get(tokenId) ?? 1) - 1;
+      if (remaining > 0) openWaits.set(tokenId, remaining);
+      else openWaits.delete(tokenId);
     }
   })
   .post("/interactions/:id/cancel", requireScopes("interactions:create"), async (c) => {

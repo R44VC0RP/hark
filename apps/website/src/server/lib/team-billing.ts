@@ -14,8 +14,11 @@ const TEAM_PLAN_ID = "team_monthly";
 const SEATS_FEATURE_ID = "seats";
 const CACHE_TTL_MS = 60_000;
 
+// `failOpen: false`: the SDK otherwise answers a 5xx or network failure
+// with a synthetic free customer (and `allowed: true`). Errors reach the
+// catch blocks below instead, which keep the last known plan.
 const autumn = env.AUTUMN_API_KEY
-  ? new Autumn({ secretKey: env.AUTUMN_API_KEY, timeoutMs: 5_000 })
+  ? new Autumn({ secretKey: env.AUTUMN_API_KEY, timeoutMs: 5_000, failOpen: false })
   : null;
 
 const planCache = new Map<string, { paid: boolean; expiresAt: number }>();
@@ -65,7 +68,12 @@ export async function teamHasPaidPlan(team: TeamCustomer, useCache = true): Prom
         subscription.status === "active" &&
         !subscription.pastDue,
     );
-    if (planCache.size > 10_000) planCache.clear();
+    if (planCache.size > 10_000) {
+      // Evict expired entries only; clearing would drop every team's
+      // last-known plan, which the catch below falls back to.
+      const now = Date.now();
+      for (const [id, entry] of planCache) if (entry.expiresAt <= now) planCache.delete(id);
+    }
     planCache.set(team.id, { paid, expiresAt: Date.now() + CACHE_TTL_MS });
     return paid;
   } catch (error) {
