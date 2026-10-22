@@ -1,4 +1,8 @@
-import type { DeviceAuthorizationRequestDto } from "@hark/contracts";
+import {
+  API_TOKEN_SCOPE_DESCRIPTIONS,
+  type ApiTokenScope,
+  type DeviceAuthorizationRequestDto,
+} from "@hark/contracts";
 import { useEffect, useState } from "react";
 import { AppleButton } from "../components/AppleButton";
 import { GoogleButton } from "../components/GoogleButton";
@@ -7,10 +11,16 @@ import { primaryButton, secondaryButton } from "../components/ui";
 import { api } from "../lib/api";
 import { signInWithApple, signInWithGoogle, useSession } from "../lib/auth";
 
+/** Scopes that let a program take over the account or other people's access. */
+const SENSITIVE_SCOPES = new Set<string>(["tokens:manage", "teams:write"]);
+const LONG_LIVED_MS = 90 * 24 * 60 * 60 * 1000;
+
 export function CliAuthorize() {
   const initialCode = new URLSearchParams(window.location.search).get("code") ?? "";
   const [code, setCode] = useState(initialCode);
   const [submittedCode, setSubmittedCode] = useState(initialCode);
+  // A link can carry someone else's code; typing it in proves it is on your screen.
+  const [codeFromLink, setCodeFromLink] = useState(initialCode !== "");
   const [request, setRequest] = useState<DeviceAuthorizationRequestDto | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -44,6 +54,7 @@ export function CliAuthorize() {
     if (!normalized) return;
     window.history.replaceState(null, "", `/cli/authorize?code=${encodeURIComponent(normalized)}`);
     setRequest(null);
+    setCodeFromLink(false);
     setSubmittedCode(normalized);
   };
 
@@ -115,7 +126,12 @@ export function CliAuthorize() {
           ) : loading ? (
             <p className="mt-6 text-[15px] text-ink-faint">Loading authorization request…</p>
           ) : request ? (
-            <AuthorizationDetails request={request} busy={busy} onResolve={resolve} />
+            <AuthorizationDetails
+              busy={busy}
+              codeFromLink={codeFromLink}
+              onResolve={resolve}
+              request={request}
+            />
           ) : null}
 
           {error ? (
@@ -132,21 +148,57 @@ export function CliAuthorize() {
   );
 }
 
+function useNow(intervalMs: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), intervalMs);
+    return () => window.clearInterval(timer);
+  }, [intervalMs]);
+  return now;
+}
+
+function ago(iso: string, now: number): string {
+  const seconds = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
+  if (seconds < 60) return `${seconds} s ago`;
+  return `${Math.round(seconds / 60)} min ago`;
+}
+
 function AuthorizationDetails({
   request,
   busy,
+  codeFromLink,
   onResolve,
 }: {
   request: DeviceAuthorizationRequestDto;
   busy: boolean;
+  codeFromLink: boolean;
   onResolve: (action: "approve" | "deny") => Promise<void>;
 }) {
   const pending = request.status === "pending";
+  const now = useNow(1000);
+  const [confirmed, setConfirmed] = useState(false);
+  const longLived = new Date(request.tokenExpiresAt).getTime() - now > LONG_LIVED_MS;
+  const origin = [request.requesterUserAgent, request.requesterIp].filter(Boolean).join(", ");
   return (
     <div className="mt-6">
+      <p className="mb-4 text-[15px] leading-relaxed text-ink-muted">
+        This gives a program on another computer access to your Hark account. Only continue if you
+        started it yourself, just now, with <span className="font-mono">harkctl auth login</span>.
+      </p>
       <div className="rounded-2xl bg-panel p-4">
-        <p className="text-[13px] text-ink-faint">Requesting client</p>
+        <p className="text-[13px] text-ink-faint">Program asking for access</p>
         <p className="mt-1 font-medium text-white">{request.clientName}</p>
+        {request.startedAt ? (
+          <p className="mt-1 text-[13px] break-words text-ink-faint">
+            Started {ago(request.startedAt, now)}
+            {origin ? (
+              <>
+                {" "}
+                from <span className="font-mono text-ink-muted">{origin}</span>
+              </>
+            ) : null}
+          </p>
+        ) : null}
         <div className="mt-4 flex items-end justify-between gap-4 border-t border-line pt-4">
           <div>
             <p className="text-[13px] text-ink-faint">Code</p>
@@ -163,21 +215,56 @@ function AuthorizationDetails({
       </div>
 
       <div className="mt-5">
-        <h2 className="text-[15px] font-medium text-white">Requested permissions</h2>
+        <h2 className="text-[15px] font-medium text-white">It will be able to</h2>
         <ul className="mt-2 space-y-2">
-          {request.scopes.map((scope) => (
-            <li
-              className="rounded-xl border border-line px-3 py-2 font-mono text-[13px] text-ink"
-              key={scope}
-            >
-              {scope}
-            </li>
-          ))}
+          {request.scopes.map((scope) => {
+            const info = API_TOKEN_SCOPE_DESCRIPTIONS[scope as ApiTokenScope];
+            const sensitive = SENSITIVE_SCOPES.has(scope);
+            return (
+              <li
+                className={`rounded-xl border px-3 py-2 ${sensitive ? "border-danger-line bg-danger-soft" : "border-line"}`}
+                key={scope}
+              >
+                <span className="block text-[15px] font-medium text-white">
+                  {info?.label ?? scope}
+                  {sensitive ? (
+                    <span className="ml-2 text-[13px] text-danger">Sensitive</span>
+                  ) : null}
+                </span>
+                {info ? (
+                  <span className="mt-0.5 block text-[13px] leading-5 text-ink-faint">
+                    {info.description}
+                  </span>
+                ) : null}
+                <span className="mt-1 block font-mono text-[12px] text-ink-disabled">{scope}</span>
+              </li>
+            );
+          })}
         </ul>
-        <p className="mt-3 text-[13px] text-ink-faint">
-          Access token expires {new Date(request.tokenExpiresAt).toLocaleString()}.
+        <p className={`mt-3 text-[13px] ${longLived ? "text-danger" : "text-ink-faint"}`}>
+          {longLived ? "Long-lived: access lasts until " : "Access lasts until "}
+          {new Date(request.tokenExpiresAt).toLocaleString()}.
         </p>
       </div>
+
+      {pending && codeFromLink ? (
+        <label
+          className="mt-5 flex cursor-pointer items-start gap-3 rounded-2xl border border-line px-3.5 py-3 text-[15px] text-ink-muted"
+          htmlFor="cli-authorize-confirm"
+        >
+          <input
+            checked={confirmed}
+            className="mt-0.5 size-[18px] shrink-0 cursor-pointer rounded accent-white"
+            id="cli-authorize-confirm"
+            onChange={(event) => setConfirmed(event.target.checked)}
+            type="checkbox"
+          />
+          <span>
+            I ran <span className="font-mono">harkctl auth login</span> myself and the code{" "}
+            <span className="font-mono text-white">{request.userCode}</span> is on my screen.
+          </span>
+        </label>
+      ) : null}
 
       {pending ? (
         <div className="mt-6 grid grid-cols-2 gap-3">
@@ -191,7 +278,7 @@ function AuthorizationDetails({
           </button>
           <button
             className={primaryButton}
-            disabled={busy}
+            disabled={busy || (codeFromLink && !confirmed)}
             onClick={() => void onResolve("approve")}
             type="button"
           >

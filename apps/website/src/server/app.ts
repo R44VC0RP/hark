@@ -86,12 +86,13 @@ app.use(
     contentSecurityPolicy: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-      fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      fontSrc: ["'self'", "data:"],
       imgSrc: ["'self'", "https:", "data:", "blob:"],
       connectSrc: ["'self'"],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
+      formAction: ["'self'"],
       frameAncestors: ["'none'"],
     },
     permissionsPolicy: {
@@ -113,6 +114,25 @@ app.use("*", (c, next) => (c.req.path === MCP_PATH ? mcpBodyLimit : defaultBodyL
 if (process.env.NODE_ENV !== "test") {
   app.use("*", accessLog);
 }
+
+/**
+ * API and webhook responses are private (webhook URLs, tokens, inbox items) and
+ * must never be stored by a browser or the edge. Public discovery routes that
+ * set their own Cache-Control keep it.
+ */
+async function noStoreByDefault(c: Context, next: Next): Promise<void> {
+  await next();
+  if (c.res.headers.has("Cache-Control")) return;
+  try {
+    c.res.headers.set("Cache-Control", "no-store");
+  } catch {
+    // Responses passed through from fetch have immutable headers; copy them.
+    c.res = new Response(c.res.body, c.res);
+    c.res.headers.set("Cache-Control", "no-store");
+  }
+}
+app.use("/api/*", noStoreByDefault);
+app.use("/hooks/*", noStoreByDefault);
 
 app.get("/api/health", (c) => c.json({ ok: true }));
 app.get("/oss", (c) => c.redirect("https://github.com/R44VC0RP/hark/"));
@@ -145,6 +165,42 @@ app.on(["GET", "POST"], "/api/auth/expo-authorization-proxy", async (c, next) =>
     return c.json({ error: "Forbidden" }, 403);
   }
   await next();
+});
+// The signed consent request carries no nonce upstream, so back/refresh could
+// approve it again and mint another authorization code. Each signature may
+// decide one consent; it is reserved while in flight and released on failure.
+const usedConsentSignatures = new Map<string, number>();
+app.post("/api/auth/oauth2/consent", async (c, next) => {
+  let oauthQuery: unknown;
+  try {
+    const request = c.req.raw.clone();
+    const type = request.headers.get("content-type") ?? "";
+    oauthQuery = type.includes("application/json")
+      ? ((await request.json()) as { oauth_query?: unknown } | null)?.oauth_query
+      : (await request.formData()).get("oauth_query");
+  } catch {
+    oauthQuery = undefined;
+  }
+  if (typeof oauthQuery !== "string") return next();
+  const params = new URLSearchParams(oauthQuery);
+  const sig = params.get("sig");
+  if (!sig) return next();
+  const now = Date.now();
+  const expiresAt = Number(params.get("exp")) * 1000;
+  if (usedConsentSignatures.has(sig)) {
+    return c.json(
+      { error: "invalid_request", error_description: "This request was already decided" },
+      400,
+    );
+  }
+  if (usedConsentSignatures.size >= 10_000) {
+    for (const [key, expiry] of usedConsentSignatures) {
+      if (expiry <= now) usedConsentSignatures.delete(key);
+    }
+  }
+  usedConsentSignatures.set(sig, Number.isFinite(expiresAt) ? expiresAt : now + 10 * 60 * 1000);
+  await next();
+  if (!c.res.ok) usedConsentSignatures.delete(sig);
 });
 app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
 // OAuth discovery for the MCP server, and the server itself. Tool calls are

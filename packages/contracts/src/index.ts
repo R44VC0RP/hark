@@ -1011,6 +1011,11 @@ export interface DeviceAuthorizationRequestDto {
   userCode: string;
   expiresAt: string;
   tokenExpiresAt: string;
+  /** When the request was started, so the approval page can show its age. */
+  startedAt: string;
+  /** Requester's user agent (truncated) and client IP with the last part masked. */
+  requesterUserAgent: string | null;
+  requesterIp: string | null;
 }
 
 export interface DeviceAuthorizationTokenResponse {

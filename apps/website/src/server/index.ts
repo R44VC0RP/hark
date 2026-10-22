@@ -2,18 +2,66 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
+import { and, isNotNull, lt, or, sql } from "drizzle-orm";
 import { app } from "./app";
-import { sqlite } from "./db";
+import { db, sqlite } from "./db";
 import { runMigrations } from "./db/migrate";
+import { analyticsEvent, session, teamInvite, verification } from "./db/schema";
 import { assertRuntimeEnv, env } from "./env";
 import { pruneAnalytics } from "./lib/analytics";
 import { startInteractionCallbackWorker } from "./lib/interaction-callbacks";
 import { startOncallEscalationWorker } from "./lib/oncall";
 
+const CLOSED_INVITE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Daily hygiene: expired auth rows Better Auth never removes, invites (and their
+ * e-mail addresses) a month after they closed, and analytics links to deleted users.
+ */
+function sweepExpiredRows(): void {
+  try {
+    const now = new Date();
+    const closedBefore = new Date(now.getTime() - CLOSED_INVITE_RETENTION_MS);
+    db.delete(verification).where(lt(verification.expiresAt, now)).run();
+    db.delete(session).where(lt(session.expiresAt, now)).run();
+    db.delete(teamInvite)
+      .where(
+        or(
+          lt(teamInvite.acceptedAt, closedBefore),
+          lt(teamInvite.revokedAt, closedBefore),
+          lt(teamInvite.expiresAt, closedBefore),
+        ),
+      )
+      .run();
+    db.update(analyticsEvent)
+      .set({ userId: null })
+      .where(
+        and(
+          isNotNull(analyticsEvent.userId),
+          sql`not exists (select 1 from "user" where "user"."id" = ${analyticsEvent.userId})`,
+        ),
+      )
+      .run();
+    // `user_id` is part of the per-day unique key, so the row keeps counting
+    // toward that day's actives under an unlinkable id.
+    sqlite
+      .prepare(
+        `update analytics_user_day set user_id = 'deleted_' || lower(hex(randomblob(12)))
+         where substr(user_id, 1, 8) <> 'deleted_'
+           and not exists (select 1 from "user" where "user"."id" = analytics_user_day.user_id)`,
+      )
+      .run();
+  } catch (error) {
+    console.error("Failed to sweep expired rows", error);
+  }
+}
+
 assertRuntimeEnv();
 runMigrations();
 // Bounds the analytics log at startup; long-running processes prune opportunistically.
 pruneAnalytics();
+sweepExpiredRows();
+setInterval(sweepExpiredRows, 24 * 60 * 60 * 1000).unref();
 startInteractionCallbackWorker();
 startOncallEscalationWorker();
 

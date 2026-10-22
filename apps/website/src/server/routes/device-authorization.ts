@@ -77,6 +77,18 @@ function normalizeUserCode(value: string): string | null {
   return `${normalized.slice(0, 4)}-${normalized.slice(4)}`;
 }
 
+/** Keeps the network, drops the host: the last IPv4 octet or the last 64 bits of IPv6. */
+export function maskIp(ip: string | null): string | null {
+  if (!ip) return null;
+  const v4 = ip.match(/^(?:::ffff:)?(\d{1,3}\.\d{1,3}\.\d{1,3})\.\d{1,3}$/i);
+  if (v4) return `${v4[1]}.x`;
+  if (ip.includes(":")) {
+    const groups = ip.split("::")[0]?.split(":").filter(Boolean).slice(0, 4) ?? [];
+    return `${groups.join(":")}::x`;
+  }
+  return null;
+}
+
 function requestDto(
   row: typeof deviceAuthorizationRequest.$inferSelect,
 ): DeviceAuthorizationRequestDto {
@@ -87,6 +99,9 @@ function requestDto(
     userCode: row.userCode,
     expiresAt: row.expiresAt.toISOString(),
     tokenExpiresAt: row.tokenExpiresAt.toISOString(),
+    startedAt: row.createdAt.toISOString(),
+    requesterUserAgent: row.requesterUserAgent,
+    requesterIp: row.requesterIp,
   };
 }
 
@@ -166,6 +181,8 @@ export const deviceAuthorizationRoute = new Hono<AuthedEnv>()
             tokenExpiresAt,
             pollIntervalSeconds: INITIAL_POLL_INTERVAL_SECONDS,
             createdAt: now,
+            requesterUserAgent: c.req.header("user-agent")?.trim().slice(0, 200) || null,
+            requesterIp: maskIp(requestKey(c)),
           })
           .run();
         const verificationUri = `${env.APP_URL.replace(/\/$/, "")}/cli/authorize`;

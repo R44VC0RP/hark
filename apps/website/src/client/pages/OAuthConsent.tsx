@@ -108,6 +108,8 @@ export function OAuthConsent() {
           ]
         : undefined;
       const url = await submitOAuthConsent(accept, scopes, request.oauthQuery);
+      // The signed request is spent; back or refresh lands on "Nothing to authorize".
+      window.history.replaceState(null, "", "/oauth/consent");
       setDone(accept ? "approved" : "denied");
       window.location.assign(url);
     } catch (err) {

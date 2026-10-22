@@ -399,8 +399,9 @@ export async function listOAuthGrants(userId: string): Promise<OAuthClientGrantD
       return {
         clientId,
         name: client?.name?.trim() || "MCP client",
-        iconUrl: client?.icon ?? null,
-        clientUri: client?.uri ?? null,
+        // Rows registered before https validation may hold other schemes.
+        iconUrl: httpsUrlOrNull(client?.icon),
+        clientUri: httpsUrlOrNull(client?.uri),
         redirectHosts: redirectHostsOf(client?.redirectUris),
         scopes: apiScopesOf(scopes),
         offlineAccess: scopes.includes(OAUTH_OFFLINE_ACCESS_SCOPE),
@@ -410,6 +411,15 @@ export async function listOAuthGrants(userId: string): Promise<OAuthClientGrantD
       };
     })
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+function httpsUrlOrNull(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    return new URL(value).protocol === "https:" ? value : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Client display names for `kind: "oauth"` token rows. */

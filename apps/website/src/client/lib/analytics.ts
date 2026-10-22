@@ -24,6 +24,37 @@ function storedId(key: string, session = false): string {
   }
 }
 
+/** Dynamic routes whose segments identify a person, a team or an invite code. */
+const DYNAMIC_ROUTES: Array<[RegExp, string]> = [
+  [/^\/join(\/|$)/, "/join/:code"],
+  [/^\/dashboard\/teams(\/|$)/, "/dashboard/teams/:teamId"],
+  [/^\/web(\/|$)/, "/web/:id"],
+];
+const STATIC_ROUTES = new Set([
+  "/",
+  "/dashboard",
+  "/cli/authorize",
+  "/docs",
+  "/pricing",
+  "/a/launched",
+  "/privacy",
+  "/terms",
+  "/oauth/consent",
+]);
+
+/**
+ * The route pattern for a path, so analytics never store invite codes or ids.
+ * Paths that match no route are recorded as `/*`.
+ */
+export function routePattern(pathname: string): string {
+  const path = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
+  if (STATIC_ROUTES.has(path)) return path;
+  for (const [pattern, route] of DYNAMIC_ROUTES) {
+    if (pattern.test(path)) return route;
+  }
+  return "/*";
+}
+
 export function markAuthPending(provider: "apple" | "google"): void {
   try {
     sessionStorage.setItem(AUTH_PENDING_KEY, provider);
@@ -96,6 +127,7 @@ export function trackWebEvent(
     surface: "web",
     name,
     ...input,
+    ...(input.path ? { path: routePattern(input.path) } : {}),
     properties: { ...firstTouch(), ...input.properties },
   };
   void fetch("/api/analytics/events", {

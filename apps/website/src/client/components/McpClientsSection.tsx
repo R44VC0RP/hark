@@ -82,7 +82,7 @@ export function McpClientsSection({ mcpUrl }: { mcpUrl?: string }) {
               className="flex flex-wrap items-center gap-x-3 gap-y-2.5 py-3.5"
               key={client.clientId}
             >
-              {client.iconUrl ? (
+              {client.iconUrl?.startsWith("https:") ? (
                 <img
                   alt=""
                   className="size-9 shrink-0 rounded-full bg-white object-cover ring-1 ring-white/15"

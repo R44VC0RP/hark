@@ -24,45 +24,66 @@ export const user = sqliteTable("user", {
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 });
 
-export const session = sqliteTable("session", {
-  id: text("id").primaryKey(),
-  expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
-  token: text("token").notNull().unique(),
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
-  ipAddress: text("ip_address"),
-  userAgent: text("user_agent"),
-  userId: text("user_id")
-    .notNull()
-    .references(() => user.id, { onDelete: "cascade" }),
-});
+export const session = sqliteTable(
+  "session",
+  {
+    id: text("id").primaryKey(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    token: text("token").notNull().unique(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    index("session_user_id_idx").on(table.userId),
+    index("session_expires_at_idx").on(table.expiresAt),
+  ],
+);
 
-export const account = sqliteTable("account", {
-  id: text("id").primaryKey(),
-  accountId: text("account_id").notNull(),
-  providerId: text("provider_id").notNull(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => user.id, { onDelete: "cascade" }),
-  accessToken: text("access_token"),
-  refreshToken: text("refresh_token"),
-  idToken: text("id_token"),
-  accessTokenExpiresAt: integer("access_token_expires_at", { mode: "timestamp_ms" }),
-  refreshTokenExpiresAt: integer("refresh_token_expires_at", { mode: "timestamp_ms" }),
-  scope: text("scope"),
-  password: text("password"),
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
-});
+export const account = sqliteTable(
+  "account",
+  {
+    id: text("id").primaryKey(),
+    accountId: text("account_id").notNull(),
+    providerId: text("provider_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    accessToken: text("access_token"),
+    refreshToken: text("refresh_token"),
+    idToken: text("id_token"),
+    accessTokenExpiresAt: integer("access_token_expires_at", { mode: "timestamp_ms" }),
+    refreshTokenExpiresAt: integer("refresh_token_expires_at", { mode: "timestamp_ms" }),
+    scope: text("scope"),
+    password: text("password"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("account_user_id_idx").on(table.userId),
+    index("account_provider_account_idx").on(table.providerId, table.accountId),
+  ],
+);
 
-export const verification = sqliteTable("verification", {
-  id: text("id").primaryKey(),
-  identifier: text("identifier").notNull(),
-  value: text("value").notNull(),
-  expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
-});
+export const verification = sqliteTable(
+  "verification",
+  {
+    id: text("id").primaryKey(),
+    identifier: text("identifier").notNull(),
+    value: text("value").notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("verification_identifier_idx").on(table.identifier),
+    index("verification_expires_at_idx").on(table.expiresAt),
+  ],
+);
 
 /** Native Apple grants are separate from Better Auth accounts so refresh tokens stay encrypted. */
 export const appleNativeGrant = sqliteTable(
@@ -133,25 +154,29 @@ export const project = sqliteTable(
   ],
 );
 
-export const device = sqliteTable("device", {
-  id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => user.id, { onDelete: "cascade" }),
-  expoPushToken: text("expo_push_token").notNull().unique(),
-  apnsToken: text("apns_token"),
-  platform: text("platform").notNull().default("ios"),
-  deviceName: text("device_name"),
-  active: integer("active", { mode: "boolean" }).notNull().default(true),
-  liveActivityPushToStartTokenCiphertext: text("live_activity_push_to_start_token_ciphertext"),
-  liveActivityTokenEnvironment: text("live_activity_token_environment"),
-  liveActivitySchemaVersion: integer("live_activity_schema_version"),
-  liveActivityTokenUpdatedAt: integer("live_activity_token_updated_at", { mode: "timestamp_ms" }),
-  interactionSchemaVersion: integer("interaction_schema_version"),
-  liveActivityInteractionVersion: integer("live_activity_interaction_version"),
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-  lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" }).notNull(),
-});
+export const device = sqliteTable(
+  "device",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    expoPushToken: text("expo_push_token").notNull().unique(),
+    apnsToken: text("apns_token"),
+    platform: text("platform").notNull().default("ios"),
+    deviceName: text("device_name"),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    liveActivityPushToStartTokenCiphertext: text("live_activity_push_to_start_token_ciphertext"),
+    liveActivityTokenEnvironment: text("live_activity_token_environment"),
+    liveActivitySchemaVersion: integer("live_activity_schema_version"),
+    liveActivityTokenUpdatedAt: integer("live_activity_token_updated_at", { mode: "timestamp_ms" }),
+    interactionSchemaVersion: integer("interaction_schema_version"),
+    liveActivityInteractionVersion: integer("live_activity_interaction_version"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("device_user_id_idx").on(table.userId)],
+);
 
 /**
  * Delivery log and project-inbox backing store; not exposed as analytics.
@@ -543,6 +568,10 @@ export const deviceAuthorizationRequest = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     resolvedAt: integer("resolved_at", { mode: "timestamp_ms" }),
     consumedAt: integer("consumed_at", { mode: "timestamp_ms" }),
+    /** Shown on the approval page so a person can spot a request they did not start. */
+    requesterUserAgent: text("requester_user_agent"),
+    /** Trusted client IP with the last octet/group masked; null without a trusted edge header. */
+    requesterIp: text("requester_ip"),
   },
   (table) => [
     uniqueIndex("device_authorization_device_code_hash_unique").on(table.deviceCodeHash),
