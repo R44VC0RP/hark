@@ -24,7 +24,15 @@ let authServerMetadataHandler: ((request: Request) => Promise<Response>) | undef
  */
 export const oauthWellKnownRoute = new Hono()
   // Browser-based MCP clients read discovery documents cross-origin.
-  .use("/.well-known/*", cors({ origin: "*", allowMethods: ["GET", "HEAD", "OPTIONS"] }))
+  // Explicit allowHeaders so the preflight never parses Access-Control-Request-Headers.
+  .use(
+    "/.well-known/*",
+    cors({
+      origin: "*",
+      allowMethods: ["GET", "HEAD", "OPTIONS"],
+      allowHeaders: ["content-type", "authorization", "mcp-protocol-version"],
+    }),
+  )
   .get("/.well-known/oauth-protected-resource", (c) => {
     c.header("Cache-Control", METADATA_CACHE_CONTROL);
     return c.json(protectedResourceMetadata());

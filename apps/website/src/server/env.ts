@@ -90,6 +90,15 @@ export function assertRuntimeEnv(): void {
     problems.push("AUTUMN_API_KEY is not set — paid plans and checkout will be unavailable.");
   }
 
+  if (env.NODE_ENV === "production" && !env.TRUSTED_CLIENT_IP_HEADER) {
+    problems.push(
+      "TRUSTED_CLIENT_IP_HEADER is not set — rate limits fall back to one shared bucket per endpoint. Set it to the client-IP header the edge overwrites.",
+    );
+  }
+  if (env.NODE_ENV === "production" && new URL(env.APP_URL).protocol !== "https:") {
+    problems.push("APP_URL is not https — production must be served over TLS.");
+  }
+
   if (env.NODE_ENV === "production" && env.BETTER_AUTH_SECRET === DEV_SECRET) {
     console.error("Refusing to start in production with the default BETTER_AUTH_SECRET.");
     process.exit(1);

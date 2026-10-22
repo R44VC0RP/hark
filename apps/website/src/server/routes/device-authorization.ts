@@ -20,7 +20,7 @@ import {
   hashDeviceCode,
   MAX_ACTIVE_API_TOKENS,
 } from "../lib/token";
-import { type AuthedEnv, requireAuth } from "../middleware";
+import { type AuthedEnv, hasForeignOrigin, requireAuth } from "../middleware";
 
 const REQUEST_TTL_SECONDS = 600;
 const INITIAL_POLL_INTERVAL_SECONDS = 5;
@@ -69,11 +69,6 @@ function codeRateLimited(userId: string, clientKey: string | null): boolean {
     // Keyed by session, so this bucket cannot be reset with a request header.
     rateLimited("code-user", userId, 60)
   );
-}
-
-function hasForeignOrigin(c: { req: { header(name: string): string | undefined } }): boolean {
-  const origin = c.req.header("origin");
-  return Boolean(origin && origin !== new URL(env.APP_URL).origin);
 }
 
 function normalizeUserCode(value: string): string | null {
@@ -251,6 +246,8 @@ export const deviceAuthorizationRoute = new Hono<AuthedEnv>()
           and(
             eq(apiToken.userId, row.approvedUserId),
             isNull(apiToken.revokedAt),
+            // Connected OAuth clients do not count against the token limit.
+            isNull(apiToken.oauthClientId),
             or(isNull(apiToken.expiresAt), gt(apiToken.expiresAt, now)),
           ),
         )

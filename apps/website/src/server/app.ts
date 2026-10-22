@@ -2,6 +2,7 @@ import { MCP_PATH } from "@hark/contracts";
 import { type Context, Hono, type Next } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
+import { secureHeaders } from "hono/secure-headers";
 import { auth } from "./auth";
 import { INTERNAL_AGENT_TOKEN } from "./middleware";
 import { activitiesAgentRoute, activitiesSessionRoute } from "./routes/activities";
@@ -40,16 +41,68 @@ import { teamInvitesRoute, teamsAgentRoute, teamsSessionRoute } from "./routes/t
 
 export const app = new Hono();
 
+/** Path segments that are themselves credentials: webhook tokens, invite and user codes. */
+const SECRET_SEGMENT = /\/(hooks|team-invites|join|device-authorization\/requests)\/[^/]+/gi;
+/** Bearer-shaped values (`whk_…`, `hark_…`) wherever they appear in a path. */
+const SECRET_TOKEN = /(?:whk|hark)_[^/]*/gi;
+
 /**
- * Logs requests without query strings and redacts webhook paths: `/hooks/:token`
- * embeds a plaintext credential that must never reach a log sink.
+ * Redacts credentials from a request path before it is logged. Matching is by
+ * pattern rather than route so non-canonical paths that 404 (`//hooks/…`,
+ * `/HOOKS/…`, percent-encoded) are covered too.
  */
+export function redactLogPath(path: string): string {
+  const redact = (value: string) =>
+    value.replace(SECRET_SEGMENT, "/$1/:redacted").replace(SECRET_TOKEN, ":redacted");
+  const redacted = redact(path);
+  let decoded = redacted;
+  try {
+    decoded = decodeURIComponent(redacted);
+  } catch {
+    // Malformed escapes are logged as-is; the raw patterns above already applied.
+  }
+  // Percent-encoded markers survive the raw patterns; drop the whole path then.
+  return decoded !== redacted && redact(decoded) !== decoded ? ":redacted" : redacted;
+}
+
+/** Logs requests without query strings, with credentials in the path redacted. */
 async function accessLog(c: Context, next: Next): Promise<void> {
   const startedAt = Date.now();
   await next();
-  const path = c.req.path.startsWith("/hooks/") ? "/hooks/:token" : c.req.path;
+  const path = redactLogPath(c.req.path);
   console.log(`${c.req.method} ${path} ${c.res.status} ${Date.now() - startedAt}ms`);
 }
+
+// Anti-framing matters most on /oauth/consent and /cli/authorize, which grant
+// access in one click. Images may come from any https origin (avatars, app
+// icons, OAuth client logos); prerendered pages carry inline style attributes.
+app.use(
+  "*",
+  secureHeaders({
+    xFrameOptions: "DENY",
+    referrerPolicy: "no-referrer",
+    // Discovery documents, MCP and public images are read cross-origin.
+    crossOriginResourcePolicy: false,
+    contentSecurityPolicy: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
+      imgSrc: ["'self'", "https:", "data:", "blob:"],
+      connectSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      baseUri: ["'self'"],
+      frameAncestors: ["'none'"],
+    },
+    permissionsPolicy: {
+      camera: [],
+      microphone: [],
+      geolocation: [],
+      usb: [],
+      payment: [],
+    },
+  }),
+);
 
 // Bounds memory use for unauthenticated POST bodies; accepted payloads are far smaller.
 // MCP tool calls wrap agent payloads in JSON-RPC, so /mcp gets more headroom.
@@ -69,6 +122,30 @@ app.get("/oss", (c) => c.redirect("https://github.com/R44VC0RP/hark/"));
 app.route("/", docsTextRoute);
 app.route("/", appPassJwksRoute);
 
+// The Expo plugin's proxy sets a signed OAuth state cookie from the URL it is
+// given and then redirects there. Only the social providers the app signs in
+// with may be the target; anything else is an open redirect and login CSRF.
+const EXPO_PROXY_ORIGINS = new Set(["https://accounts.google.com", "https://appleid.apple.com"]);
+app.on(["GET", "POST"], "/api/auth/expo-authorization-proxy", async (c, next) => {
+  // Exactly one value, so a second one cannot be what Better Auth reads.
+  const targets = c.req.queries("authorizationURL") ?? [];
+  let origin: string | null = null;
+  try {
+    origin = targets.length === 1 && targets[0] ? new URL(targets[0]).origin : null;
+  } catch {
+    origin = null;
+  }
+  if (!origin || !EXPO_PROXY_ORIGINS.has(origin)) {
+    return c.json({ error: "Invalid authorizationURL" }, 400);
+  }
+  // The app opens this in a fresh auth session (Sec-Fetch-Site: none). A page on
+  // another site linking here could still plant its own state cookie.
+  const site = c.req.header("sec-fetch-site")?.toLowerCase();
+  if (site === "cross-site" || site === "same-site") {
+    return c.json({ error: "Forbidden" }, 403);
+  }
+  await next();
+});
 app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
 // OAuth discovery for the MCP server, and the server itself. Tool calls are
 // dispatched through the agent routes below as the caller's grant token.

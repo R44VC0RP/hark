@@ -4,6 +4,7 @@ import { createMiddleware } from "hono/factory";
 import { auth } from "./auth";
 import { db } from "./db";
 import { apiToken } from "./db/schema";
+import { env } from "./env";
 import { trackUserActive } from "./lib/analytics";
 import { hashApiToken } from "./lib/token";
 
@@ -26,8 +27,28 @@ export type AgentEnv = {
   };
 };
 
-/** Derives the user from the Better Auth session cookie. Rejects anonymous requests. */
+/** True when a browser says the request comes from a page outside APP_URL's origin. */
+export function hasForeignOrigin(c: {
+  req: { header(name: string): string | undefined };
+}): boolean {
+  const origin = c.req.header("origin");
+  return Boolean(
+    (origin && origin !== new URL(env.APP_URL).origin) ||
+      c.req.header("sec-fetch-site")?.toLowerCase() === "cross-site",
+  );
+}
+
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+/**
+ * Derives the user from the Better Auth session cookie. Rejects anonymous
+ * requests, and cross-site state changes so the cookie alone (SameSite=Lax)
+ * is not the only CSRF defence. Native app requests carry no Origin.
+ */
 export const requireAuth = createMiddleware<AuthedEnv>(async (c, next) => {
+  if (!SAFE_METHODS.has(c.req.method) && hasForeignOrigin(c)) {
+    return c.json({ error: "Forbidden" }, 403);
+  }
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
   if (!session) {
     return c.json({ error: "Unauthorized" }, 401);

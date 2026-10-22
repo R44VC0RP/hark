@@ -3,7 +3,7 @@ import { oauthProvider } from "@better-auth/oauth-provider";
 import { OAUTH_SCOPES } from "@hark/contracts";
 import { type BetterAuthPlugin, betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { createAuthMiddleware } from "better-auth/api";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { db } from "./db";
 import * as schema from "./db/schema";
 import { env } from "./env";
@@ -35,6 +35,54 @@ const oauthDefaultScopes = {
         handler: createAuthMiddleware(async (ctx) => {
           const scope = (await clientDefaultScopes(String(ctx.query?.client_id))).join(" ");
           return scope ? { context: { query: { ...ctx.query, scope } } } : undefined;
+        }),
+      },
+    ],
+  },
+} satisfies BetterAuthPlugin;
+
+const CLIENT_METADATA_URIS = ["client_uri", "logo_uri", "tos_uri", "policy_uri"] as const;
+
+function isHttpsUrl(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Dynamic registration is unauthenticated and the consent page and dashboard
+ * show what a client registers, so bound its name and contacts and keep only
+ * https links (a `javascript:` or `http:` URI is dropped rather than stored).
+ */
+const oauthClientMetadataLimits = {
+  id: "hark-oauth-client-metadata-limits",
+  hooks: {
+    before: [
+      {
+        matcher: (ctx) => ctx.path === "/oauth2/register",
+        handler: createAuthMiddleware(async (ctx) => {
+          const body = ctx.body as Record<string, unknown> | undefined;
+          if (!body || typeof body !== "object") return;
+          if (typeof body.client_name === "string" && body.client_name.length > 100) {
+            throw new APIError("BAD_REQUEST", {
+              error: "invalid_client_metadata",
+              error_description: "client_name must be at most 100 characters",
+            });
+          }
+          if (Array.isArray(body.contacts) && body.contacts.length > 5) {
+            throw new APIError("BAD_REQUEST", {
+              error: "invalid_client_metadata",
+              error_description: "contacts must list at most 5 entries",
+            });
+          }
+          // In place: a returned context is merged with defu, which would restore
+          // deleted keys from the original body.
+          for (const key of CLIENT_METADATA_URIS) {
+            if (key in body && !isHttpsUrl(body[key])) delete body[key];
+          }
         }),
       },
     ],
@@ -114,15 +162,17 @@ export const auth = betterAuth({
       silenceWarnings: { oauthAuthServerConfig: true },
     }),
     oauthDefaultScopes,
+    oauthClientMetadataLimits,
   ],
   trustedOrigins: [env.APP_URL, "https://appleid.apple.com", "hark://", "hark://*"],
   advanced: {
     // Rate limits (e.g. OAuth client registration) key on the client IP. Only a
     // header the trusted edge overwrites is used; forwarded headers sent by the
-    // client itself are spoofable.
-    ...(env.TRUSTED_CLIENT_IP_HEADER
-      ? { ipAddress: { ipAddressHeaders: [env.TRUSTED_CLIENT_IP_HEADER] } }
-      : {}),
+    // client itself are spoofable, so without one no header is read at all
+    // (Better Auth would otherwise default to X-Forwarded-For).
+    ipAddress: {
+      ipAddressHeaders: env.TRUSTED_CLIENT_IP_HEADER ? [env.TRUSTED_CLIENT_IP_HEADER] : [],
+    },
     ...(env.APP_URL.startsWith("https://")
       ? {
           // Apple returns OAuth callbacks with a cross-site form POST. Better Auth

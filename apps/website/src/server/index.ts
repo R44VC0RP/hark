@@ -22,6 +22,10 @@ startOncallEscalationWorker();
 // instead of becoming indexable soft-404 copies of the home page.
 const clientDir = resolve(process.cwd(), "dist/client");
 if (existsSync(clientDir)) {
+  // HTML shells must revalidate so a deploy's new asset hashes are picked up;
+  // Vite's content-hashed /assets/* never change and can be cached for good.
+  const shell = (path: string) =>
+    serveStatic({ path, onFound: (_path, c) => c.header("Cache-Control", "no-cache") });
   const documentRoutes = [
     "/",
     "/docs",
@@ -34,19 +38,31 @@ if (existsSync(clientDir)) {
   for (const path of documentRoutes) {
     const file = path === "/" ? "index.html" : `${path.slice(1)}/index.html`;
     if (existsSync(resolve(clientDir, file))) {
-      app.get(path, serveStatic({ path: `./dist/client/${file}` }));
+      app.get(path, shell(`./dist/client/${file}`));
     }
   }
   // Client-routed private pages reuse the noindex dashboard shell.
   if (existsSync(resolve(clientDir, "dashboard/index.html"))) {
     for (const path of ["/dashboard/teams/:teamId", "/join/:code", "/oauth/consent"]) {
-      app.get(path, serveStatic({ path: "./dist/client/dashboard/index.html" }));
+      app.get(path, shell("./dist/client/dashboard/index.html"));
     }
   }
   if (existsSync(resolve(clientDir, "cli/authorize/index.html"))) {
-    app.get("/cli/authorize", serveStatic({ path: "./dist/client/cli/authorize/index.html" }));
+    app.get("/cli/authorize", shell("./dist/client/cli/authorize/index.html"));
   }
-  app.use("*", serveStatic({ root: "./dist/client" }));
+  app.use(
+    "*",
+    serveStatic({
+      root: "./dist/client",
+      onFound: (path, c) => {
+        if (c.req.path.startsWith("/assets/")) {
+          c.header("Cache-Control", "public, max-age=31536000, immutable");
+        } else if (path.endsWith(".html")) {
+          c.header("Cache-Control", "no-cache");
+        }
+      },
+    }),
+  );
 }
 
 const server = serve({ fetch: app.fetch, port: env.PORT }, (info) => {
