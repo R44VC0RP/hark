@@ -18,7 +18,14 @@ const authState = vi.hoisted(() => ({ userId: "user_a" as string | null }));
 const seatState = vi.hoisted(() => ({ paid: true }));
 const sent = vi.hoisted(() => [] as Array<Record<string, unknown>>);
 
-const NAMES: Record<string, string> = { user_a: "Ryan", user_b: "Bea", user_c: "Cam" };
+const NAMES: Record<string, string> = {
+  user_a: "Ryan",
+  user_b: "Bea",
+  user_c: "Cam",
+  user_d: "Dee",
+  user_e: "Eli",
+  user_f: "Fay",
+};
 
 vi.mock("../auth", () => ({
   auth: {
@@ -298,6 +305,83 @@ describe("teams and invites", () => {
     expect(list.invites[0]?.revokedAt).not.toBeNull();
     as("user_b");
     expect((await call("POST", `/api/team-invites/${created.code}/accept`)).status).toBe(404);
+  });
+});
+
+describe("invite abuse and membership changes", () => {
+  it("keeps one open invite and one notice per invitee, and caps invites per hour", async () => {
+    as("user_d");
+    const team = await createTeam("URGENT:\u202e Hark\u200b alert");
+    expect(team.name).toBe("URGENT: Hark alert");
+    const statuses: number[] = [];
+    const bodies: TeamInviteCreateResponse[] = [];
+    for (let index = 0; index < 30; index += 1) {
+      const response = await call("POST", `/api/teams/${team.id}/invites`, {
+        email: "user_c@example.com",
+      });
+      statuses.push(response.status);
+      if (response.status < 300) bodies.push((await response.json()) as TeamInviteCreateResponse);
+    }
+    await settle();
+    expect(statuses[0]).toBe(201);
+    expect(statuses.slice(1, 20).every((status) => status === 200)).toBe(true);
+    expect(statuses.slice(20).every((status) => status === 429)).toBe(true);
+    expect(new Set(bodies.map((body) => body.invite.id)).size).toBe(1);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ title: "Dee invited you to URGENT: Hark alert" });
+    // Only the latest code works.
+    as(null);
+    expect((await call("GET", `/api/team-invites/${bodies[0]?.code}`)).status).toBe(404);
+    expect((await call("GET", `/api/team-invites/${bodies.at(-1)?.code}`)).status).toBe(200);
+  });
+
+  it("stops a removed or demoted admin's invites and keeps billing owner-only", async () => {
+    as("user_e");
+    const team = await createTeam("Inviters");
+    await join("user_f", (await invite(team.id, { role: "admin" })).code);
+    as("user_f");
+    const removedCode = (await invite(team.id, { role: "admin" })).code;
+    expect((await call("POST", `/api/teams/${team.id}/billing/portal`)).status).toBe(403);
+    expect((await call("POST", `/api/teams/${team.id}/billing/checkout`)).status).toBe(403);
+    as("user_e");
+    expect((await call("DELETE", `/api/teams/${team.id}/members/user_f`)).status).toBe(200);
+    as("user_b");
+    expect((await call("POST", `/api/team-invites/${removedCode}/accept`)).status).toBe(404);
+
+    as("user_e");
+    await join("user_f", (await invite(team.id, { role: "admin" })).code);
+    as("user_f");
+    const demotedCode = (await invite(team.id)).code;
+    as("user_e");
+    await call("PATCH", `/api/teams/${team.id}/members/user_f`, { role: "member" });
+    as("user_b");
+    expect((await call("POST", `/api/team-invites/${demotedCode}/accept`)).status).toBe(404);
+  });
+
+  it("hands a deleted owner's teams to the longest-serving admin and deletes solo teams", async () => {
+    const { releaseTeamsOf } = await import("../lib/teams");
+    as("user_b");
+    const shared = await createTeam("Handover");
+    await join("user_c", (await invite(shared.id)).code);
+    as("user_b");
+    await join("user_e", (await invite(shared.id, { role: "admin" })).code);
+    as("user_b");
+    const solo = await createTeam("Alone");
+
+    await releaseTeamsOf("user_b");
+    as("user_e");
+    const detail = (await (await call("GET", `/api/teams/${shared.id}`)).json()) as {
+      members: TeamMemberDto[];
+    };
+    expect(detail.members.map((member) => [member.userId, member.role])).toEqual([
+      ["user_e", "owner"],
+      ["user_c", "member"],
+    ]);
+    const [left] = await db
+      .select()
+      .from(schema.team)
+      .where((await import("drizzle-orm")).eq(schema.team.id, solo.id));
+    expect(left).toBeUndefined();
   });
 });
 

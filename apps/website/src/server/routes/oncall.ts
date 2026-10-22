@@ -1,11 +1,13 @@
 import {
+  MAX_ACTIVE_OVERRIDES_PER_GROUP,
+  MAX_ACTIVE_OVERRIDES_PER_MEMBER,
   type OncallShiftDto,
   oncallGroupUpdateSchema,
   oncallOverrideCreateSchema,
   oncallPageCreateSchema,
   oncallPageResolveSchema,
 } from "@hark/contracts";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, count, eq, gt } from "drizzle-orm";
 import { type Context, Hono } from "hono";
 import { z } from "zod";
 import { db } from "../db";
@@ -117,14 +119,35 @@ async function createOverride(actor: Actor, groupId: string, input: unknown): Pr
   if (endsAt <= startsAt) return failure(400, "endsAt must be after startsAt");
   if (endsAt <= Date.now()) return failure(400, "endsAt must be in the future");
   if (endsAt - startsAt > MAX_OVERRIDE_MS) return failure(400, "Overrides last at most 90 days");
-  await db.insert(oncallOverride).values({
-    id: newId("ovr"),
-    groupId,
-    userId: parsed.data.userId,
-    startsAt: new Date(startsAt),
-    endsAt: new Date(endsAt),
-    createdAt: new Date(),
+  const now = new Date();
+  // Count and insert in one synchronous transaction so a burst cannot pass the caps.
+  const limited = db.transaction((tx) => {
+    const active = and(eq(oncallOverride.groupId, groupId), gt(oncallOverride.endsAt, now));
+    const inGroup = tx.select({ value: count() }).from(oncallOverride).where(active).get();
+    if ((inGroup?.value ?? 0) >= MAX_ACTIVE_OVERRIDES_PER_GROUP) {
+      return `This group has the most active overrides allowed (${MAX_ACTIVE_OVERRIDES_PER_GROUP})`;
+    }
+    const forMember = tx
+      .select({ value: count() })
+      .from(oncallOverride)
+      .where(and(active, eq(oncallOverride.userId, parsed.data.userId)))
+      .get();
+    if ((forMember?.value ?? 0) >= MAX_ACTIVE_OVERRIDES_PER_MEMBER) {
+      return `This member has the most active overrides allowed in this group (${MAX_ACTIVE_OVERRIDES_PER_MEMBER})`;
+    }
+    tx.insert(oncallOverride)
+      .values({
+        id: newId("ovr"),
+        groupId,
+        userId: parsed.data.userId,
+        startsAt: new Date(startsAt),
+        endsAt: new Date(endsAt),
+        createdAt: now,
+      })
+      .run();
+    return null;
   });
+  if (limited) return failure(409, limited);
   return result({ group: await toGroupDto(found.group) }, 201);
 }
 

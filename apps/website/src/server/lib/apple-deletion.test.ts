@@ -95,7 +95,7 @@ describe("Apple account deletion revocation", () => {
     ]);
   });
 
-  it("fails closed when an Apple grant has no revocable token", async () => {
+  it("has nothing to revoke when an Apple account has no stored token", async () => {
     await insertUser("missing_grant");
     const now = new Date();
     await db.insert(schema.account).values({
@@ -108,11 +108,30 @@ describe("Apple account deletion revocation", () => {
     });
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
-    await expect(revokeAppleGrantsForUser("missing_grant")).rejects.toThrow(
-      "refresh token is unavailable",
-    );
+    await expect(revokeAppleGrantsForUser("missing_grant")).resolves.toBeUndefined();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("treats an Apple invalid_grant as already revoked", async () => {
+    await insertUser("gone_grant");
+    const now = new Date();
+    await db.insert(schema.account).values({
+      id: "gone_account",
+      accountId: "gone-subject",
+      providerId: "apple",
+      userId: "gone_grant",
+      refreshToken: "gone-refresh",
+      createdAt: now,
+      updatedAt: now,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ error: "invalid_grant" }, { status: 400 })),
+    );
+
+    await expect(revokeAppleGrantsForUser("gone_grant")).resolves.toBeUndefined();
   });
 
   it("propagates Apple revocation failures so Better Auth cannot delete the user", async () => {
@@ -129,9 +148,17 @@ describe("Apple account deletion revocation", () => {
     });
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => new Response(null, { status: 400 })),
+      vi.fn(async () => new Response(null, { status: 503 })),
     );
 
-    await expect(revokeAppleGrantsForUser("failed_revoke")).rejects.toThrow("revocation failed");
+    const { AppleRevocationError } = await import("./apple");
+    await expect(revokeAppleGrantsForUser("failed_revoke")).rejects.toThrow(AppleRevocationError);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("fetch failed");
+      }),
+    );
+    await expect(revokeAppleGrantsForUser("failed_revoke")).rejects.toThrow(AppleRevocationError);
   });
 });

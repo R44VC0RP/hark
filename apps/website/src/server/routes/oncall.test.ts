@@ -271,6 +271,39 @@ describe("on-call groups", () => {
       "user_a",
     );
   });
+
+  it("caps active overrides per member and per group", async () => {
+    const { eq } = await import("drizzle-orm");
+    as("user_a");
+    const group = await createGroup("Capped");
+    const override = (userId: string, index: number) =>
+      call("POST", `/api/oncall/${group.id}/overrides`, {
+        userId,
+        startsAt: new Date(Date.now() + index * 3_600_000).toISOString(),
+        endsAt: new Date(Date.now() + (index + 1) * 3_600_000).toISOString(),
+      });
+    for (let index = 0; index < 20; index += 1) {
+      expect((await override("user_c", index)).status).toBe(201);
+    }
+    const capped = await override("user_c", 20);
+    expect(capped.status).toBe(409);
+    const others = await db
+      .select({ id: schema.oncallOverride.id })
+      .from(schema.oncallOverride)
+      .where(eq(schema.oncallOverride.groupId, group.id));
+    expect(others).toHaveLength(20);
+    await db.insert(schema.oncallOverride).values(
+      Array.from({ length: 80 }, (_, index) => ({
+        id: `ovr_fill_${index}`,
+        groupId: group.id,
+        userId: index % 2 ? "user_a" : "user_b",
+        startsAt: new Date(),
+        endsAt: new Date(Date.now() + 3_600_000),
+        createdAt: new Date(),
+      })),
+    );
+    expect((await override("user_a", 30)).status).toBe(409);
+  });
 });
 
 describe("pages", () => {

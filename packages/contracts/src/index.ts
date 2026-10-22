@@ -34,6 +34,39 @@ export function utf8ByteLength(value: string): number {
   return bytes;
 }
 
+/** Control characters that render as whitespace and become a plain space. */
+function isWhitespaceControl(code: number): boolean {
+  return (code >= 0x09 && code <= 0x0d) || code === 0x85;
+}
+
+/** C0/C1 controls, bidi embeddings/overrides/isolates, and zero-width characters. */
+function isInvisibleOrControl(code: number): boolean {
+  return (
+    code <= 0x1f ||
+    (code >= 0x7f && code <= 0x9f) ||
+    (code >= 0x200b && code <= 0x200f) ||
+    (code >= 0x202a && code <= 0x202e) ||
+    (code >= 0x2066 && code <= 0x2069) ||
+    code === 0xfeff
+  );
+}
+
+/**
+ * Makes user-chosen display text (team, project and account names) safe to show
+ * in another person's UI or push title: strips C0/C1 controls, bidi controls
+ * (U+202A–U+202E, U+2066–U+2069) and zero-width characters (U+200B–U+200F,
+ * U+FEFF), collapses whitespace runs to one space, and trims.
+ */
+export function sanitizeDisplayText(value: string): string {
+  let result = "";
+  for (const character of value) {
+    const code = character.codePointAt(0) as number;
+    if (isWhitespaceControl(code)) result += " ";
+    else if (!isInvisibleOrControl(code)) result += character;
+  }
+  return result.replace(/\s+/g, " ").trim();
+}
+
 /** Longest prefix of `value` that fits `maxBytes` without splitting a code point. */
 export function truncateToUtf8Bytes(value: string, maxBytes: number): string {
   if (maxBytes <= 0) return "";
@@ -75,9 +108,6 @@ export function normalizeProjectName(name: string): string {
 
 const projectNameSchema = z
   .string()
-  .trim()
-  .min(1)
-  .max(PROJECT_NAME_MAX_CHARS)
   .refine(
     (value) =>
       Array.from(value).every((character) => {
@@ -85,7 +115,10 @@ const projectNameSchema = z
         return code >= 32 && code !== 127;
       }),
     "Project names must be a single line",
-  );
+  )
+  .overwrite(sanitizeDisplayText)
+  .min(1)
+  .max(PROJECT_NAME_MAX_CHARS);
 
 function isPublicHttpsUrl(value: string): boolean {
   try {
@@ -1434,6 +1467,10 @@ export const TEAM_FREE_SEATS = 1 as const;
 /** Monthly price per seat beyond the free one, in USD. */
 export const TEAM_SEAT_PRICE_MONTHLY = 5 as const;
 export const TEAM_INVITE_TTL_SECONDS = 604_800 as const;
+/** Open (unaccepted, unrevoked, unexpired) invites a team may hold at once. */
+export const MAX_PENDING_INVITES_PER_TEAM = 50 as const;
+/** Account display names (Better Auth `update-user`). */
+export const USER_NAME_MAX_CHARS = 80 as const;
 
 const singleLine = (value: string) =>
   Array.from(value).every((character) => {
@@ -1443,10 +1480,10 @@ const singleLine = (value: string) =>
 
 export const teamNameSchema = z
   .string()
-  .trim()
+  .refine(singleLine, "Team names must be a single line")
+  .overwrite(sanitizeDisplayText)
   .min(1, "Name is required")
-  .max(TEAM_NAME_MAX_CHARS)
-  .refine(singleLine, "Team names must be a single line");
+  .max(TEAM_NAME_MAX_CHARS);
 
 export const teamCreateSchema = z.strictObject({ name: teamNameSchema });
 export type TeamCreateInput = z.infer<typeof teamCreateSchema>;
@@ -1544,6 +1581,9 @@ export const ONCALL_ROTATION_PERIODS = ["daily", "weekly"] as const;
 export const oncallRotationPeriodSchema = z.enum(ONCALL_ROTATION_PERIODS);
 export const ONCALL_ESCALATION_TARGETS = ["next", "group"] as const;
 export const MAX_ONCALL_GROUPS_PER_TEAM = 50 as const;
+/** Active (not yet ended) overrides per on-call group, and per member within it. */
+export const MAX_ACTIVE_OVERRIDES_PER_GROUP = 100 as const;
+export const MAX_ACTIVE_OVERRIDES_PER_MEMBER = 20 as const;
 export const MAX_ESCALATION_STEPS = 5 as const;
 
 export const oncallEscalationStepSchema = z.strictObject({

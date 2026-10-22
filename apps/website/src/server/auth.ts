@@ -1,13 +1,18 @@
 import { expo } from "@better-auth/expo";
 import { oauthProvider } from "@better-auth/oauth-provider";
-import { OAUTH_SCOPES } from "@hark/contracts";
+import { OAUTH_SCOPES, sanitizeDisplayText, USER_NAME_MAX_CHARS } from "@hark/contracts";
 import { type BetterAuthPlugin, betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { db } from "./db";
 import * as schema from "./db/schema";
 import { env } from "./env";
-import { appleAuthConfig, generateAppleClientSecret, revokeAppleGrantsForUser } from "./lib/apple";
+import {
+  AppleRevocationError,
+  appleAuthConfig,
+  generateAppleClientSecret,
+  revokeAppleGrantsForUser,
+} from "./lib/apple";
 import {
   clientDefaultScopes,
   hashOAuthToken,
@@ -18,6 +23,7 @@ import {
   OAUTH_REFRESH_TOKEN_PREFIX,
   OAUTH_REFRESH_TOKEN_TTL_SECONDS,
 } from "./lib/oauth";
+import { releaseTeamsOf } from "./lib/teams";
 
 /**
  * A client that asks for no scope gets every scope except `tokens:manage`
@@ -89,6 +95,80 @@ const oauthClientMetadataLimits = {
   },
 } satisfies BetterAuthPlugin;
 
+const USER_IMAGE_MAX_CHARS = 2048;
+
+/**
+ * Names and avatars set through `/update-user` are shown to teammates, in
+ * invite previews and push titles: keep names short, single-line and free of
+ * invisible or reordering characters, and images https only.
+ */
+const userProfileLimits = {
+  id: "hark-user-profile-limits",
+  hooks: {
+    before: [
+      {
+        matcher: (ctx) => ctx.path === "/update-user",
+        handler: createAuthMiddleware(async (ctx) => {
+          const body = ctx.body as Record<string, unknown> | undefined;
+          if (!body || typeof body !== "object") return;
+          if ("name" in body) {
+            const name = typeof body.name === "string" ? sanitizeDisplayText(body.name) : "";
+            if (name.length < 1 || name.length > USER_NAME_MAX_CHARS) {
+              throw new APIError("BAD_REQUEST", {
+                message: `name must be 1 to ${USER_NAME_MAX_CHARS} characters`,
+              });
+            }
+            body.name = name;
+          }
+          if ("image" in body && body.image !== null) {
+            if (
+              typeof body.image !== "string" ||
+              body.image.length > USER_IMAGE_MAX_CHARS ||
+              !isHttpsUrl(body.image)
+            ) {
+              throw new APIError("BAD_REQUEST", {
+                message: `image must be an https URL of at most ${USER_IMAGE_MAX_CHARS} characters, or null`,
+              });
+            }
+          }
+        }),
+      },
+    ],
+  },
+} satisfies BetterAuthPlugin;
+
+const APPLE_ORIGIN = "https://appleid.apple.com";
+const STATIC_TRUSTED_ORIGINS = [env.APP_URL, "hark://", "hark://*"];
+
+/** Apple's cross-site form POST is trusted only on its own OAuth callback. */
+function trustedOrigins(request?: Request): string[] {
+  if (!request) return STATIC_TRUSTED_ORIGINS;
+  try {
+    if (new URL(request.url).pathname === "/api/auth/callback/apple") {
+      return [...STATIC_TRUSTED_ORIGINS, APPLE_ORIGIN];
+    }
+  } catch {}
+  return STATIC_TRUSTED_ORIGINS;
+}
+
+/**
+ * Runs before Better Auth deletes an account: revoke Apple grants first (the
+ * step that can fail), then hand over or delete the user's teams.
+ */
+async function beforeDeleteUser(userId: string): Promise<void> {
+  try {
+    await revokeAppleGrantsForUser(userId);
+  } catch (error) {
+    if (error instanceof AppleRevocationError) {
+      throw new APIError("CONFLICT", {
+        message: `Your account was not deleted. ${error.message}`,
+      });
+    }
+    throw error;
+  }
+  await releaseTeamsOf(userId);
+}
+
 export const auth = betterAuth({
   appName: "Hark",
   baseURL: env.APP_URL,
@@ -103,7 +183,7 @@ export const auth = betterAuth({
   user: {
     deleteUser: {
       enabled: true,
-      beforeDelete: async (user) => revokeAppleGrantsForUser(user.id),
+      beforeDelete: async (user) => beforeDeleteUser(user.id),
     },
   },
   socialProviders: {
@@ -163,8 +243,9 @@ export const auth = betterAuth({
     }),
     oauthDefaultScopes,
     oauthClientMetadataLimits,
+    userProfileLimits,
   ],
-  trustedOrigins: [env.APP_URL, "https://appleid.apple.com", "hark://", "hark://*"],
+  trustedOrigins,
   advanced: {
     // Rate limits (e.g. OAuth client registration) key on the client IP. Only a
     // header the trusted edge overwrites is used; forwarded headers sent by the

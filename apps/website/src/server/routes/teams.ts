@@ -3,8 +3,10 @@ import {
   type BillingRedirectResponse,
   MAX_MEMBERS_PER_TEAM,
   MAX_ONCALL_GROUPS_PER_TEAM,
+  MAX_PENDING_INVITES_PER_TEAM,
   MAX_TEAMS_PER_ACCOUNT,
   oncallGroupCreateSchema,
+  sanitizeDisplayText,
   TEAM_INVITE_TTL_SECONDS,
   type TeamInviteCreateResponse,
   type TeamInvitePreviewDto,
@@ -14,8 +16,9 @@ import {
   teamInviteCreateSchema,
   teamMemberUpdateSchema,
   teamUpdateSchema,
+  USER_NAME_MAX_CHARS,
 } from "@hark/contracts";
-import { and, asc, count, desc, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { type Context, Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { db } from "../db";
@@ -27,7 +30,6 @@ import { checkRotation, listTeamPages, toGroupDto } from "../lib/oncall";
 import {
   createTeamBillingPortal,
   createTeamCheckout,
-  syncTeamSeats,
   teamBillingConfigured,
   teamCanSeat,
 } from "../lib/team-billing";
@@ -41,7 +43,9 @@ import {
   memberDto,
   membership,
   removeMember,
+  revokeInvitesBy,
   sendNotice,
+  syncSeats,
   toInviteDto,
   toTeamDto,
 } from "../lib/teams";
@@ -174,7 +178,7 @@ async function leaveTeam(actor: Actor, teamId: string): Promise<Outcome> {
     return failure(409, "Transfer ownership before leaving, or delete the team");
   }
   removeMember(teamId, actor.id);
-  void syncTeamSeats(await billingCustomer(current.team), await memberCount(teamId));
+  syncSeats(current.team);
   return result({ ok: true });
 }
 
@@ -215,6 +219,8 @@ async function updateMember(
       .update(teamMember)
       .set({ role })
       .where(and(eq(teamMember.teamId, teamId), eq(teamMember.userId, userId)));
+    // A demoted admin can no longer invite, so their outstanding codes stop working.
+    if (role === "member") revokeInvitesBy(db, teamId, userId);
   }
   return result({ member: await memberDto(teamId, userId) });
 }
@@ -227,7 +233,7 @@ async function deleteMember(actor: Actor, teamId: string, userId: string): Promi
   if (!target) return failure(404, "Member not found");
   if (target.role === "owner") return failure(409, "The team owner cannot be removed");
   removeMember(teamId, userId);
-  void syncTeamSeats(await billingCustomer(current.team), await memberCount(teamId));
+  syncSeats(current.team);
   return result({ ok: true });
 }
 
@@ -250,6 +256,9 @@ async function createInvite(actor: Actor, teamId: string, input: unknown): Promi
   if (!hasRole(current.role, "admin")) return FORBIDDEN_ADMIN;
   const parsed = teamInviteCreateSchema.safeParse(input ?? {});
   if (!parsed.success) return failure(400, "Invalid invite", { issues: parsed.error.issues });
+  if (actorLimited(`invite:${actor.id}`, INVITES_PER_HOUR)) {
+    return failure(429, `Invite limit reached (${INVITES_PER_HOUR} per hour)`);
+  }
   const members = await memberCount(teamId);
   if (members >= MAX_MEMBERS_PER_TEAM) {
     return failure(409, `Member limit reached (${MAX_MEMBERS_PER_TEAM} per team)`);
@@ -258,31 +267,74 @@ async function createInvite(actor: Actor, teamId: string, input: unknown): Promi
 
   const code = generateTeamInviteCode();
   const now = new Date();
-  const [row] = await db
-    .insert(teamInvite)
-    .values({
-      id: newId("tinv"),
-      teamId,
-      codeHash: hashTeamInviteCode(code),
-      email: parsed.data.email?.toLowerCase() ?? null,
-      role: parsed.data.role,
-      invitedByUserId: actor.id,
-      invitedByName: actor.name,
-      expiresAt: new Date(now.getTime() + TEAM_INVITE_TTL_SECONDS * 1000),
-      createdAt: now,
-    })
-    .returning();
+  const email = parsed.data.email?.toLowerCase() ?? null;
+  const values = {
+    codeHash: hashTeamInviteCode(code),
+    role: parsed.data.role,
+    invitedByUserId: actor.id,
+    invitedByName:
+      sanitizeDisplayText(actor.name).slice(0, USER_NAME_MAX_CHARS).trim() || "A teammate",
+    expiresAt: new Date(now.getTime() + TEAM_INVITE_TTL_SECONDS * 1000),
+  };
+  // Synchronous, so concurrent requests cannot both miss an open invite or the cap.
+  const created = db.transaction((tx) => {
+    const open = and(
+      eq(teamInvite.teamId, teamId),
+      isNull(teamInvite.acceptedAt),
+      isNull(teamInvite.revokedAt),
+      gt(teamInvite.expiresAt, now),
+    );
+    if (email) {
+      // One open invite per address: re-inviting refreshes it under a new code
+      // instead of piling up invites (and notices) for the same person.
+      const existing = tx
+        .select({ id: teamInvite.id })
+        .from(teamInvite)
+        .where(and(open, eq(teamInvite.email, email)))
+        .orderBy(desc(teamInvite.createdAt))
+        .limit(1)
+        .get();
+      if (existing) {
+        const row = tx
+          .update(teamInvite)
+          .set(values)
+          .where(eq(teamInvite.id, existing.id))
+          .returning()
+          .get();
+        return { row, reused: true };
+      }
+    }
+    const pending = tx.select({ value: count() }).from(teamInvite).where(open).get();
+    if ((pending?.value ?? 0) >= MAX_PENDING_INVITES_PER_TEAM) return null;
+    const row = tx
+      .insert(teamInvite)
+      .values({ id: newId("tinv"), teamId, email, ...values, createdAt: now })
+      .returning()
+      .get();
+    return { row, reused: false };
+  });
+  if (!created) {
+    return failure(
+      409,
+      `Pending invite limit reached (${MAX_PENDING_INVITES_PER_TEAM} per team). Revoke unused invites first.`,
+    );
+  }
+  const { row, reused } = created;
   if (!row) return failure(500, "Could not create invite");
 
-  if (row.email) {
+  if (row.email && !reused) {
     const [invitee] = await db
       .select({ id: userTable.id })
       .from(userTable)
       .where(sql`lower(${userTable.email}) = ${row.email}`)
       .limit(1);
-    if (invitee && !(await membership(teamId, invitee.id))) {
+    if (
+      invitee &&
+      !(await membership(teamId, invitee.id)) &&
+      !actorLimited(`notice:${actor.id}`, INVITE_NOTICES_PER_HOUR)
+    ) {
       void sendNotice([invitee.id], {
-        title: `${actor.name} invited you to ${current.team.name}`,
+        title: `${row.invitedByName} invited you to ${current.team.name}`,
         body: `Tap to join ${current.team.name} on Hark.`,
         sourceName: "Hark Teams",
         url: `hark://join/${code}`,
@@ -291,7 +343,7 @@ async function createInvite(actor: Actor, teamId: string, input: unknown): Promi
     }
   }
   const body: TeamInviteCreateResponse = { invite: toInviteDto(row), code, url: inviteUrl(code) };
-  return result(body, 201);
+  return result(body, reused ? 200 : 201);
 }
 
 async function revokeInvite(actor: Actor, teamId: string, inviteId: string): Promise<Outcome> {
@@ -317,6 +369,16 @@ async function openInvite(code: string) {
     .select({ invite: teamInvite, team })
     .from(teamInvite)
     .innerJoin(team, eq(team.id, teamInvite.teamId))
+    // The inviter must still be able to invite: a removed or demoted admin's
+    // codes (or ones whose inviter deleted their account) no longer work.
+    .innerJoin(
+      teamMember,
+      and(
+        eq(teamMember.teamId, teamInvite.teamId),
+        eq(teamMember.userId, teamInvite.invitedByUserId),
+        inArray(teamMember.role, ["owner", "admin"]),
+      ),
+    )
     .where(
       and(
         eq(teamInvite.codeHash, hashTeamInviteCode(code)),
@@ -377,7 +439,7 @@ async function acceptInvite(actor: Actor, code: string): Promise<Outcome> {
     return true;
   });
   if (!joined) return failure(404, "This invite is invalid, used, or expired");
-  void syncTeamSeats(customer, members + 1);
+  syncSeats(found.team);
   const body: TeamJoinResponse = {
     team: await toTeamDto(found.team, found.invite.role as TeamRole),
     joined: true,
@@ -458,7 +520,8 @@ async function billingRedirect(
 ): Promise<Outcome> {
   const current = await membership(teamId, actor.id);
   if (!current) return TEAM_NOT_FOUND;
-  if (!hasRole(current.role, "admin")) return FORBIDDEN_ADMIN;
+  // The portal can cancel the plan and shows the owner's payment details.
+  if (current.role !== "owner") return failure(403, "Only the team owner can manage billing");
   if (!teamBillingConfigured()) return failure(503, "Billing is not configured");
   const customer = await billingCustomer(current.team);
   try {
@@ -474,6 +537,31 @@ async function billingRedirect(
       kind === "checkout" ? "Could not start checkout" : "Could not open billing portal",
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Per-actor invite limits
+// ---------------------------------------------------------------------------
+
+const INVITES_PER_HOUR = 20;
+/** Invite pushes an actor can cause per hour, so invites cannot be used to spam. */
+const INVITE_NOTICES_PER_HOUR = 10;
+const actorBuckets = new Map<string, { count: number; resetAt: number }>();
+
+function actorLimited(key: string, limit: number): boolean {
+  const now = Date.now();
+  const current = actorBuckets.get(key);
+  if (!current || current.resetAt <= now) {
+    if (actorBuckets.size > 10_000) {
+      for (const [candidate, bucket] of actorBuckets) {
+        if (bucket.resetAt <= now) actorBuckets.delete(candidate);
+      }
+    }
+    actorBuckets.set(key, { count: 1, resetAt: now + 3_600_000 });
+    return false;
+  }
+  current.count += 1;
+  return current.count > limit;
 }
 
 // ---------------------------------------------------------------------------

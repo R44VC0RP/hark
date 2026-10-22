@@ -27,6 +27,12 @@ export class AppleOAuthError extends Error {
   }
 }
 
+/**
+ * Apple could not confirm a revocation (unreachable, 5xx, or a rejected
+ * request). Account deletion stops and the user can retry later.
+ */
+export class AppleRevocationError extends Error {}
+
 export function normalizeApplePrivateKey(value: string): string {
   const normalized = value.replace(/\\n/g, "\n").trim();
   if (normalized.includes("BEGIN PRIVATE KEY")) return normalized;
@@ -117,19 +123,31 @@ export async function revokeAppleToken(
   clientId: string,
   config: AppleAuthConfig,
 ): Promise<void> {
-  const response = await fetch(APPLE_REVOKE_ENDPOINT, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: await generateAppleClientSecret(clientId, config),
-      token,
-      token_type_hint: "refresh_token",
-    }),
+  const body = new URLSearchParams({
+    client_id: clientId,
+    client_secret: await generateAppleClientSecret(clientId, config),
+    token,
+    token_type_hint: "refresh_token",
   });
-  if (!response.ok) {
-    throw new AppleOAuthError(`Apple token revocation failed with status ${response.status}`);
+  let response: Response;
+  try {
+    response = await fetch(APPLE_REVOKE_ENDPOINT, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body,
+    });
+  } catch {
+    throw new AppleRevocationError(
+      "Apple could not be reached to revoke Sign in with Apple. Try again in a few minutes.",
+    );
   }
+  if (response.ok) return;
+  const error = ((await response.json().catch(() => ({}))) as Record<string, unknown>).error;
+  // The grant is already gone (revoked by the user in Apple ID settings, or expired).
+  if (error === "invalid_grant") return;
+  throw new AppleRevocationError(
+    `Apple token revocation failed with status ${response.status}. Try again in a few minutes.`,
+  );
 }
 
 export function appleAuthConfig(): AppleAuthConfig {
@@ -150,7 +168,11 @@ export async function decryptBetterAuthOAuthToken(token: string): Promise<string
   return symmetricDecrypt({ key: env.BETTER_AUTH_SECRET, data: token });
 }
 
-/** Account deletion is blocked unless every revocable Apple grant is revoked. */
+/**
+ * Revokes every Apple grant the user has. Account deletion is blocked (with an
+ * {@link AppleRevocationError}) while Apple cannot confirm a revocation; a
+ * linked Apple account with no stored token has nothing to revoke.
+ */
 export async function revokeAppleGrantsForUser(userId: string): Promise<void> {
   const [accounts, nativeGrants] = await Promise.all([
     db
@@ -165,7 +187,7 @@ export async function revokeAppleGrantsForUser(userId: string): Promise<void> {
   for (const { refreshToken } of accounts) {
     if (!refreshToken) continue;
     if (!env.APPLE_SIGN_IN_SERVICE_ID) {
-      throw new Error(
+      throw new AppleRevocationError(
         "Apple authorization cannot be revoked because the Services ID is not configured.",
       );
     }
@@ -184,13 +206,19 @@ export async function revokeAppleGrantsForUser(userId: string): Promise<void> {
   const accountWithoutRevocableGrant = accounts.some(
     ({ accountId, refreshToken }) => !refreshToken && !nativeSubjects.has(accountId),
   );
-  if (grants.length === 0 || accountWithoutRevocableGrant) {
-    throw new Error(
-      "Apple authorization cannot be revoked because its refresh token is unavailable. Sign in with Apple again before deleting the account.",
+  if (accountWithoutRevocableGrant) {
+    console.warn("[apple] Apple account has no stored refresh token; nothing to revoke for it");
+  }
+  if (grants.length === 0) return;
+
+  let config: AppleAuthConfig;
+  try {
+    config = appleAuthConfig();
+  } catch {
+    throw new AppleRevocationError(
+      "Apple authorization cannot be revoked because Sign in with Apple is not configured.",
     );
   }
-
-  const config = appleAuthConfig();
   for (const grant of grants) {
     await revokeAppleToken(grant.token, grant.clientId, config);
   }

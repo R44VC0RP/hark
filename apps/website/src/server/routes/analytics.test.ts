@@ -48,7 +48,9 @@ function event(overrides: Record<string, unknown> = {}) {
   };
 }
 
-async function send(body: unknown, headers: Record<string, string> = {}) {
+const SAME_ORIGIN = { origin: "http://localhost:5173" };
+
+async function send(body: unknown, headers: Record<string, string> = SAME_ORIGIN) {
   return app.request("http://localhost/api/analytics/events", {
     method: "POST",
     headers: { "content-type": "application/json", ...headers },
@@ -88,5 +90,48 @@ describe("POST /api/analytics/events", () => {
     expect((await send(event({ properties: { email: "private@example.com" } }))).status).toBe(400);
     expect((await send(event(), { origin: "https://attacker.example" })).status).toBe(403);
     expect(await db.select().from(schema.analyticsEvent)).toHaveLength(0);
+  });
+
+  it("requires same-origin web events and a session for post-sign-in iOS events", async () => {
+    expect((await send(event(), {})).status).toBe(403);
+    expect((await send(event(), { "sec-fetch-site": "same-origin" })).status).toBe(200);
+    const ios = { surface: "ios", path: "/home", properties: {} };
+    expect(
+      (await send(event({ ...ios, eventId: "ios_event_000000001", name: "app_open" }), {})).status,
+    ).toBe(200);
+    expect(
+      (
+        await send(
+          event({ ...ios, eventId: "ios_event_000000002", name: "notification_opened" }),
+          {},
+        )
+      ).status,
+    ).toBe(401);
+    authenticated = true;
+    expect(
+      (
+        await send(
+          event({ ...ios, eventId: "ios_event_000000003", name: "notification_opened" }),
+          {},
+        )
+      ).status,
+    ).toBe(200);
+    expect(await db.select().from(schema.analyticsEvent)).toHaveLength(3);
+  });
+
+  it("drops events beyond a client's budget without an error", async () => {
+    const statuses: number[] = [];
+    for (let index = 0; index < 125; index += 1) {
+      const response = await send(
+        event({
+          eventId: `burst_event_${String(index).padStart(6, "0")}`,
+          anonymousId: "burst_visitor_00001",
+        }),
+      );
+      statuses.push(response.status);
+    }
+    expect(statuses.filter((status) => status === 200)).toHaveLength(120);
+    expect(statuses.filter((status) => status === 202)).toHaveLength(5);
+    expect(await db.select().from(schema.analyticsEvent)).toHaveLength(120);
   });
 });

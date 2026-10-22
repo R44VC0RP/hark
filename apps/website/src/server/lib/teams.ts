@@ -1,5 +1,11 @@
-import type { TeamDto, TeamInviteDto, TeamMemberDto, TeamRole } from "@hark/contracts";
-import { and, asc, count, eq, inArray } from "drizzle-orm";
+import {
+  sanitizeDisplayText,
+  type TeamDto,
+  type TeamInviteDto,
+  type TeamMemberDto,
+  type TeamRole,
+} from "@hark/contracts";
+import { and, asc, count, eq, inArray, isNull, ne } from "drizzle-orm";
 import { db } from "../db";
 import {
   agentNotification,
@@ -9,13 +15,13 @@ import {
   oncallGroup,
   oncallOverride,
   team,
-  type teamInvite,
+  teamInvite,
   teamMember,
   user as userTable,
 } from "../db/schema";
 import { newId } from "./id";
 import { buildPushMessages, sendPushMessages } from "./push";
-import { teamSeats } from "./team-billing";
+import { syncTeamSeats, teamSeats } from "./team-billing";
 
 export type TeamRow = typeof team.$inferSelect;
 export type InviteRow = typeof teamInvite.$inferSelect;
@@ -67,6 +73,23 @@ export async function billingCustomer(teamRow: TeamRow) {
     .where(and(eq(teamMember.teamId, teamRow.id), eq(teamMember.role, "owner")))
     .limit(1);
   return { id: teamRow.id, name: teamRow.name, ...(owner ? { email: owner.email } : {}) };
+}
+
+const seatSyncs = new Map<string, Promise<void>>();
+
+/**
+ * Reports the team's current member count to billing. Syncs for one team run
+ * one after another and each reads the count when it starts, so concurrent
+ * joins and leaves always end with the final count.
+ */
+export function syncSeats(teamRow: TeamRow): void {
+  const next = (seatSyncs.get(teamRow.id) ?? Promise.resolve())
+    .then(async () => syncTeamSeats(await billingCustomer(teamRow), await memberCount(teamRow.id)))
+    .catch((error: unknown) => console.error("[teams] Seat sync failed", error));
+  seatSyncs.set(teamRow.id, next);
+  void next.then(() => {
+    if (seatSyncs.get(teamRow.id) === next) seatSyncs.delete(teamRow.id);
+  });
 }
 
 export async function toTeamDto(teamRow: TeamRow, role: TeamRole): Promise<TeamDto> {
@@ -143,10 +166,7 @@ export function toInviteDto(row: InviteRow): TeamInviteDto {
 }
 
 /** Moves a team app back to the member who added it, keeping their own sign-in state. */
-export function returnAppToAdder(
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
-  row: typeof app.$inferSelect,
-) {
+export function returnAppToAdder(tx: Tx, row: typeof app.$inferSelect) {
   const state = tx
     .select()
     .from(appMemberState)
@@ -166,6 +186,24 @@ export function returnAppToAdder(
   tx.delete(appMemberState).where(eq(appMemberState.appId, row.id)).run();
 }
 
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** Revokes the open invites a user minted for a team (they lost the right to invite). */
+export function revokeInvitesBy(executor: Tx | typeof db, teamId: string, userId: string): void {
+  executor
+    .update(teamInvite)
+    .set({ revokedAt: new Date() })
+    .where(
+      and(
+        eq(teamInvite.teamId, teamId),
+        eq(teamInvite.invitedByUserId, userId),
+        isNull(teamInvite.acceptedAt),
+        isNull(teamInvite.revokedAt),
+      ),
+    )
+    .run();
+}
+
 /**
  * Removes a member and everything that only made sense while they belonged:
  * their sign-in state for the team's apps (so no further pass is issued),
@@ -179,6 +217,7 @@ export function removeMember(teamId: string, userId: string): boolean {
       .returning({ userId: teamMember.userId })
       .all();
     if (removed.length === 0) return false;
+    revokeInvitesBy(tx, teamId, userId);
     const teamApps = tx.select({ id: app.id }).from(app).where(eq(app.teamId, teamId));
     tx.delete(appMemberState)
       .where(and(eq(appMemberState.userId, userId), inArray(appMemberState.appId, teamApps)))
@@ -221,6 +260,43 @@ export function deleteTeam(teamId: string): boolean {
   });
 }
 
+/**
+ * Takes a user out of every team before their account is deleted, so no team
+ * is left without an owner: a team they are alone in is deleted; a team they
+ * own passes to its longest-serving admin, else its longest-serving member;
+ * then the usual member cleanup runs (rotations, overrides, app state, their
+ * open invites).
+ */
+export async function releaseTeamsOf(userId: string): Promise<void> {
+  const memberships = await db
+    .select({ teamId: teamMember.teamId, role: teamMember.role })
+    .from(teamMember)
+    .where(eq(teamMember.userId, userId));
+  for (const { teamId, role } of memberships) {
+    const others = await db
+      .select({ userId: teamMember.userId, role: teamMember.role })
+      .from(teamMember)
+      .where(and(eq(teamMember.teamId, teamId), ne(teamMember.userId, userId)))
+      .orderBy(asc(teamMember.joinedAt), asc(teamMember.userId));
+    if (others.length === 0) {
+      deleteTeam(teamId);
+      continue;
+    }
+    if (role === "owner") {
+      const successor = others.find((other) => other.role === "admin") ?? others[0];
+      if (successor) {
+        await db
+          .update(teamMember)
+          .set({ role: "owner" })
+          .where(and(eq(teamMember.teamId, teamId), eq(teamMember.userId, successor.userId)));
+      }
+    }
+    removeMember(teamId, userId);
+    const [row] = await db.select().from(team).where(eq(team.id, teamId)).limit(1);
+    if (row) syncSeats(row);
+  }
+}
+
 export interface HarkNotice {
   title: string;
   body: string;
@@ -238,6 +314,13 @@ export interface HarkNotice {
  */
 export async function sendNotice(userIds: string[], notice: HarkNotice): Promise<number> {
   if (userIds.length === 0) return 0;
+  // Titles and bodies carry user-chosen names; keep them free of invisible or
+  // reordering characters that could disguise a Hark notice.
+  notice = {
+    ...notice,
+    title: sanitizeDisplayText(notice.title),
+    body: sanitizeDisplayText(notice.body),
+  };
   const now = new Date();
   let accepted = 0;
   for (const userId of userIds) {

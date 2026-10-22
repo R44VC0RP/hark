@@ -20,7 +20,9 @@ import {
   OAUTH_DEFAULT_SCOPES,
   OAUTH_SCOPES,
   pushDataSchema,
+  sanitizeDisplayText,
   serviceCreateSchema,
+  teamNameSchema,
   truncateToUtf8Bytes,
   utf8ByteLength,
   webhookRequestSchema,
@@ -203,6 +205,12 @@ describe("webhookRequestSchema", () => {
     expect(webhookRequestSchema.safeParse({ body: "x", bodyFormat: "html" }).success).toBe(false);
     expect(webhookRequestSchema.safeParse({ body: "x", project: "" }).success).toBe(false);
     expect(webhookRequestSchema.safeParse({ body: "x", project: "a\nb" }).success).toBe(false);
+    expect(webhookRequestSchema.safeParse({ body: "x", project: "\u200b\u202e" }).success).toBe(
+      false,
+    );
+    expect(
+      webhookRequestSchema.parse({ body: "x", project: " Ac\u202eme\u200b  App\u0085 " }).project,
+    ).toBe("Acme App");
     expect(webhookRequestSchema.safeParse({ body: "x", project: "p".repeat(81) }).success).toBe(
       false,
     );
@@ -771,5 +779,16 @@ describe("OAuth scopes", () => {
     expect(OAUTH_DEFAULT_SCOPES).not.toContain("tokens:manage");
     expect(OAUTH_DEFAULT_SCOPES).toContain("offline_access");
     expect(OAUTH_DEFAULT_SCOPES).toHaveLength(OAUTH_SCOPES.length - 1);
+  });
+});
+
+describe("sanitizeDisplayText", () => {
+  it("strips controls, bidi and zero-width characters and collapses whitespace", () => {
+    expect(
+      sanitizeDisplayText("  URGENT\u202e:\u2066 Hark\u200b\ufeff \t\u0085 alert\u0007 "),
+    ).toBe("URGENT: Hark alert");
+    expect(teamNameSchema.parse(" Acme\u202a  Ops ")).toBe("Acme Ops");
+    expect(teamNameSchema.safeParse("\u200b\u2069").success).toBe(false);
+    expect(teamNameSchema.safeParse("a\nb").success).toBe(false);
   });
 });
