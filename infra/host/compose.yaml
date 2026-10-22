@@ -1,0 +1,67 @@
+# Production stack on the AWS host. deploy.sh runs it as
+#   docker compose --env-file /opt/hark/compose.env -f /opt/hark/compose.yaml ...
+# compose.env sets HARK_IMAGE, LITESTREAM_BUCKET and AWS_REGION; app secrets
+# come from the env_file files that deploy.sh renders from SSM.
+#
+# Nothing publishes a port: the only way in is the outbound Cloudflare Tunnel,
+# which reaches hark on the compose network. That is what makes
+# CF-Connecting-IP trustworthy (TRUSTED_CLIENT_IP_HEADER=cf-connecting-ip).
+name: hark
+
+services:
+  hark:
+    image: ${HARK_IMAGE:?set HARK_IMAGE in compose.env}
+    env_file: /opt/hark/.env
+    environment:
+      NODE_ENV: production
+      PORT: "8787"
+      DATABASE_URL: /data/hark.sqlite
+    volumes:
+      - hark-data:/data
+    # Only /data (the volume) and /tmp are writable.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.1
+    # TUNNEL_TOKEN (from CLOUDFLARE_TUNNEL_TOKEN in SSM) is read from the environment,
+    # so it never appears in the process arguments.
+    command: tunnel --no-autoupdate run
+    env_file: /opt/hark/cloudflared.env
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  litestream:
+    image: litestream/litestream:0.5.17
+    command: replicate -config /etc/litestream.yml
+    # Same uid as the node user that owns /data in the hark image.
+    user: "1000:1000"
+    environment:
+      LITESTREAM_BUCKET: ${LITESTREAM_BUCKET:?set LITESTREAM_BUCKET in compose.env}
+      AWS_REGION: ${AWS_REGION:?set AWS_REGION in compose.env}
+    volumes:
+      - hark-data:/data
+      - ./litestream.yml:/etc/litestream.yml:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  hark-data:

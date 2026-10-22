@@ -1,0 +1,6 @@
+{
+  "app": "tsx bin/hark.ts",
+  "context": {
+    "createGithubOidcProvider": true
+  }
+}

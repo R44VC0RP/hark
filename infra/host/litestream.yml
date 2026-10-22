@@ -1,0 +1,13 @@
+# Continuous replication of the Hark database to the backups bucket.
+# Litestream expands ${VAR} from the container environment (set by compose.yaml).
+snapshot:
+  interval: 24h
+  retention: 72h
+
+dbs:
+  - path: /data/hark.sqlite
+    replica:
+      type: s3
+      bucket: ${LITESTREAM_BUCKET}
+      path: hark.sqlite
+      region: ${AWS_REGION}
