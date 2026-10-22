@@ -284,16 +284,13 @@ describe("POST /hooks/:token", () => {
     });
   });
 
-  it("requires Pro for webhook responses", async () => {
+  it("allows webhook responses on the free plan", async () => {
     const response = await post(TOKEN, {
       body: "Deploy?",
       response: { type: "approval" },
     });
-    expect(response.status).toBe(402);
-    expect(await response.json()).toMatchObject({
-      ok: false,
-      error: "Interactive responses require Hark Pro",
-    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true });
   });
 
   it("records credential text responses as replied", async () => {

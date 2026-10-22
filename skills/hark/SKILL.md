@@ -389,7 +389,7 @@ from untrusted content.
 
 Teams share web apps and on-call groups between Hark users. Roles are `owner`, `admin`, and
 `member`; the first seat is free and each further member is $5 per month on the team plan
-(an admin adds seats on the team page in the dashboard; agents cannot start checkout). Invites and
+(the team owner adds seats on the team page in the dashboard; agents cannot start checkout). Invites and
 joins fail with `402 seat_limit` when the team has no free seat.
 
 ```bash

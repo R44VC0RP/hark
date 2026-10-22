@@ -11,8 +11,11 @@ import { signInWithApple, signInWithGoogle, useSession } from "../lib/auth";
 
 const numberFormat = new Intl.NumberFormat("en-US");
 
-/** Pro capabilities that are plan-gated in the API rather than metered in Autumn. */
-const PRO_EXTRAS = ["Interactive responses", "Live Activities", "Response callbacks"];
+/**
+ * Included on every plan. Pro only changes what the plan rows list: iPhones,
+ * `deviceIds` routing, per-minute limits and the monthly allowance.
+ */
+const EVERY_PLAN = ["Approval and reply prompts", "Live Activities", "Response callbacks"];
 
 export function Pricing() {
   const { data: session, isPending } = useSession();
@@ -166,7 +169,6 @@ function SignInButtons({ disabled }: { disabled: boolean }) {
 }
 
 function PlanCard({ plan, children }: { plan: PricingPlanDto; children: React.ReactNode }) {
-  const pro = plan.priceMonthly > 0;
   const rows = [
     plan.notificationsPerMonth === null
       ? "Unlimited notifications"
@@ -177,7 +179,7 @@ function PlanCard({ plan, children }: { plan: PricingPlanDto; children: React.Re
     `${numberFormat.format(plan.servicePerMinute)} requests/minute per service`,
     `${numberFormat.format(plan.accountPerMinute)} requests/minute per account`,
     ...(plan.deviceRouting ? ["Device routing"] : []),
-    ...(pro ? PRO_EXTRAS : []),
+    ...EVERY_PLAN,
   ];
 
   return (

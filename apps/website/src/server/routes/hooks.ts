@@ -282,12 +282,6 @@ export const hooksRoute = new Hono()
     if (parsed.data.deviceIds && !billing.features.deviceRouting) {
       return c.json<WebhookResponse>({ ok: false, error: "Device routing requires Hark Pro" }, 402);
     }
-    if (parsed.data.response && billing.plan !== "pro") {
-      return c.json<WebhookResponse>(
-        { ok: false, error: "Interactive responses require Hark Pro" },
-        402,
-      );
-    }
 
     let targetedDevices: (typeof device.$inferSelect)[] | undefined;
     if (parsed.data.deviceIds) {

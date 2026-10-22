@@ -169,7 +169,7 @@ export function SeatLimitNotice({
         extra person is ${TEAM_SEAT_PRICE_MONTHLY} a month on the team plan.{" "}
         {admin
           ? "Add seats from the Hark dashboard, then invite again."
-          : "Ask a team admin to add a seat from the Hark dashboard."}
+          : "Ask the team owner to add a seat from the Hark dashboard."}
       </Text>
       <Pressable
         accessibilityHint="Opens hark.ryan.ceo in Safari"

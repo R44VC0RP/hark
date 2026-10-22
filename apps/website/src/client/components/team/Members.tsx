@@ -40,6 +40,8 @@ export function SeatsPanel({ team, activating }: { team: TeamDto; activating: bo
   const [error, setError] = useState<string | null>(null);
   const full = seatsFull(team);
   const manage = canManage(team.role);
+  // Only the owner can open team checkout or the billing portal.
+  const owner = team.role === "owner";
   const paid = team.plan === "team";
   const ratio =
     team.seats.available === null || team.seats.available === 0
@@ -72,7 +74,7 @@ export function SeatsPanel({ team, activating }: { team: TeamDto; activating: bo
             {seatsLabel(team)}
           </p>
         </div>
-        {manage ? (
+        {owner ? (
           <div className="flex flex-wrap gap-2">
             {paid ? (
               <button
@@ -117,6 +119,7 @@ export function SeatsPanel({ team, activating }: { team: TeamDto; activating: bo
           : paid
             ? ""
             : ` This team is on the free plan with ${TEAM_FREE_SEATS} seat.`}
+        {manage && !owner ? " The team owner manages billing." : ""}
       </p>
       {activating ? (
         <p className="mt-3 rounded-2xl bg-white/12 px-4 py-3 text-[15px] text-white" role="status">
@@ -124,9 +127,9 @@ export function SeatsPanel({ team, activating }: { team: TeamDto; activating: bo
         </p>
       ) : full ? (
         <p className="mt-3 rounded-2xl bg-warn/12 px-4 py-3 text-sm text-white ring-1 ring-warn/40 ring-inset">
-          {manage
+          {owner
             ? "Every seat is in use. Add a seat before the next person accepts an invite."
-            : "Every seat is in use. Ask a team admin to add seats before inviting anyone else."}
+            : "Every seat is in use. Ask the team owner to add seats before inviting anyone else."}
         </p>
       ) : null}
       <ErrorText>{error}</ErrorText>

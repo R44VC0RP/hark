@@ -132,7 +132,7 @@ export function llmsTxt(): string {
 ## Notes
 
 - Webhook API requests are authenticated by the token in the URL; harkctl uses a scoped agent token. Treat both as credentials.
-- Webhook device targeting, webhook interactive responses, and the webhook Activity API require Hark Pro.
-- Agent-token CLI asks and task Live Activities work on Free with the one-device limit; targeted or multi-device routing requires Pro.
+- Interactive responses, response callbacks, and Live Activities work on every plan, on both the webhook and agent APIs.
+- Hark Pro adds more than one active iPhone, \`deviceIds\` / \`--device\` routing, higher per-minute rate limits, and a larger monthly allowance.
 `;
 }

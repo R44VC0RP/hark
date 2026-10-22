@@ -550,15 +550,19 @@ describe("Live Activity webhook routes", () => {
     expect(displaced).toMatchObject({ status: "ended" });
   });
 
-  it("requires Pro to start a Live Activity", async () => {
+  it("starts a Live Activity on the free plan", async () => {
     billingState.pro = false;
-    const response = await start();
-    expect(response.status).toBe(402);
-    expect(await response.json()).toMatchObject({
-      ok: false,
-      error: "Live Activities require Hark Pro",
+    const targeted = await start();
+    expect(targeted.status).toBe(402);
+    expect(await targeted.json()).toMatchObject({ error: "Device routing requires Hark Pro" });
+    const response = await activityRequest(TOKEN, "", "POST", {
+      title: "Deploy #184",
+      status: "Building",
+      progress: 0,
     });
-    expect(apnsCalls).toHaveLength(0);
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({ ok: true });
+    expect(apnsCalls.length).toBeGreaterThan(0);
   });
 
   it("keeps webhook services isolated", async () => {

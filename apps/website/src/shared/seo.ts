@@ -46,7 +46,7 @@ export const PAGE_SEO: Record<SeoPage, PageSeo> = {
     path: "/pricing",
     title: "Hark Pricing — Free and Pro iPhone Notifications",
     description:
-      "Compare Hark Free and Pro plans for webhook notifications, multiple iPhones, device routing, interactive responses, and Live Activities.",
+      "Compare Hark Free and Pro plans: interactive responses and Live Activities on every plan, plus multiple iPhones, device routing, and higher limits with Pro.",
     index: true,
   },
   launched: {

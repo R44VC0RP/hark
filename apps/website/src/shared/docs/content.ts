@@ -257,7 +257,7 @@ export const DOC_CONTENT: DocSection[] = [
               },
               {
                 name: "response",
-                type: "object, Pro",
+                type: "object",
                 detail: "Turns the notification into an approval, yes/no, or text prompt.",
               },
               {
@@ -459,7 +459,7 @@ export const DOC_CONTENT: DocSection[] = [
               { name: "200", type: "ok", detail: "Accepted, or an idempotent replay." },
               { name: "202", type: "ok", detail: "An identical request is still processing." },
               { name: "400", type: "error", detail: "Invalid payload, key, or device selection." },
-              { name: "402", type: "error", detail: "The payload uses a Hark Pro feature." },
+              { name: "402", type: "error", detail: "`deviceIds` routing requires Hark Pro." },
               { name: "404", type: "error", detail: "Unknown webhook token." },
               { name: "409", type: "error", detail: "Idempotency key reused with a new payload." },
               { name: "429", type: "error", detail: "Rate limit or monthly allowance exhausted." },
@@ -474,11 +474,10 @@ export const DOC_CONTENT: DocSection[] = [
       },
       {
         id: "interactive-responses",
-        pro: true,
         blocks: [
           {
             kind: "p",
-            text: "Hark Pro can attach a fixed response type to any notification. Supported types are `approval` (Approve or Deny), `yes_no` (Yes or No), and `text` (a short free-form reply).",
+            text: "Any notification can carry a fixed response type, on every plan. Supported types are `approval` (Approve or Deny), `yes_no` (Yes or No), and `text` (a short free-form reply).",
           },
           {
             kind: "code",
@@ -547,7 +546,6 @@ export const DOC_CONTENT: DocSection[] = [
       },
       {
         id: "response-status",
-        pro: true,
         blocks: [
           {
             kind: "p",
@@ -591,7 +589,6 @@ curl -X POST ${EXAMPLE_ENDPOINT}/events/evt_Cxns2IdbF4H0TJYq/cancel`,
       },
       {
         id: "response-callbacks",
-        pro: true,
         blocks: [
           {
             kind: "p",
@@ -629,7 +626,6 @@ curl -X POST ${EXAMPLE_ENDPOINT}/events/evt_Cxns2IdbF4H0TJYq/cancel`,
   },
   {
     id: "activity-api",
-    pro: true,
     lead: "A Live Activity is a stateful card on the Lock Screen and in the Dynamic Island. Start one, push partial updates as work progresses, then end it. Same webhook token, nested routes.",
     subsections: [
       {
@@ -1362,7 +1358,7 @@ harkctl apps remove app_...`,
           },
           {
             kind: "p",
-            text: "Without the team plan, creating or accepting an invite for a second member returns `402` with code `seat_limit`. Owners and admins start checkout or open the billing portal from the team page in the dashboard.",
+            text: "Without the team plan, creating or accepting an invite for a second member returns `402` with code `seat_limit`. The team owner starts checkout or opens the billing portal from the team page in the dashboard.",
           },
           {
             kind: "note",

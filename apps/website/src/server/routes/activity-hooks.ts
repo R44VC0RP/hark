@@ -285,9 +285,6 @@ export const activityHooksRoute = new Hono()
       }
     }
     const billing = await getBilling(owner, true);
-    if (billing.plan !== "pro") {
-      return c.json({ ok: false, error: "Live Activities require Hark Pro" }, 402);
-    }
     if (!(await checkNotificationAllowance(service.userId))) {
       return c.json({ ok: false, error: "Monthly notification limit reached" }, 429);
     }

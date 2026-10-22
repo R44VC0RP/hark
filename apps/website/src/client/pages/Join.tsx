@@ -149,8 +149,8 @@ export function Join() {
                   className="mt-5 rounded-2xl bg-warn/12 px-4 py-3 text-[15px] leading-relaxed text-white ring-1 ring-warn/40 ring-inset"
                   role="alert"
                 >
-                  {teamName} has no free seats right now. Ask a team admin to add a seat, then open
-                  this link again.
+                  {teamName} has no free seats right now. Ask the team owner to add a seat, then
+                  open this link again.
                 </div>
               ) : null}
               {outcome.kind === "error" ? (

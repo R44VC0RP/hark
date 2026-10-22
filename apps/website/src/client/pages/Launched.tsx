@@ -66,8 +66,8 @@ export function Launched() {
                 Support what comes next
               </h2>
               <p className="mt-1.5 max-w-[34rem] text-pretty">
-                Upgrade to Hark Pro to support continued development and unlock webhook-powered Live
-                Activities, richer approval and response workflows, callbacks, and device routing.{" "}
+                Upgrade to Hark Pro to support continued development and unlock more iPhones, device
+                routing, higher rate limits, and a larger monthly allowance.{" "}
                 <Link className="hark-link" to="/pricing">
                   See Hark Pro
                 </Link>
