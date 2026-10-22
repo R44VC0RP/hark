@@ -6,6 +6,14 @@
 # Nothing publishes a port: the only way in is the outbound Cloudflare Tunnel,
 # which reaches hark on the compose network. That is what makes
 # CF-Connecting-IP trustworthy (TRUSTED_CLIENT_IP_HEADER=cf-connecting-ip).
+#
+# hark and cloudflared cannot reach the instance metadata service (IMDSv2 hop
+# limit 1, plus a DOCKER-USER drop rule from bootstrap.sh), so they never see
+# the instance role. Litestream needs the role for S3 and talks to nothing else,
+# so it runs on the host network instead of the compose network.
+#
+# Sidecar images are pinned to their linux/arm64 digests; to bump, change the
+# tag and take the arm64 digest from `docker buildx imagetools inspect <image:tag>`.
 name: hark
 
 services:
@@ -21,7 +29,7 @@ services:
     # Only /data (the volume) and /tmp are writable.
     read_only: true
     tmpfs:
-      - /tmp
+      - /tmp:size=64m,noexec,nosuid,nodev
     cap_drop:
       - ALL
     security_opt:
@@ -29,14 +37,14 @@ services:
     restart: unless-stopped
 
   cloudflared:
-    image: cloudflare/cloudflared:2026.10.1
+    image: cloudflare/cloudflared:2026.10.1@sha256:6d9f470f8df4161f90df39cd97719cdb8d02a8ade3885ab9b0ec15a495820b79
     # TUNNEL_TOKEN (from CLOUDFLARE_TUNNEL_TOKEN in SSM) is read from the environment,
     # so it never appears in the process arguments.
     command: tunnel --no-autoupdate run
     env_file: /opt/hark/cloudflared.env
     read_only: true
     tmpfs:
-      - /tmp
+      - /tmp:size=64m,noexec,nosuid,nodev
     cap_drop:
       - ALL
     security_opt:
@@ -44,8 +52,9 @@ services:
     restart: unless-stopped
 
   litestream:
-    image: litestream/litestream:0.5.17
+    image: litestream/litestream:0.5.17@sha256:ebc367d2267acf1d46b46b4883352dd1a2238b8286444acb57ac2c477353aace
     command: replicate -config /etc/litestream.yml
+    network_mode: host
     # Same uid as the node user that owns /data in the hark image.
     user: "1000:1000"
     environment:
@@ -56,7 +65,7 @@ services:
       - ./litestream.yml:/etc/litestream.yml:ro
     read_only: true
     tmpfs:
-      - /tmp
+      - /tmp:size=64m,noexec,nosuid,nodev
     cap_drop:
       - ALL
     security_opt:

@@ -2,7 +2,12 @@
 # Litestream expands ${VAR} from the container environment (set by compose.yaml).
 snapshot:
   interval: 24h
-  retention: 72h
+
+# Never delete from S3: the instance role has no s3:DeleteObject, and the
+# bucket's lifecycle rules expire old files instead (35 days, 7 more for
+# noncurrent versions).
+retention:
+  enabled: false
 
 dbs:
   - path: /data/hark.sqlite

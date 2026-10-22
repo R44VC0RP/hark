@@ -1,6 +1,8 @@
 {
   "app": "tsx bin/hark.ts",
   "context": {
-    "createGithubOidcProvider": true
+    "createGithubOidcProvider": true,
+    "githubRepositoryId": "1310428322",
+    "githubRepositoryOwnerId": "89211796"
   }
 }

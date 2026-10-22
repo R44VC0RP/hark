@@ -69,26 +69,27 @@ jobs:
         env:
           REPOSITORY: ${{ steps.ecr.outputs.registry }}/hark
         run: |
-          docker build --platform linux/arm64 \
-            -t "$REPOSITORY:$GITHUB_SHA" -t "$REPOSITORY:latest" .
-          docker push "$REPOSITORY:$GITHUB_SHA"
-          docker push "$REPOSITORY:latest"
+          # Tags are immutable in ECR, so a re-run for an already pushed commit
+          # deploys that image instead of rebuilding.
+          if aws ecr describe-images --repository-name hark \
+            --image-ids "imageTag=$GITHUB_SHA" >/dev/null 2>&1; then
+            echo "$REPOSITORY:$GITHUB_SHA already exists; not rebuilding"
+          else
+            docker build --platform linux/arm64 --provenance=false \
+              -t "$REPOSITORY:$GITHUB_SHA" -t "$REPOSITORY:latest" .
+            docker push "$REPOSITORY:$GITHUB_SHA"
+            docker push "$REPOSITORY:latest"
+          fi
           echo "uri=$REPOSITORY:$GITHUB_SHA" >> "$GITHUB_OUTPUT"
 
-      - name: Upload host bundle
-        id: bundle
-        run: |
-          account=$(aws sts get-caller-identity --query Account --output text)
-          bucket="hark-deploy-${account}-${AWS_REGION}"
-          tar -czf host.tar.gz -C infra/host --owner=0 --group=0 .
-          aws s3 cp host.tar.gz "s3://${bucket}/host/${GITHUB_SHA}.tar.gz"
-          echo "url=s3://${bucket}/host/${GITHUB_SHA}.tar.gz" >> "$GITHUB_OUTPUT"
-
+      # Runs the stack's HarkDeploy document, which accepts only an image of this
+      # repository pinned to a commit sha. Host files (deploy.sh and friends) ship
+      # with the CDK stack, not from here. Only the status is printed: the
+      # command output stays in SSM for operators.
       - name: Deploy on the instance
         env:
           INSTANCE_ID: ${{ vars.HARK_INSTANCE_ID }}
           IMAGE_URI: ${{ steps.image.outputs.uri }}
-          BUNDLE_URL: ${{ steps.bundle.outputs.url }}
         run: |
           if [ -z "$INSTANCE_ID" ]; then
             INSTANCE_ID=$(aws ec2 describe-instances \
@@ -100,24 +101,13 @@ jobs:
             exit 1
           fi
 
-          jq -n --arg bundle "$BUNDLE_URL" --arg image "$IMAGE_URI" --arg region "$AWS_REGION" '{
-            executionTimeout: ["900"],
-            commands: [
-              "set -eu",
-              "tmp=$(mktemp -d)",
-              "aws s3 cp --region \($region) \($bundle) \"$tmp/host.tar.gz\"",
-              "tar -xzf \"$tmp/host.tar.gz\" -C /opt/hark --no-same-owner --no-overwrite-dir",
-              "rm -rf \"$tmp\"",
-              "chmod +x /opt/hark/deploy.sh /opt/hark/restore.sh /opt/hark/bootstrap.sh",
-              "/opt/hark/deploy.sh \($image)"
-            ]
-          }' > params.json
-
+          # shellcheck disable=SC2016 # $LATEST and $image are literal (SSM, jq)
           command_id=$(aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
-            --document-name AWS-RunShellScript \
+            --document-name HarkDeploy \
+            --document-version '$LATEST' \
             --comment "hark ${GITHUB_SHA::12}" \
-            --parameters file://params.json \
+            --parameters "$(jq -cn --arg image "$IMAGE_URI" '{image: [$image]}')" \
             --query Command.CommandId --output text)
           echo "SSM command $command_id on $INSTANCE_ID"
 
@@ -132,12 +122,11 @@ jobs:
             esac
           done
 
-          aws ssm get-command-invocation --command-id "$command_id" --instance-id "$INSTANCE_ID" \
-            --query StandardOutputContent --output text || true
-          aws ssm get-command-invocation --command-id "$command_id" --instance-id "$INSTANCE_ID" \
-            --query StandardErrorContent --output text >&2 || true
           echo "Status: $status"
-          test "$status" = Success
+          if [ "$status" != Success ]; then
+            echo "Deploy failed; read the output with: aws ssm get-command-invocation --command-id $command_id --instance-id $INSTANCE_ID" >&2
+            exit 1
+          fi
 
       - name: Verify public deployment
         run: |

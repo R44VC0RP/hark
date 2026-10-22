@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
-# Deploy one Hark image on this host. Safe to re-run.
+# Deploy one Hark image on this host. Safe to re-run. CI runs it through the
+# HarkDeploy Run Command document; an operator can run it in a session.
 #   /opt/hark/deploy.sh <account>.dkr.ecr.<region>.amazonaws.com/hark:<sha>
+# If the new image does not become healthy, the previous image is started again
+# and the script fails; the failed container's log tail is kept in
+# /opt/hark/last-failed-deploy.log (not in the command output, which CI can read).
+# A missing database with a non-empty replica is an error (a failed restore must
+# not start an empty database); HARK_ALLOW_EMPTY_DB=1 overrides that.
 set -euo pipefail
 
 image=${1:?usage: deploy.sh <image-uri>}
@@ -67,12 +73,20 @@ chmod 600 "$env_tmp" "$tunnel_tmp"
 mv -f "$env_tmp" "$HARK_DIR/.env"
 mv -f "$tunnel_tmp" "$HARK_DIR/cloudflared.env"
 
-cat >"$HARK_DIR/compose.env.tmp" <<ENV
-HARK_IMAGE=${image}
+previous_image=
+if [[ -f "$HARK_DIR/compose.env" ]]; then
+  previous_image=$(sed -n 's/^HARK_IMAGE=//p' "$HARK_DIR/compose.env")
+fi
+
+write_compose_env() {
+  cat >"$HARK_DIR/compose.env.tmp" <<ENV
+HARK_IMAGE=${1}
 LITESTREAM_BUCKET=${LITESTREAM_BUCKET}
 AWS_REGION=${AWS_REGION}
 ENV
-mv -f "$HARK_DIR/compose.env.tmp" "$HARK_DIR/compose.env"
+  mv -f "$HARK_DIR/compose.env.tmp" "$HARK_DIR/compose.env"
+}
+write_compose_env "$image"
 umask 022
 
 echo "==> Pulling images"
@@ -87,22 +101,51 @@ compose run --rm --no-deps -T hark true </dev/null
 # there is no replica yet.
 echo "==> Restoring database from replica if it is missing"
 compose run --rm --no-deps -T litestream \
-  restore -config /etc/litestream.yml -if-db-not-exists -if-replica-exists /data/hark.sqlite \
+  restore -config /etc/litestream.yml -if-db-not-exists -if-replica-exists \
+  -integrity-check quick /data/hark.sqlite \
   </dev/null
+
+if ! compose run --rm --no-deps -T hark test -e /data/hark.sqlite </dev/null; then
+  replica_key=$(aws s3api list-objects-v2 --region "$AWS_REGION" --bucket "$LITESTREAM_BUCKET" \
+    --prefix hark.sqlite/ --max-items 1 --query 'Contents[0].Key' --output text)
+  if [[ "$replica_key" != "None" && "${HARK_ALLOW_EMPTY_DB:-}" != "1" ]]; then
+    echo "No database after the restore step, but the replica is not empty; refusing to" >&2
+    echo "start an empty database. Fix the restore (restore.sh), or set HARK_ALLOW_EMPTY_DB=1." >&2
+    exit 1
+  fi
+  echo "No replica yet; hark will create a new database"
+fi
+
+wait_healthy() {
+  local container status=unknown
+  container=$(compose ps -q hark)
+  for _ in $(seq 1 30); do
+    status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container")
+    [[ "$status" == "healthy" ]] && return 0
+    sleep 2
+  done
+  echo "hark is ${status} after 60s" >&2
+  return 1
+}
 
 echo "==> Starting ${image}"
 compose up -d --remove-orphans
 
-container=$(compose ps -q hark)
-status=unknown
-for _ in $(seq 1 30); do
-  status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container")
-  [[ "$status" == "healthy" ]] && break
-  sleep 2
-done
-if [[ "$status" != "healthy" ]]; then
-  echo "hark is ${status} after 60s; last 50 log lines:" >&2
-  compose logs --no-color --tail=50 hark >&2
+if ! wait_healthy; then
+  (umask 077 && compose logs --no-color --tail=200 hark >"$HARK_DIR/last-failed-deploy.log" 2>&1) || true
+  echo "Log tail saved to $HARK_DIR/last-failed-deploy.log" >&2
+  if [[ -n "$previous_image" && "$previous_image" != "$image" ]]; then
+    echo "==> Rolling back to ${previous_image}" >&2
+    umask 077
+    write_compose_env "$previous_image"
+    umask 022
+    compose up -d --remove-orphans
+    if wait_healthy; then
+      echo "Rolled back: ${previous_image} is healthy" >&2
+    else
+      echo "Rollback image ${previous_image} is not healthy either" >&2
+    fi
+  fi
   exit 1
 fi
 

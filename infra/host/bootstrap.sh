@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
-# First-boot setup for the Hark host (Amazon Linux 2023, arm64). The CDK stack
-# feeds this file as EC2 user data, prefixed with exports of LITESTREAM_BUCKET
-# and AWS_REGION. It installs the runtime only; deploy.sh does the deploying.
+# Host setup for the Hark host (Amazon Linux 2023, arm64), run as root from the
+# extracted host bundle: by EC2 user data on first boot and by the HarkUpdateHost
+# Run Command document afterwards, both with LITESTREAM_BUCKET and AWS_REGION
+# exported. Safe to re-run. It installs the runtime and this bundle into
+# /opt/hark; deploy.sh does the deploying.
+#   bootstrap.sh <extracted bundle dir>
 set -euo pipefail
+
+bundle_dir=${1:?usage: bootstrap.sh <extracted host bundle dir>}
 
 # Pinned docker compose release; bump both together from
 # https://github.com/docker/compose/releases (docker-compose-linux-aarch64.sha256).
@@ -14,7 +19,7 @@ if [[ "$(uname -m)" != "aarch64" ]]; then
   exit 1
 fi
 
-dnf install -y docker dnf-automatic
+dnf install -y docker dnf-automatic iptables-nft
 
 # Apply security updates automatically.
 sed -i -E \
@@ -22,6 +27,15 @@ sed -i -E \
   -e 's/^apply_updates[[:space:]]*=.*/apply_updates = yes/' \
   /etc/dnf/automatic.conf
 systemctl enable --now dnf-automatic.timer
+
+# Kernel live patches (installed by dnf-automatic like other security updates)
+# cover kernel CVEs until the next reboot. Best effort: a kernel without live
+# patch support must not fail the setup.
+if dnf install -y kpatch-dnf kpatch-runtime && dnf kernel-livepatch -y auto; then
+  systemctl enable --now kpatch.service
+else
+  echo "warning: kernel live patching could not be enabled" >&2
+fi
 
 # Rotate container logs so json-file logs cannot fill the disk.
 install -d -m 755 /etc/docker
@@ -43,7 +57,37 @@ rm -f "$compose_tmp"
 systemctl enable --now docker
 docker compose version
 
+# Containers on Docker bridges must not reach the instance metadata service
+# (the role's credentials). Litestream, the one container that needs the role,
+# uses the host network and is unaffected. Docker recreates DOCKER-USER on every
+# start, so a unit tied to docker.service re-inserts the rule each time.
+cat >/etc/systemd/system/hark-block-imds.service <<'UNIT'
+[Unit]
+Description=Block container access to the EC2 instance metadata service
+After=docker.service
+Requires=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'iptables -C DOCKER-USER -d 169.254.169.254/32 -j DROP 2>/dev/null || iptables -I DOCKER-USER -d 169.254.169.254/32 -j DROP'
+
+[Install]
+WantedBy=docker.service
+UNIT
+systemctl daemon-reload
+systemctl enable hark-block-imds.service
+systemctl restart hark-block-imds.service
+iptables -C DOCKER-USER -d 169.254.169.254/32 -j DROP
+
 install -d -m 755 /opt/hark
+for f in compose.yaml litestream.yml; do
+  install -m 644 "$bundle_dir/$f" "/opt/hark/$f"
+done
+for f in bootstrap.sh deploy.sh restore.sh; do
+  install -m 755 "$bundle_dir/$f" "/opt/hark/$f"
+done
 # Values that are fixed per stack, read by deploy.sh.
 umask 077
 cat >/opt/hark/instance.env <<ENV

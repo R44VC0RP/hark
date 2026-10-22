@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Upload every KEY=value line of a local env file to SSM Parameter Store as
-# SecureString /hark/prod/<KEY> (overwriting). Values are never printed.
+# SecureString /hark/prod/<KEY> (overwriting), encrypted with the stack's
+# alias/hark-prod key, which only the Hark host can decrypt. Values are never printed.
 #   AWS_PROFILE=inbound infra/scripts/put-env.sh path/to/.env.production
 # Format: one KEY=value per line; blank lines, # comments and `export ` are fine;
 # a value may be wrapped in matching single or double quotes (they are stripped,
@@ -12,6 +13,7 @@ set -euo pipefail
 env_file=${1:?usage: put-env.sh <env-file>}
 region=${AWS_REGION:-us-east-1}
 prefix=/hark/prod
+key_id=alias/hark-prod
 
 umask 077
 value_file=$(mktemp)
@@ -56,7 +58,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   # Pass the value through a file so it never appears in the process list.
   printf '%s' "$value" >"$value_file"
   aws ssm put-parameter --region "$region" --name "${prefix}/${key}" --type SecureString \
-    --overwrite --value "file://${value_file}" --no-cli-pager >/dev/null
+    --key-id "$key_id" --overwrite --value "file://${value_file}" --no-cli-pager >/dev/null
   echo "put ${prefix}/${key}"
   count=$((count + 1))
 done <"$env_file"

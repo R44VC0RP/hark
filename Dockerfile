@@ -34,6 +34,8 @@ FROM node:22-trixie-slim@sha256:8eb619e402eaede1748a3c8173bffab391592812e8513645
 ENV NODE_ENV=production
 ENV PORT=8787
 ENV DATABASE_URL=/data/hark.sqlite
+# The pinned base can lag Debian security fixes (glibc, zlib, ...); take them at build time.
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 # The app is root-owned and read-only so the runtime user cannot rewrite it;
 # only /data is writable by node.

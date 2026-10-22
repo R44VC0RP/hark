@@ -8,17 +8,19 @@ through SSM Session Manager.
 ```
 Cloudflare edge ── tunnel (outbound) ──> cloudflared ──> hark:8787 ──> /data/hark.sqlite
                                                                   └── litestream ──> S3 (backups)
-GitHub Actions ── OIDC ──> ECR push, S3 bundle, SSM Run Command ──> /opt/hark/deploy.sh
+GitHub Actions ── OIDC ──> ECR push, SSM Run Command (HarkDeploy) ──> /opt/hark/deploy.sh <image>
+cdk deploy ──> host bundle asset ── HarkUpdateHost (operator) ──> /opt/hark/*
 ```
 
 | Piece | What it is |
 | --- | --- |
-| `lib/hark-stack.ts` | VPC (one public subnet, no NAT), egress-only security group, the instance, ECR `hark`, backups and deploy buckets, IAM roles, recover alarm, optional alerts and budget |
-| `host/bootstrap.sh` | First-boot user data: Docker, pinned compose plugin, `dnf-automatic`, log rotation |
-| `host/compose.yaml` | `hark`, `cloudflared` and `litestream` containers, all read-only with no capabilities |
-| `host/deploy.sh` | Renders `.env` from SSM, pulls, restores a missing DB, starts, waits for healthy |
+| `lib/hark-stack.ts` | VPC (one public subnet, no NAT, flow logs), egress-only security group, the instance, ECR `hark`, backups bucket, `alias/hark-prod` key, the `HarkDeploy`/`HarkUpdateHost` Run Command documents, Session Manager logging, daily EBS snapshots, IAM roles, recover alarm, optional alerts and budget |
+| `host/` | The host bundle. The stack uploads it as an asset; first boot and `HarkUpdateHost` install it into `/opt/hark` |
+| `host/bootstrap.sh` | Host setup, safe to re-run: Docker, pinned compose plugin, `dnf-automatic`, kernel live patching, log rotation, the IMDS block for containers, the bundle into `/opt/hark` |
+| `host/compose.yaml` | `hark`, `cloudflared` and `litestream` containers, all read-only with no capabilities; only `litestream` (host network) can reach the instance role |
+| `host/deploy.sh` | Renders `.env` from SSM, pulls, restores a missing DB, starts, waits for healthy, rolls back on failure |
 | `host/restore.sh` | Restores the DB from the Litestream replica |
-| `scripts/put-env.sh` | Uploads a local env file to SSM as SecureString parameters |
+| `scripts/put-env.sh` | Uploads a local env file to SSM as SecureString parameters (key `alias/hark-prod`) |
 
 ## Cost
 
@@ -29,16 +31,20 @@ About **$18 per month**, on demand:
 | `t4g.small` on demand | ~$12.30 |
 | 20 GiB gp3 root volume | ~$1.60 |
 | Public IPv4 address | ~$3.60 |
-| S3, ECR, SSM Parameter Store, CloudWatch alarm | cents |
+| KMS key `alias/hark-prod` | $1 |
+| 7 daily EBS snapshots (incremental) | ~$0.50 |
+| S3, ECR, SSM Parameter Store, CloudWatch alarm and logs | cents |
 
 A 1-year no-upfront reserved instance (or Savings Plan) roughly halves the
-compute line. SecureString parameters use the AWS-managed `aws/ssm` key, which
-is free. NAT gateways, load balancers and Elastic IPs are deliberately absent.
+compute line. NAT gateways, load balancers and Elastic IPs are deliberately absent.
 
 ## Configuration
 
 Everything the app reads lives in SSM Parameter Store as SecureString
-parameters under `/hark/prod/<NAME>`. `deploy.sh` renders them to
+parameters under `/hark/prod/<NAME>`, encrypted with the stack's KMS key
+`alias/hark-prod`. Its key policy lets the account administer it and encrypt
+with it, but only the instance role (through SSM) can decrypt, and the instance
+role is denied every parameter outside `/hark/prod`. `deploy.sh` renders them to
 `/opt/hark/.env` (mode 600) on every deploy. `CLOUDFLARE_TUNNEL_TOKEN` goes only
 to `/opt/hark/cloudflared.env` (as `TUNNEL_TOKEN`), so the app never sees it.
 
@@ -80,7 +86,12 @@ them), or base64. Values may not contain a single quote.
    `-- -c alertEmail=you@example.com` for the alarm email and the $30 budget, and
    `-c createGithubOidcProvider=false` if the account already has the GitHub OIDC
    provider. Note the outputs: `InstanceId`, `RepositoryUri`, `BackupsBucketName`,
-   `DeployBucketName`, `GithubDeployRoleArn`.
+   `DeployDocumentName`, `GithubDeployRoleArn`. The deploy role trusts only the
+   `production` environment of `production-update.yml` on `main`, pinned to the
+   numeric repository and owner ids in `cdk.json` (`githubRepositoryId`,
+   `githubRepositoryOwnerId`; from `gh api repos/R44VC0RP/hark --jq '.id, .owner.id'`).
+   The stack has termination protection and the instance has API termination
+   protection; turn both off deliberately before replacing or destroying them.
 4. Create the tunnel in Cloudflare Zero Trust (Networks → Tunnels → Create, type
    cloudflared). Copy its token. Do not add the public hostname yet (it would
    collide with the current DNS record); that is the cutover step below.
@@ -98,83 +109,87 @@ them), or base64. Values may not contain a single quote.
 The instance takes a few minutes after `cdk deploy` to finish `bootstrap.sh`;
 check with `sudo cat /var/log/cloud-init-output.log` in a session.
 
+## After a stack update
+
+1. **Parameters moved to the key:** parameters written before `alias/hark-prod`
+   existed are still encrypted with `aws/ssm`. Re-upload them once with
+   `infra/scripts/put-env.sh <env-file>` (the full production file); check with
+   `aws ssm get-parameters-by-path --path /hark/prod --query 'Parameters[].Name'`
+   and `aws ssm describe-parameters --parameter-filters Key=Path,Values=/hark/prod --query 'Parameters[].[Name,KeyId]'`.
+2. **Host files changed** (anything in `host/`): run `HarkUpdateHost` (below).
+   Changing `host/` also changes the instance's user data, which CloudFormation
+   applies by stopping and starting the instance (a minute or two of downtime;
+   the containers come back on their own, but the new files do not arrive until
+   `HarkUpdateHost` runs).
+3. Run the **Production Update** workflow so the containers pick up the new
+   compose file.
+
 ## Migrating from exe.dev
 
-1. On the old box (`ssh raven-cobra.exe.xyz`, `cd /home/exedev/hark`), stop the app
-   and write a consistent copy into the volume:
-
-   ```sh
-   docker compose stop hark
-   docker compose run --rm --no-deps -T hark node -e "
-     const Database = require('better-sqlite3');
-     const db = new Database('/data/hark.sqlite');
-     db.pragma('wal_checkpoint(TRUNCATE)');
-     db.backup('/data/hark-migrate.sqlite').then(() => {
-       console.log('integrity', db.pragma('integrity_check', { simple: true }));
-       db.close();
-     });
-   " < /dev/null
-   docker run --rm -v hark_hark-data:/data busybox cat /data/hark-migrate.sqlite > ~/hark-migrate.sqlite
-   ```
-
-   Leave it stopped: writes after this point would be lost.
-2. Copy it to the laptop and into the deploy bucket:
-
-   ```sh
-   scp raven-cobra.exe.xyz:hark-migrate.sqlite .
-   aws s3 cp hark-migrate.sqlite s3://<DeployBucketName>/migrate/hark.sqlite
-   ```
-
-3. Put it in the new host's volume before the first deploy
-   (`aws ssm start-session --target <InstanceId>`):
-
-   ```sh
-   sudo docker volume create hark_hark-data
-   sudo aws s3 cp --region us-east-1 s3://<DeployBucketName>/migrate/hark.sqlite \
-     /var/lib/docker/volumes/hark_hark-data/_data/hark.sqlite
-   sudo chown -R 1000:1000 /var/lib/docker/volumes/hark_hark-data/_data
-   ```
-
-   Compose warns once that it did not create this volume; that is harmless.
-4. Run the **Production Update** workflow (or wait for step 7 above). `deploy.sh`
-   finds the DB, so it does not restore over it; Litestream starts replicating it.
-5. Cut over DNS: in Cloudflare DNS delete the `hark.ryan.ceo` CNAME to exe.dev,
-   then in the tunnel add the public hostname `hark.ryan.ceo` → `http://hark:8787`
-   (this creates the tunnel CNAME). Check `curl https://hark.ryan.ceo/api/health`.
-6. Delete `s3://<DeployBucketName>/migrate/hark.sqlite`; it expires after 30 days
-   regardless.
+Done on 2026-10-22. The database was copied into the volume before the first
+deploy through the (since removed) deploy bucket; see this file's history for
+the steps.
 
 ## Operations
 
 - **Shell:** `aws ssm start-session --target <InstanceId>`; then
   `cd /opt/hark && sudo docker compose --env-file compose.env ps` (or `logs -f hark`).
 - **Deploy:** run the **Production Update** workflow. It builds the arm64 image,
-  pushes `:<sha>` and `:latest`, uploads `infra/host` as
-  `s3://<DeployBucketName>/host/<sha>.tar.gz` and runs `deploy.sh` through SSM.
+  pushes `:<sha>` and `:latest` (`:<sha>` tags are immutable; a re-run for a pushed
+  sha reuses the image) and runs the `HarkDeploy` document, which accepts only
+  `<account>.dkr.ecr.us-east-1.amazonaws.com/hark:<40-hex sha>` and runs
+  `/opt/hark/deploy.sh <image>`. The workflow prints only the command status; read
+  the output with `aws ssm get-command-invocation --command-id <id> --instance-id <InstanceId>`.
+- **Update host files:** CI cannot change `/opt/hark`. After a `cdk deploy` that
+  changed `host/`, run
+  `aws ssm send-command --document-name HarkUpdateHost --document-version '$LATEST' --instance-ids <InstanceId>`.
+  It downloads the bundle this stack version uploaded and re-runs `bootstrap.sh`
+  (idempotent), which installs it into `/opt/hark`. Then deploy again.
+- **Roll back:** if the new image does not become healthy within 60 seconds,
+  `deploy.sh` starts the previous image again and fails; the failed container's
+  log tail is in `/opt/hark/last-failed-deploy.log`. To go back to an older build
+  deliberately, in a session: `sudo /opt/hark/deploy.sh <RepositoryUri>:<older sha>`
+  (images older than the last 30 are expired). Database migrations are not rolled
+  back, so an older image must tolerate the newer schema.
 - **Rotate a secret:** `infra/scripts/put-env.sh <file>` (a file with just the
   changed keys is fine), then re-run the workflow. To remove a key:
   `aws ssm delete-parameter --name /hark/prod/<NAME>`.
 - **Backups:** Litestream streams every change to
-  `s3://<BackupsBucketName>/hark.sqlite`, with a daily snapshot and 72 hours of
-  point-in-time history. Bucket versioning keeps overwritten objects 30 more days.
+  `s3://<BackupsBucketName>/hark.sqlite`, with a daily snapshot. It never deletes
+  (retention is disabled and the instance role has no `s3:DeleteObject`); the
+  bucket expires files after 35 days and noncurrent versions 7 days after that.
+  Separately, Data Lifecycle Manager snapshots the instance's volume daily at
+  05:00 UTC (instances tagged `hark:snapshot=daily`) and keeps 7. To use one, create
+  a volume from the snapshot (EC2 → Snapshots), attach it to the instance or a
+  helper instance, and copy `/var/lib/docker/volumes/hark_hark-data/_data/hark.sqlite`.
 - **Restore:** in a session, `sudo /opt/hark/restore.sh --force` restores the
   latest state (the current files are moved aside, not deleted). Add
-  `-timestamp 2026-10-22T10:00:00Z` for a point in time. On a replaced or new
-  instance, just deploy: `deploy.sh` restores automatically when the DB is missing.
-- **Updates:** `dnf-automatic` applies security updates daily. Amazon Linux 2023
+  `-timestamp 2026-10-22T10:00:00Z` for a point in time. The restore is
+  integrity-checked (`-integrity-check quick`); if it fails, the moved-aside files
+  are put back and hark stays stopped. On a replaced or new instance, just deploy:
+  `deploy.sh` restores automatically when the DB is missing, and refuses to start
+  an empty database while the replica has data (override in a session with
+  `sudo HARK_ALLOW_EMPTY_DB=1 /opt/hark/deploy.sh <image>`).
+- **Audit logs:** VPC flow logs and Session Manager transcripts go to CloudWatch
+  Logs (the stack's `FlowLogGroup` and `SessionLogGroup`). The session preferences
+  document `SSM-SessionManagerRunShell` is region-wide: it applies to every
+  Session Manager session in us-east-1.
+- **Updates:** `dnf-automatic` applies security updates daily, including kernel
+  live patches (Kernel Live Patching is enabled by `bootstrap.sh`); a new kernel
+  itself still needs a reboot (`sudo reboot` in a session). Amazon Linux 2023
   pins its repository release, so newer AL2023 releases arrive only with a new
   AMI; to move to one, `dnf upgrade --releasever=latest` in a session, or replace
   the instance (a new instance resolves the latest AMI at launch and restores
   from Litestream on its first deploy).
 - **Bump compose, cloudflared or Litestream:** `COMPOSE_VERSION`/`COMPOSE_SHA256`
-  in `host/bootstrap.sh` (applies to new instances only) and the image tags in
-  `host/compose.yaml` (applies on the next deploy).
+  in `host/bootstrap.sh`, and the image tag and its linux/arm64 digest in
+  `host/compose.yaml` (`docker buildx imagetools inspect <image:tag>`); then
+  `cdk deploy`, `HarkUpdateHost`, deploy.
 
 ## Checks
 
-`pnpm --filter @hark/infra synth` works offline:
-`CDK_DEFAULT_ACCOUNT=123456789012 pnpm --filter @hark/infra synth`. It warns that
-the instance `ImageId` (`resolve:ssm:...`) is not an `ami-*` id; EC2 accepts it,
-and it keeps a new AMI release from replacing the instance on every deploy.
+`pnpm --filter @hark/infra synth` works offline for the production account (the
+AMI id is cached in `cdk.context.json`):
+`CDK_DEFAULT_ACCOUNT=375612485665 pnpm --filter @hark/infra synth`.
 If `us-east-1a` cannot launch `t4g.small` for this account, pass
 `-c availabilityZone=us-east-1b` (this replaces the VPC subnet and the instance).
