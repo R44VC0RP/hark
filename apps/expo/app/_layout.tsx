@@ -5,7 +5,7 @@ import {
   useFonts,
 } from "@expo-google-fonts/inter-tight";
 import * as Notifications from "expo-notifications";
-import { router, Stack, usePathname } from "expo-router";
+import { router, Stack, usePathname, useSegments } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
@@ -39,6 +39,13 @@ Notifications.setNotificationHandler({
 export default function RootLayout() {
   const { data: session } = useSession();
   const pathname = usePathname();
+  const segments = useSegments();
+  // Analytics gets the route pattern (`/join/:code`), never invite codes or
+  // IDs; `:` keeps it within the server's path character set.
+  const routePattern = `/${segments
+    .filter((segment) => segment !== "index" && !segment.startsWith("("))
+    .map((segment) => segment.replace(/^\[(?:\.\.\.)?(.+)\]$/, ":$1"))
+    .join("/")}`;
   const [fontsLoaded, fontError] = useFonts({
     InterTight_400Regular,
     InterTight_500Medium,
@@ -81,9 +88,10 @@ export default function RootLayout() {
     };
   }, []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: each navigation is a view, even within one pattern.
   useEffect(() => {
-    void trackAppEvent("screen_view", { path: pathname });
-  }, [pathname]);
+    void trackAppEvent("screen_view", { path: routePattern });
+  }, [pathname, routePattern]);
 
   useEffect(() => {
     if (!session) return;

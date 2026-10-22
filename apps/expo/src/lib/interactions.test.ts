@@ -67,7 +67,7 @@ vi.mock("./api", () => ({
 }));
 
 import { router } from "expo-router";
-import { Linking } from "react-native";
+import { Alert, Linking } from "react-native";
 import { ApiError } from "./api";
 import {
   clearInteractionResponses,
@@ -133,13 +133,43 @@ afterEach(async () => {
 });
 
 describe("notification tap destinations", () => {
+  it("opens an http(s) destination directly", async () => {
+    await handleNotificationResponse(defaultResponse("https://example.com/builds/48"));
+    expect(Alert.alert).not.toHaveBeenCalled();
+    expect(Linking.openURL).toHaveBeenCalledWith("https://example.com/builds/48");
+  });
+
+  it.each(["example-app://builds/48", "slack://channel?team=T1&id=C1"])(
+    "confirms before opening another app: %s",
+    async (url) => {
+      vi.mocked(Alert.alert).mockImplementationOnce((_title, _message, buttons) => {
+        buttons?.find((button) => button.text === "Cancel")?.onPress?.();
+      });
+      await handleNotificationResponse(defaultResponse(url));
+      expect(Alert.alert).toHaveBeenCalledWith("Open in another app?", url, expect.any(Array));
+      expect(Linking.openURL).not.toHaveBeenCalled();
+
+      vi.mocked(Alert.alert).mockImplementationOnce((_title, _message, buttons) => {
+        buttons?.find((button) => button.text === "Open")?.onPress?.();
+      });
+      await handleNotificationResponse(defaultResponse(url));
+      expect(Linking.openURL).toHaveBeenCalledWith(url);
+    },
+  );
+
   it.each([
-    "https://example.com/builds/48",
-    "example-app://builds/48",
-    "shortcuts://run-shortcut?name=Process%20Alert&input=text&text=build%2048",
-  ])("opens a validated destination: %s", async (url) => {
+    "hark://web/app_12345678?url=/x",
+    "ceo.ryan.hark://notification/evt_1",
+    "exp+hark://expo-development-client/?url=http://10.0.0.1:8081",
+    "exp://10.0.0.1:8081",
+    "exps://example.com",
+    "example-app://expo-development-client/?url=http://10.0.0.1:8081",
+  ])("never re-enters Hark from a tap URL: %s", async (url) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     await handleNotificationResponse(defaultResponse(url));
-    expect(Linking.openURL).toHaveBeenCalledWith(url);
+    expect(Alert.alert).not.toHaveBeenCalled();
+    expect(Linking.openURL).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it.each(["javascript:alert(1)", "data:text/html,x", "file:///etc/passwd", "not a url"])(

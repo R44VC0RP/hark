@@ -46,9 +46,45 @@ export function isHttpUrl(value: string): boolean {
   }
 }
 
+/**
+ * Schemes that re-enter Hark itself (or the Expo dev launcher). A tap URL or
+ * web page must never drive the app's own routes or point a dev build at a
+ * remote bundle, so these are dropped outright.
+ */
+const SELF_SCHEMES = new Set(["hark:", "ceo.ryan.hark:", "exp+hark:", "exp:", "exps:"]);
+const DEV_LAUNCHER_HOST = "expo-development-client";
+
+/** True for URLs that point back into Hark or at the Expo dev launcher. */
+export function isSelfUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      SELF_SCHEMES.has(url.protocol.toLowerCase()) ||
+      url.hostname.toLowerCase() === DEV_LAUNCHER_HOST
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Short, human-readable destination: the host for http(s), otherwise the
+ * scheme plus host (e.g. `shortcuts://run-shortcut`). Null when unparseable.
+ */
+export function linkDestinationLabel(value: string): string | null {
+  try {
+    const url = new URL(value);
+    if (url.protocol === "http:" || url.protocol === "https:") return url.host;
+    return url.host ? `${url.protocol}//${url.host}` : url.protocol;
+  } catch {
+    return null;
+  }
+}
+
 export interface OpenBodyLinkRuntime {
   openUrl: (url: string) => Promise<unknown>;
-  confirm: (url: string) => Promise<boolean>;
+  /** Asks before leaving Hark; `label` is the destination host or scheme. */
+  confirm: (url: string, label: string) => Promise<boolean>;
 }
 
 async function confirmWithAlert(url: string): Promise<boolean> {
@@ -66,37 +102,50 @@ const defaultRuntime: OpenBodyLinkRuntime = {
 };
 
 /**
- * Opens a link found inside body text. The URL is revalidated at tap time;
- * dangerous schemes stay blocked, http(s) opens directly, and any other
- * scheme (custom app links) requires an explicit user confirmation.
+ * The one policy for every link that leaves Hark (body links, push taps, the
+ * "Open link" button and web-app navigations). The URL is revalidated at tap
+ * time; dangerous schemes stay blocked, links back into Hark are dropped,
+ * http(s) opens directly unless `confirmHttp` is set, and any other scheme
+ * (custom app links) requires an explicit user confirmation.
  */
-export async function openBodyLink(
+export async function openExternalLink(
   url: string,
   runtime: OpenBodyLinkRuntime = defaultRuntime,
+  options: { confirmHttp?: boolean } = {},
 ): Promise<boolean> {
   const validated = tapDestinationUrlSchema.safeParse(url);
   if (!validated.success) return false;
-  if (!isHttpUrl(validated.data)) {
-    const approved = await runtime.confirm(validated.data);
+  const label = linkDestinationLabel(validated.data);
+  if (!label) return false;
+  if (isSelfUrl(validated.data)) {
+    console.warn(`Hark ignored a link back into the app (${label})`);
+    return false;
+  }
+  if (options.confirmHttp || !isHttpUrl(validated.data)) {
+    const approved = await runtime.confirm(validated.data, label);
     if (!approved) return false;
   }
   await runtime.openUrl(validated.data).catch(() => {});
   return true;
 }
 
-/**
- * Opens the notification's own top-level destination. It went through
- * ingestion validation, is revalidated here, and opens on explicit tap with
- * the same rules as a push tap (custom schemes included, no confirmation).
- */
-export async function openTopLevelDestination(
+/** Opens a link found inside body text. */
+export function openBodyLink(
   url: string,
-  runtime: Pick<OpenBodyLinkRuntime, "openUrl"> = defaultRuntime,
+  runtime: OpenBodyLinkRuntime = defaultRuntime,
 ): Promise<boolean> {
-  const validated = tapDestinationUrlSchema.safeParse(url);
-  if (!validated.success) return false;
-  await runtime.openUrl(validated.data).catch(() => {});
-  return true;
+  return openExternalLink(url, runtime);
+}
+
+/**
+ * Opens the notification's own top-level destination (push tap or the
+ * "Open link" button) with the same rules as body links.
+ */
+export function openTopLevelDestination(
+  url: string,
+  runtime: OpenBodyLinkRuntime = defaultRuntime,
+): Promise<boolean> {
+  return openExternalLink(url, runtime);
 }
 
 /**

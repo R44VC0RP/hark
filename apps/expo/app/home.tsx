@@ -29,6 +29,7 @@ import {
 } from "../src/lib/interactions";
 import { refreshLiveActivityTokenSync } from "../src/lib/live-activities";
 import { colors, fonts, tightTracking } from "../src/lib/theme";
+import { clearAllWebsiteData } from "../src/lib/website-data";
 
 type PermissionState = "unknown" | "undetermined" | "granted" | "denied";
 type RegistrationState = "idle" | "working" | "registered" | "error";
@@ -199,6 +200,7 @@ export default function HomeScreen() {
               SecureStore.deleteItemAsync(APNS_TOKEN_KEY),
               SecureStore.deleteItemAsync(DEVICE_ID_KEY),
               clearInteractionResponses(),
+              clearAllWebsiteData(),
             ]);
             await authClient.signOut();
             router.replace("/");
@@ -230,6 +232,7 @@ export default function HomeScreen() {
                   SecureStore.deleteItemAsync(APNS_TOKEN_KEY),
                   SecureStore.deleteItemAsync(DEVICE_ID_KEY),
                   clearInteractionResponses(),
+                  clearAllWebsiteData(),
                 ]);
                 router.replace("/");
               } catch (error) {

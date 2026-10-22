@@ -94,23 +94,17 @@ final class NotificationService: UNNotificationServiceExtension {
 
   // MARK: - Avatar
 
+  /// Avatars are fetched over HTTPS only, without following redirects, and
+  /// abandoned past 10 s of silence or 2 MB so the extension stays well
+  /// inside its memory and time budget.
   private func downloadAvatar(_ url: URL?, completion: @escaping (INImage?) -> Void) {
-    guard let url else {
+    guard let url, url.scheme?.lowercased() == "https" else {
       completion(nil)
       return
     }
-    let task = URLSession.shared.dataTask(with: url) { data, response, _ in
-      guard
-        let data,
-        let http = response as? HTTPURLResponse,
-        (200..<300).contains(http.statusCode)
-      else {
-        completion(nil)
-        return
-      }
-      completion(INImage(imageData: data))
+    AvatarDownload.start(url) { data in
+      completion(data.map { INImage(imageData: $0) })
     }
-    task.resume()
   }
 
   // MARK: - Communication notification
@@ -177,5 +171,77 @@ final class NotificationService: UNNotificationServiceExtension {
     didComplete = true
     completionLock.unlock()
     handler(content)
+  }
+}
+
+/// One bounded avatar fetch. Calls `completion` exactly once: with the body on
+/// a 2xx response within the size cap, otherwise with nil.
+private final class AvatarDownload: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+  static let maxBytes = 2 * 1024 * 1024
+
+  private let lock = NSLock()
+  private var data = Data()
+  private var completion: ((Data?) -> Void)?
+
+  private init(completion: @escaping (Data?) -> Void) {
+    self.completion = completion
+  }
+
+  static func start(_ url: URL, completion: @escaping (Data?) -> Void) {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.timeoutIntervalForRequest = 10
+    configuration.timeoutIntervalForResource = 15
+    let download = AvatarDownload(completion: completion)
+    let session = URLSession(configuration: configuration, delegate: download, delegateQueue: nil)
+    session.dataTask(with: url).resume()
+    // Releases the session (and this delegate) once the task finishes.
+    session.finishTasksAndInvalidate()
+  }
+
+  func urlSession(
+    _ session: URLSession,
+    task: URLSessionTask,
+    willPerformHTTPRedirection response: HTTPURLResponse,
+    newRequest request: URLRequest,
+    completionHandler: @escaping (URLRequest?) -> Void
+  ) {
+    completionHandler(nil)
+  }
+
+  func urlSession(
+    _ session: URLSession,
+    dataTask: URLSessionDataTask,
+    didReceive response: URLResponse,
+    completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+  ) {
+    guard
+      let http = response as? HTTPURLResponse,
+      (200..<300).contains(http.statusCode),
+      http.expectedContentLength <= Int64(Self.maxBytes)
+    else {
+      completionHandler(.cancel)
+      return
+    }
+    completionHandler(.allow)
+  }
+
+  func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive chunk: Data) {
+    lock.lock()
+    data.append(chunk)
+    let tooLarge = data.count > Self.maxBytes
+    lock.unlock()
+    if tooLarge { dataTask.cancel() }
+  }
+
+  func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+    lock.lock()
+    let handler = completion
+    completion = nil
+    let succeeded =
+      error == nil && !data.isEmpty && data.count <= Self.maxBytes
+      && ((task.response as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } ?? false)
+    let result = succeeded ? data : nil
+    lock.unlock()
+    handler?(result)
   }
 }

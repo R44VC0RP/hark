@@ -8,6 +8,7 @@ vi.mock("react-native", () => ({
 import {
   compositeIdForPushEvent,
   isHttpUrl,
+  linkDestinationLabel,
   linkifyBody,
   openBodyLink,
   openTopLevelDestination,
@@ -101,13 +102,48 @@ describe("openBodyLink", () => {
 });
 
 describe("openTopLevelDestination", () => {
-  it("opens validated destinations including custom schemes without extra prompts", async () => {
+  it("opens http(s) directly and confirms other apps with the destination", async () => {
     const openUrl = vi.fn(async () => undefined);
-    expect(await openTopLevelDestination("shortcuts://run-shortcut?name=X", { openUrl })).toBe(
-      true,
+    const confirm = vi.fn(async () => false);
+    expect(await openTopLevelDestination("https://example.com/x", { openUrl, confirm })).toBe(true);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(
+      await openTopLevelDestination("example-app://run-job?name=X", { openUrl, confirm }),
+    ).toBe(false);
+    expect(confirm).toHaveBeenCalledWith("example-app://run-job?name=X", "example-app://run-job");
+    expect(openUrl).toHaveBeenCalledTimes(1);
+    expect(await openTopLevelDestination("javascript:alert(1)", { openUrl, confirm })).toBe(false);
+  });
+
+  it("drops links back into Hark or the dev launcher without asking", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const openUrl = vi.fn(async () => undefined);
+    const confirm = vi.fn(async () => true);
+    for (const url of [
+      "hark://web/app_12345678",
+      "HARK://join/abc",
+      "ceo.ryan.hark://x",
+      "exp+hark://expo-development-client/?url=http://10.0.0.1:8081",
+      "exp://10.0.0.1:8081",
+      "exps://example.com",
+      "https://expo-development-client/?url=x",
+    ]) {
+      expect(await openTopLevelDestination(url, { openUrl, confirm }), url).toBe(false);
+    }
+    expect(openUrl).not.toHaveBeenCalled();
+    expect(confirm).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});
+
+describe("linkDestinationLabel", () => {
+  it("uses the host for web links and the scheme plus host otherwise", () => {
+    expect(linkDestinationLabel("https://ci.example.com:8443/builds/1")).toBe(
+      "ci.example.com:8443",
     );
-    expect(openUrl).toHaveBeenCalledWith("shortcuts://run-shortcut?name=X");
-    expect(await openTopLevelDestination("javascript:alert(1)", { openUrl })).toBe(false);
+    expect(linkDestinationLabel("example-app://incidents/42")).toBe("example-app://incidents");
+    expect(linkDestinationLabel("mailto:me@example.com")).toBe("mailto:");
+    expect(linkDestinationLabel("nope")).toBeNull();
   });
 });
 

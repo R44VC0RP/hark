@@ -16,11 +16,10 @@ import {
 import * as Notifications from "expo-notifications";
 import { router } from "expo-router";
 import * as SecureStore from "expo-secure-store";
-import { Linking } from "react-native";
 import { trackAppEvent } from "./analytics";
 import { ApiError, api } from "./api";
 import { getCookie } from "./auth";
-import { compositeIdForPushEvent } from "./inbox-body";
+import { compositeIdForPushEvent, openTopLevelDestination } from "./inbox-body";
 import { joinCodeFromUrl, pagePushData } from "./teams";
 
 export const DEVICE_ID_KEY = "hark.device.serverId";
@@ -426,9 +425,10 @@ export async function handleNotificationResponse(
       path: "/inbox",
       properties: { destinationHost },
     });
-    // A custom tap URL keeps its exact existing behavior and always wins.
+    // A custom tap URL always wins; it opens with the shared link policy
+    // (http(s) directly, other apps after confirmation, Hark's own schemes never).
     if (destination.success) {
-      await Linking.openURL(destination.data).catch(() => {});
+      await openTopLevelDestination(destination.data);
       return;
     }
     // No URL and no interaction: open the notification detail when possible.

@@ -17,7 +17,12 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon } from "../../src/components/app-icon";
 import { api, classifyNotificationDetailFailure } from "../../src/lib/api";
 import { useSession } from "../../src/lib/auth";
-import { linkifyBody, openBodyLink, openTopLevelDestination } from "../../src/lib/inbox-body";
+import {
+  linkDestinationLabel,
+  linkifyBody,
+  openBodyLink,
+  openTopLevelDestination,
+} from "../../src/lib/inbox-body";
 import { previewNotificationDetail } from "../../src/lib/inbox-preview";
 import { colors, fonts, tightTracking } from "../../src/lib/theme";
 
@@ -208,13 +213,21 @@ export default function NotificationDetailScreen() {
               style={({ pressed }) => [styles.openButton, pressed && styles.openButtonPressed]}
             >
               <SymbolView name="arrow.up.right" size={14} tintColor="#FFFFFF" weight="semibold" />
-              <Text style={styles.openButtonText}>Open link</Text>
+              <Text numberOfLines={1} style={styles.openButtonText}>
+                {openLinkLabel(notification.url)}
+              </Text>
             </Pressable>
           ) : null}
         </ScrollView>
       )}
     </SafeAreaView>
   );
+}
+
+/** "Open link" plus where it goes, e.g. `Open link · ci.example.com`. */
+function openLinkLabel(url: string): string {
+  const destination = linkDestinationLabel(url);
+  return destination ? `Open link · ${destination}` : "Open link";
 }
 
 /** Host plus path of the page an app notification opens, e.g. `app.example.com/builds/185`. */
@@ -416,6 +429,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 7,
     marginTop: 24,
+    paddingHorizontal: 18,
     borderRadius: 22,
     backgroundColor: colors.accent,
   },
@@ -482,6 +496,7 @@ const styles = StyleSheet.create({
     letterSpacing: tightTracking(12),
   },
   openButtonText: {
+    flexShrink: 1,
     color: "#FFFFFF",
     fontFamily: fonts.medium,
     fontSize: 14,

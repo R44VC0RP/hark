@@ -29,6 +29,7 @@ import { previewTeams } from "../src/lib/inbox-preview";
 import { clearInteractionResponses, DEVICE_ID_KEY } from "../src/lib/interactions";
 import { isUnsupportedRoute } from "../src/lib/teams";
 import { colors, fonts, tightTracking } from "../src/lib/theme";
+import { clearAllWebsiteData } from "../src/lib/website-data";
 
 const EXPO_TOKEN_KEY = "hark.device.expoPushToken";
 const APNS_TOKEN_KEY = "hark.device.apnsToken";
@@ -84,6 +85,7 @@ export default function SettingsScreen() {
       SecureStore.deleteItemAsync(DEVICE_ID_KEY),
       clearInteractionResponses(),
       Notifications.setBadgeCountAsync(0),
+      clearAllWebsiteData(),
     ]);
   };
 

@@ -23,6 +23,7 @@ import { WebView, type WebViewMessageEvent } from "react-native-webview";
 import type { ShouldStartLoadRequest } from "react-native-webview/lib/WebViewTypes";
 import { AppIcon } from "../../src/components/app-icon";
 import { ApiError, api } from "../../src/lib/api";
+import { isHttpUrl, openExternalLink } from "../../src/lib/inbox-body";
 import { previewApps } from "../../src/lib/inbox-preview";
 import { colors, fonts, tightTracking } from "../../src/lib/theme";
 import {
@@ -32,11 +33,11 @@ import {
   cachedApp,
   isAppOrigin,
   isDarkColor,
-  originOf,
   parseBridgeMessage,
   pickStripColor,
   resolveLaunchUrl,
 } from "../../src/lib/web-apps";
+import { clearWebsiteDataForOrigin } from "../../src/lib/website-data";
 
 type Phase = "loading" | "consent" | "ready" | "error";
 
@@ -209,20 +210,32 @@ export default function WebAppScreen() {
       });
   };
 
+  // Every top-frame exit is confirmed with its destination; links back into
+  // Hark are dropped by the shared link policy.
   const openOutside = (url: string) => {
     if (!app) return;
-    const origin = originOf(url);
-    if (!origin || !/^https?:/.test(url)) {
-      void Linking.openURL(url).catch(() => {});
-      return;
-    }
-    Alert.alert(
-      `This link leaves ${app.name}`,
-      `It opens in Safari. Your Hark sign-in stays with ${new URL(app.origin).host}.`,
-      [
-        { text: `Stay in ${app.name}`, style: "cancel" },
-        { text: "Open in Safari", onPress: () => void Linking.openURL(url).catch(() => {}) },
-      ],
+    const appName = app.name;
+    const signInHost = new URL(app.origin).host;
+    void openExternalLink(
+      url,
+      {
+        openUrl: (target) => Linking.openURL(target),
+        confirm: (target, label) =>
+          new Promise((resolve) => {
+            const web = isHttpUrl(target);
+            Alert.alert(
+              web ? `This link leaves ${appName}` : "Open in another app?",
+              web
+                ? `It opens ${label} in Safari. Your Hark sign-in stays with ${signInHost}.`
+                : `${appName} wants to open ${target}`,
+              [
+                { text: `Stay in ${appName}`, style: "cancel", onPress: () => resolve(false) },
+                { text: web ? "Open in Safari" : "Open", onPress: () => resolve(true) },
+              ],
+            );
+          }),
+      },
+      { confirmHttp: true },
     );
   };
 
@@ -239,7 +252,7 @@ export default function WebAppScreen() {
     if (!app) return;
     Alert.alert(
       `Stop signing in to ${app.name}?`,
-      `Hark will stop sending passes to ${new URL(app.origin).host}. The app may keep you signed in until its own session ends.`,
+      `Hark will stop sending passes to ${new URL(app.origin).host}. Its saved data on this iPhone is cleared too.`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -248,11 +261,13 @@ export default function WebAppScreen() {
           onPress: () => {
             const done = () => close();
             if (simulatorPreview) return done();
-            void api
-              .revokeApp(app.id)
-              .then((result) => cacheApps([result.app]))
-              .catch(() => {})
-              .finally(done);
+            void Promise.all([
+              api
+                .revokeApp(app.id)
+                .then((result) => cacheApps([result.app]))
+                .catch(() => {}),
+              clearWebsiteDataForOrigin(app.origin),
+            ]).finally(done);
           },
         },
       ],
