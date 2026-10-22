@@ -187,6 +187,7 @@ export function parseArgs(argv) {
     "personal",
     "all",
     "no-notify",
+    "allow-custom-scheme",
   ]);
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -221,11 +222,34 @@ export function configPath(env = process.env) {
   return join(env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "hark", "config.json");
 }
 
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+function isLoopbackHost(hostname) {
+  return LOOPBACK_HOSTS.has(hostname.toLowerCase());
+}
+
+/** Tokens travel only over HTTPS; plain HTTP is allowed for loopback development servers. */
+function assertApiUrl(value, label) {
+  let url;
+  try {
+    url = new URL(String(value));
+  } catch {
+    throw new UsageError(`${label} must be an absolute URL`);
+  }
+  if (url.protocol === "https:") return;
+  if (url.protocol === "http:" && isLoopbackHost(url.hostname)) return;
+  throw new UsageError(`${label} must use https:// (http:// is allowed only for localhost)`);
+}
+
+const normalizeApiUrl = (value) => String(value).replace(/\/+$/, "");
+
 export async function loadConfig(env = process.env) {
   if (env.HARK_TOKEN) {
+    const apiUrl = env.HARK_API_URL ?? DEFAULT_API_URL;
+    assertApiUrl(apiUrl, "HARK_API_URL");
     return {
       token: env.HARK_TOKEN,
-      apiUrl: env.HARK_API_URL ?? DEFAULT_API_URL,
+      apiUrl,
       source: "environment",
     };
   }
@@ -257,9 +281,23 @@ export async function loadConfig(env = process.env) {
   if (typeof parsed.token !== "string" || !parsed.token.startsWith("hark_")) {
     throw new RequestError(`Missing Hark token in ${path}.`, 401);
   }
+  const apiUrl = typeof parsed.apiUrl === "string" ? parsed.apiUrl : DEFAULT_API_URL;
+  // The stored token is bound to the API it was minted for; an environment
+  // override must not silently send it anywhere else.
+  if (
+    env.HARK_API_URL !== undefined &&
+    normalizeApiUrl(env.HARK_API_URL) !== normalizeApiUrl(apiUrl)
+  ) {
+    throw new RequestError(
+      `Refusing HARK_API_URL=${env.HARK_API_URL}: the token in ${path} belongs to ${apiUrl}. ` +
+        "Unset HARK_API_URL, set HARK_TOKEN for that API, or run harkctl auth login with it.",
+      401,
+    );
+  }
+  assertApiUrl(apiUrl, `apiUrl in ${path}`);
   return {
     token: parsed.token,
-    apiUrl: env.HARK_API_URL ?? parsed.apiUrl ?? DEFAULT_API_URL,
+    apiUrl,
     tokenId: typeof parsed.tokenId === "string" ? parsed.tokenId : undefined,
     source: "file",
     path,
@@ -346,6 +384,18 @@ async function publicRequest(apiUrl, path, init = {}) {
   return body;
 }
 
+/** Only opens authorization pages served by the API the token is being minted for. */
+function isSameOriginWebUrl(value, apiUrl) {
+  try {
+    const url = new URL(String(value));
+    const okScheme =
+      url.protocol === "https:" || (url.protocol === "http:" && isLoopbackHost(url.hostname));
+    return okScheme && url.origin === new URL(apiUrl).origin;
+  } catch {
+    return false;
+  }
+}
+
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 async function login(options, env, runtime) {
@@ -353,6 +403,7 @@ async function login(options, env, runtime) {
     throw new UsageError("--open and --no-open cannot be used together");
   }
   const apiUrl = env.HARK_API_URL ?? DEFAULT_API_URL;
+  assertApiUrl(apiUrl, "HARK_API_URL");
   const expiresInSeconds = parseDuration(options["expires-in"] ?? "90d");
   const timeoutSeconds = parseDuration(options.timeout ?? "10m");
   const clientName = options["client-name"] ?? "harkctl";
@@ -365,7 +416,9 @@ async function login(options, env, runtime) {
   runtime.stderr(`Code: ${started.userCode}`);
   runtime.stderr(`Authorize at: ${started.verificationUri}`);
   const shouldOpen = options.open || (!options["no-open"] && runtime.stderrIsTTY);
-  if (shouldOpen) {
+  if (shouldOpen && !isSameOriginWebUrl(started.verificationUriComplete, apiUrl)) {
+    runtime.stderr(`Not opening the browser: the authorization URL is not on ${apiUrl}`);
+  } else if (shouldOpen) {
     try {
       runtime.openBrowser(started.verificationUriComplete);
     } catch (error) {
@@ -400,23 +453,32 @@ async function login(options, env, runtime) {
     }
 
     const path = configPath(env);
+    const accessToken = typeof response?.accessToken === "string" ? response.accessToken : null;
+    let saved = false;
     try {
-      await runtime.writeConfig(path, {
-        apiUrl,
-        token: response.accessToken,
-        tokenId: response.token.id,
-      });
-    } catch (error) {
-      await request({ apiUrl, token: response.accessToken }, "/api/agent/auth/revoke", {
-        method: "POST",
-      }).catch(() => {});
-      throw error;
+      if (
+        !accessToken?.startsWith("hark_") ||
+        typeof response.token !== "object" ||
+        response.token === null ||
+        typeof response.token.id !== "string"
+      ) {
+        throw new RequestError("Malformed authorization response", 502);
+      }
+      await runtime.writeConfig(path, { apiUrl, token: accessToken, tokenId: response.token.id });
+      saved = true;
+      return {
+        authenticated: true,
+        token: response.token,
+        configPath: path,
+      };
+    } finally {
+      // Never leave a minted token alive that was not stored.
+      if (!saved && accessToken) {
+        await request({ apiUrl, token: accessToken }, "/api/agent/auth/revoke", {
+          method: "POST",
+        }).catch(() => {});
+      }
     }
-    return {
-      authenticated: true,
-      token: response.token,
-      configPath: path,
-    };
   }
   throw new RequestError("Authorization timed out", 408, { error: "expired_token" });
 }
@@ -429,6 +491,78 @@ async function readStdinJson() {
   } catch {
     throw new UsageError("stdin must contain valid JSON");
   }
+}
+
+/**
+ * Fields each command accepts from `--stdin`. Routing and targeting fields
+ * (device IDs, on-call groups, app IDs) are flags only, so piped JSON built
+ * from external content cannot redirect where a request goes.
+ */
+const STDIN_KEYS = {
+  notify: ["body", "title", "summary", "project", "bodyFormat", "imageUrl", "url"],
+  "notify ask": ["prompt", "title", "expiresIn", "presentation", "imageUrl", "url"],
+  "services create": ["title", "imageUrl", "url"],
+  "services update": ["title", "imageUrl", "url"],
+  "activity start": [
+    "key",
+    "replace",
+    "title",
+    "status",
+    "detail",
+    "progress",
+    "symbol",
+    "privacyMode",
+    "accentColor",
+    "style",
+    "expiresInSeconds",
+    "staleAfterSeconds",
+  ],
+  "activity update": [
+    "title",
+    "status",
+    "detail",
+    "progress",
+    "symbol",
+    "privacyMode",
+    "accentColor",
+    "style",
+    "staleAfterSeconds",
+    "ifSequence",
+  ],
+  "activity end": [
+    "status",
+    "detail",
+    "progress",
+    "symbol",
+    "accentColor",
+    "dismissAfterSeconds",
+    "ifSequence",
+  ],
+  "oncall create": ["name", "rotation", "escalation"],
+  "oncall update": ["name", "rotation", "escalation"],
+};
+
+async function readStdinFor(options, command) {
+  if (!options.stdin) return {};
+  const input = await readStdinJson();
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    throw new UsageError("stdin must contain a JSON object");
+  }
+  const allowed = STDIN_KEYS[command];
+  const unknown = Object.keys(input).filter((key) => !allowed.includes(key));
+  if (unknown.length > 0) {
+    throw new UsageError(
+      `${command} --stdin does not accept: ${unknown.join(", ")} (allowed: ${allowed.join(", ")})`,
+    );
+  }
+  if (input.url !== undefined && input.url !== null && !options["allow-custom-scheme"]) {
+    if (!URL.canParse(String(input.url)) || new URL(String(input.url)).protocol !== "https:") {
+      throw new UsageError(
+        `${command} --stdin url must be an https:// URL; pass --allow-custom-scheme to allow other schemes`,
+      );
+    }
+  }
+  return input;
 }
 
 function interactionExitCode(interaction) {
@@ -463,12 +597,14 @@ function help() {
   harkctl auth status
   harkctl notify <body> [--title <name>] [--image <url>] [--url <url>] [--device <id>]
                  [--project <name>] [--summary <text>] [--markdown | --body-format <text|markdown>]
-                 [--app <app_id>] [--oncall <group_id>] [--idempotency-key <key>] [--stdin]
+                 [--app <app_id>] [--oncall <group_id>] [--idempotency-key <key>]
+                 [--stdin [--allow-custom-scheme]]
   harkctl notify ask <prompt> (--approval|--yes-no|--text) [--title <name>] [--image <url>]
                   [--url <url>] [--device <id>] [--expires-in <duration>]
                   [--live-activity [--style <approval|shell|verdict|signal>]
                                    [--primary-label <label>] [--secondary-label <label>]]
-                  [--idempotency-key <key>] [--stdin] [--wait [--timeout <duration>] | --poll]
+                  [--idempotency-key <key>] [--stdin [--allow-custom-scheme]]
+                  [--wait [--timeout <duration>] | --poll]
   harkctl notify withdraw <notification_id>
   harkctl interaction list
   harkctl interaction get <id>
@@ -747,7 +883,7 @@ async function oncallCommand(config, args, options) {
     case "get":
       return scopedRequest(config, groupPath());
     case "create": {
-      const stdin = options.stdin ? await readStdinJson() : {};
+      const stdin = await readStdinFor(options, "oncall create");
       if (!options.team) throw new UsageError("oncall create requires --team <team_id>");
       const name = options.name ?? stdin.name;
       const rotation = rotationFromOptions(options, stdin.rotation);
@@ -770,7 +906,7 @@ async function oncallCommand(config, args, options) {
       });
     }
     case "update": {
-      const stdin = options.stdin ? await readStdinJson() : {};
+      const stdin = await readStdinFor(options, "oncall update");
       let rotation = rotationFromOptions(options, stdin.rotation);
       if (rotation) {
         // The server replaces the whole rotation, so fill unchanged fields
@@ -877,7 +1013,7 @@ export async function execute(argv, env = process.env, overrides = {}) {
     return { body: await request(config, "/api/agent/services"), exitCode: 0 };
   }
   if (group === "services" && action === "create") {
-    const stdin = options.stdin ? await readStdinJson() : {};
+    const stdin = await readStdinFor(options, "services create");
     const title = options.title ?? stdin.title;
     if (!title) throw new UsageError("services create requires --title");
     const payload = {
@@ -910,7 +1046,7 @@ export async function execute(argv, env = process.env, overrides = {}) {
     if (action === "remove") {
       return { body: await scopedRequest(config, path, { method: "DELETE" }), exitCode: 0 };
     }
-    const stdin = options.stdin ? await readStdinJson() : {};
+    const stdin = await readStdinFor(options, "services update");
     const payload = {
       ...stdin,
       ...(options.title ? { title: options.title } : {}),
@@ -1080,7 +1216,7 @@ export async function execute(argv, env = process.env, overrides = {}) {
     };
   }
   if (group === "activity" && action === "start") {
-    const stdin = options.stdin ? await readStdinJson() : {};
+    const stdin = await readStdinFor(options, "activity start");
     const progress = options.progress === undefined ? stdin.progress : Number(options.progress);
     if (progress !== undefined && (!Number.isFinite(progress) || progress < 0 || progress > 1)) {
       throw new UsageError("--progress must be a number from 0 to 1");
@@ -1120,7 +1256,7 @@ export async function execute(argv, env = process.env, overrides = {}) {
   if (group === "activity" && action === "update") {
     const identifier = id ?? options.key;
     if (!identifier) throw new UsageError("activity update requires an activity ID or --key");
-    const stdin = options.stdin ? await readStdinJson() : {};
+    const stdin = await readStdinFor(options, "activity update");
     const progress = options.progress === undefined ? stdin.progress : Number(options.progress);
     if (
       progress !== undefined &&
@@ -1165,7 +1301,7 @@ export async function execute(argv, env = process.env, overrides = {}) {
   if (group === "activity" && action === "end") {
     const identifier = id ?? options.key;
     if (!identifier) throw new UsageError("activity end requires an activity ID or --key");
-    const stdin = options.stdin ? await readStdinJson() : {};
+    const stdin = await readStdinFor(options, "activity end");
     const ifSequence =
       options["if-sequence"] === undefined
         ? stdin.ifSequence
@@ -1320,7 +1456,7 @@ export async function execute(argv, env = process.env, overrides = {}) {
           "--project, --summary, --markdown, --body-format, and --app apply to notify, not notify ask",
         );
       }
-      const stdin = options.stdin ? await readStdinJson() : {};
+      const stdin = await readStdinFor(options, "notify ask");
       const prompt = positionals.slice(2).join(" ") || stdin.prompt;
       if (!prompt) throw new UsageError("notify ask requires a prompt");
       const expiresInSeconds = parseDuration(options["expires-in"] ?? stdin.expiresIn ?? "15m");
@@ -1373,7 +1509,7 @@ export async function execute(argv, env = process.env, overrides = {}) {
         exitCode: waited.timedOut ? 4 : interactionExitCode(waited.interaction),
       };
     }
-    const stdin = options.stdin ? await readStdinJson() : {};
+    const stdin = await readStdinFor(options, "notify");
     const notificationBody = positionals.slice(1).join(" ") || stdin.body;
     if (!notificationBody) throw new UsageError("notify requires a message body");
     assertNotificationBody(notificationBody);

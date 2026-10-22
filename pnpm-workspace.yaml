@@ -8,7 +8,13 @@ allowBuilds:
   "@biomejs/biome": true
   msgpackr-extract: false
 
-minimumReleaseAge: 0
+# Only install releases that have been public for a week (minutes).
+minimumReleaseAge: 10080
+
+# Security floors for transitive dependencies (undici via expo-server-sdk, fast-uri via ajv).
+overrides:
+  undici: "^7.29.1"
+  fast-uri: "^3.1.8"
 
 patchedDependencies:
   '@better-auth/core@1.6.25': patches/@better-auth__core@1.6.25.patch

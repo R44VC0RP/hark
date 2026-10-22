@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
 
-FROM node:22-trixie-slim AS base
+# Pinned by digest; bump deliberately (docker buildx imagetools inspect node:22-trixie-slim).
+FROM node:22-trixie-slim@sha256:8eb619e402eaede1748a3c8173bffab391592812e85136452f781741c7242ddf AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable
@@ -29,18 +30,21 @@ RUN pnpm --filter @hark/website-runtime deploy --prod --legacy /out
 # Runtime: single process serving the API and the static SPA.
 # SQLite persists under /data (mount a volume there).
 # ---------------------------------------------------------------------------
-FROM node:22-trixie-slim AS runtime
+FROM node:22-trixie-slim@sha256:8eb619e402eaede1748a3c8173bffab391592812e85136452f781741c7242ddf AS runtime
 ENV NODE_ENV=production
 ENV PORT=8787
 ENV DATABASE_URL=/data/hark.sqlite
 WORKDIR /app
-COPY --from=build --chown=node:node /out/node_modules ./node_modules
-COPY --from=build --chown=node:node /repo/apps/website/dist ./dist
-COPY --from=build --chown=node:node /repo/apps/website/drizzle ./drizzle
+# The app is root-owned and read-only so the runtime user cannot rewrite it;
+# only /data is writable by node.
+COPY --from=build --chown=root:root /out/node_modules ./node_modules
+COPY --from=build --chown=root:root /repo/apps/website/dist ./dist
+COPY --from=build --chown=root:root /repo/apps/website/drizzle ./drizzle
 # Read-only operator scripts, e.g. `node scripts/analytics.mjs summary`.
-COPY --from=build --chown=node:node /repo/apps/website/scripts ./scripts
-COPY --from=build --chown=node:node /out/package.json ./package.json
-RUN mkdir -p /data && chown node:node /data
+COPY --from=build --chown=root:root /repo/apps/website/scripts ./scripts
+COPY --from=build --chown=root:root /out/package.json ./package.json
+RUN chmod -R a-w node_modules dist drizzle scripts package.json \
+  && mkdir -p /data && chown node:node /data
 USER node
 VOLUME /data
 EXPOSE 8787

@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "license": "PolyForm-Noncommercial-1.0.0",
-  "packageManager": "pnpm@11.10.0",
+  "packageManager": "pnpm@11.10.0+sha224.641b7c097e6c106e3197b4d8733478aeaa101323980d212d11010014",
   "engines": {
     "node": ">=22"
   },

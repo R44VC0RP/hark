@@ -1,15 +1,31 @@
+# The server speaks plain HTTP and sends no HSTS itself, so it must sit behind an
+# edge proxy on this host. The edge must:
+#   - terminate TLS and send Strict-Transport-Security;
+#   - forward to 127.0.0.1:8787 (the port is published on loopback only; set
+#     HARK_PUBLISH_ADDRESS only if the edge must reach it over another interface);
+#   - set a client-IP header on every request, overwriting any value the client
+#     sent (for example X-Real-IP or CF-Connecting-IP);
+#   - and TRUSTED_CLIENT_IP_HEADER in .env must name that header, or rate limits
+#     fall back to coarse global buckets.
 services:
   hark:
     build: .
     ports:
-      # Bind publicly only behind a trusted proxy; auth rate limits use its client-IP headers.
-      - "8787:8787"
+      - "${HARK_PUBLISH_ADDRESS:-127.0.0.1}:8787:8787"
+    # Only /data (the volume) and /tmp are writable.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     environment:
       NODE_ENV: production
       PORT: "8787"
       DATABASE_URL: /data/hark.sqlite
       # Public origin of this deployment (used for OAuth redirects + webhook URLs).
-      APP_URL: ${APP_URL:-http://localhost:8787}
+      APP_URL: ${APP_URL:?set APP_URL in .env}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET in .env}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}

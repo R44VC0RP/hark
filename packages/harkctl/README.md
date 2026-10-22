@@ -32,7 +32,7 @@ Prefer MCP? The same operations are available as tools from Hark's remote MCP se
 Start a browser authorization flow and approve the requested scopes with your signed-in Hark account:
 
 ```sh
-npx harkctl auth login
+npx harkctl@0.8.0 auth login
 harkctl auth status
 harkctl notify "Deploy finished ✅" --title "Deploy bot" --image https://example.com/bot.png \
   --url https://example.com/runs/1
@@ -64,7 +64,10 @@ keeps stdout to one machine-readable object while browser instructions remain on
 name (defaults to “Hark”), `--image` sets the avatar shown with the notification, `--url` is opened
 when the notification is tapped, and repeatable `--device` routes to specific device IDs (Hark Pro).
 Use `--idempotency-key` for safe retries and `--stdin` to merge a JSON payload from stdin under any
-explicit flags. The command exits `7` when no push was accepted.
+explicit flags. The command exits `7` when no push was accepted. `--stdin` accepts only `body`,
+`title`, `summary`, `project`, `bodyFormat`, `imageUrl`, and `url` (routing such as devices, `--app`,
+and `--oncall` stays flag-only) and exits `2` on any other key; a stdin `url` must be `https://`
+unless `--allow-custom-scheme` is passed.
 
 Bodies hold up to 8,000 characters (16 KiB of UTF-8); the CLI rejects anything larger before
 sending. `--project <name>` files the notification into a named project in the Hark app inbox —
@@ -305,7 +308,10 @@ with mode `0600`:
 - Linux: `${XDG_CONFIG_HOME:-~/.config}/hark/config.json`
 - Windows: `%APPDATA%\hark\config.json`
 
-Use `HARK_API_URL` for a self-hosted API. Tokens are never accepted on the command line or printed to
+Use `HARK_API_URL` for a self-hosted API: set it for `harkctl auth login`, which stores it with the
+token, or together with `HARK_TOKEN`. A stored token is only sent to the API it was minted for; if
+`HARK_API_URL` names a different one, commands exit `3` instead of using it. API URLs must use
+`https://` (plain `http://` only for localhost). Tokens are never accepted on the command line or printed to
 stdout. All successful command output is one stable JSON object; diagnostics use stderr.
 
 Exit codes: `0` success/approved/yes/replied, `1` API error, `2` usage error, `3` authentication or

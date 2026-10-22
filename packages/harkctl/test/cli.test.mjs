@@ -226,9 +226,13 @@ test("auth login opens only when interactive or explicitly requested", async () 
       stderrIsTTY: false,
       writeConfig: async () => {},
     };
-    await execute(["auth", "login", "--open"], {}, overrides);
+    const env = { HARK_API_URL: "https://example.test" };
+    await execute(["auth", "login", "--open"], env, overrides);
     assert.equal(opened, 1);
-    await execute(["auth", "login", "--no-open"], {}, { ...overrides, stderrIsTTY: true });
+    await execute(["auth", "login", "--no-open"], env, { ...overrides, stderrIsTTY: true });
+    assert.equal(opened, 1);
+    // An authorization URL on another origin than the API is never opened.
+    await execute(["auth", "login", "--open"], {}, overrides);
     assert.equal(opened, 1);
   } finally {
     globalThis.fetch = originalFetch;
@@ -1479,4 +1483,126 @@ test("oncall update keeps unchanged rotation fields, including the original star
       });
     },
   );
+});
+
+test("a stored token is never sent to a different HARK_API_URL", async () => {
+  const originalFetch = globalThis.fetch;
+  const directory = await mkdtemp(join(tmpdir(), "harkctl-override-"));
+  const path = join(directory, "config.json");
+  await writeFile(path, JSON.stringify({ token: "hark_test", apiUrl: "https://example.test" }), {
+    mode: 0o600,
+  });
+  await chmod(path, 0o600);
+  let requests = 0;
+  globalThis.fetch = async () => {
+    requests += 1;
+    return Response.json({ authenticated: true });
+  };
+  try {
+    const originalError = console.error;
+    console.error = () => {};
+    try {
+      const code = await run(["auth", "status"], {
+        HARK_CONFIG: path,
+        HARK_API_URL: "http://127.0.0.1:8798",
+      });
+      assert.equal(code, 3);
+    } finally {
+      console.error = originalError;
+    }
+    assert.equal(requests, 0);
+    // The stored origin itself (trailing slash aside) is still accepted.
+    await execute(["auth", "status"], { HARK_CONFIG: path, HARK_API_URL: "https://example.test/" });
+    assert.equal(requests, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("API URLs must be https unless they are loopback", async () => {
+  await assert.rejects(
+    execute(["auth", "status"], { HARK_TOKEN: "hark_test", HARK_API_URL: "http://evil.example" }),
+    /must use https/,
+  );
+  await assert.rejects(
+    execute(["auth", "login", "--no-open"], { HARK_API_URL: "http://evil.example" }),
+    /must use https/,
+  );
+});
+
+test("auth login revokes a minted token when the success response is malformed", async () => {
+  const originalFetch = globalThis.fetch;
+  const accessToken = `hark_${"m".repeat(43)}`;
+  const revoked = [];
+  let written = 0;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).endsWith("/start")) {
+      return Response.json(
+        {
+          deviceCode: "m".repeat(43),
+          userCode: "MALF-2345",
+          verificationUri: "https://example.test/cli/authorize",
+          verificationUriComplete: "https://example.test/cli/authorize?code=MALF-2345",
+          expiresIn: 600,
+          interval: 5,
+        },
+        { status: 201 },
+      );
+    }
+    if (String(url).endsWith("/revoke")) {
+      revoked.push(init.headers.authorization);
+      return Response.json({ ok: true });
+    }
+    return Response.json({ accessToken });
+  };
+  try {
+    await assert.rejects(
+      execute(
+        ["auth", "login", "--no-open"],
+        { HARK_API_URL: "https://example.test" },
+        {
+          sleep: async () => {},
+          stderr: () => {},
+          writeConfig: async () => {
+            written += 1;
+          },
+        },
+      ),
+      /Malformed authorization response/,
+    );
+    assert.equal(written, 0);
+    assert.deepEqual(revoked, [`Bearer ${accessToken}`]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("--stdin accepts only the command's own fields and https urls", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const bin = join(import.meta.dirname, "..", "bin", "harkctl.mjs");
+  const runWithStdin = (args, input) =>
+    spawnSync(process.execPath, [bin, ...args], {
+      input: JSON.stringify(input),
+      env: { PATH: process.env.PATH, HARK_TOKEN: "hark_test", HARK_API_URL: "http://127.0.0.1:9" },
+      encoding: "utf8",
+    });
+  const routed = runWithStdin(["notify", "--stdin"], { body: "Hi", oncall: "ocg_12345678" });
+  assert.equal(routed.status, 2);
+  assert.match(routed.stderr, /does not accept: oncall/);
+  const asked = runWithStdin(["notify", "ask", "--approval", "--stdin"], {
+    prompt: "Deploy?",
+    deviceIds: ["dev_1"],
+  });
+  assert.equal(asked.status, 2);
+  assert.match(asked.stderr, /does not accept: deviceIds/);
+  const scheme = runWithStdin(["notify", "--stdin"], { body: "Hi", url: "shortcuts://run" });
+  assert.equal(scheme.status, 2);
+  assert.match(scheme.stderr, /--allow-custom-scheme/);
+  // With the opt-in, validation passes and the (unreachable) request is attempted.
+  const allowed = runWithStdin(["notify", "--stdin", "--allow-custom-scheme"], {
+    body: "Hi",
+    url: "shortcuts://run",
+  });
+  assert.equal(allowed.status, 6);
 });
