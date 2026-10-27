@@ -72,6 +72,14 @@ Pages carry `urgency` (webhooks, agent notifications, the on-call API, MCP `page
 with no repeats and no scheduled escalation. A person escalating a low page upgrades it to
 `high`, so it rings and escalates from then on.
 
+## Time Sensitive Notifications
+
+`interruptionLevel: "time-sensitive"` only breaks through Focus when the app has the
+`com.apple.developer.usernotifications.time-sensitive` entitlement (Time Sensitive Notifications
+capability on the `ceo.ryan.hark` App ID). Without it iOS delivers pages as ordinary alerts. The
+entitlement is in `app.config.ts`; it needs no Apple approval, only the capability enabled on the
+App ID (EAS capability sync does this on the next build).
+
 ## Critical Alerts (waiting on Apple)
 
 A critical alert plays at full volume through the silent switch and every Focus. It needs the
