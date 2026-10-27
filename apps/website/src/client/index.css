@@ -752,3 +752,1509 @@ address {
     animation-duration: 0.01ms;
   }
 }
+
+/* -------------------------------------------------------------------------- */
+/* Landing: one screen with a role switcher and a phone                       */
+/* -------------------------------------------------------------------------- */
+
+/* The landing fits the viewport, so it never needs the reserved scrollbar. */
+:root:has(.hark-landing) {
+  overflow-y: auto;
+  scrollbar-gutter: auto;
+}
+
+.hark-roles {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+}
+
+.hark-roles-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.hark-roles-title {
+  color: #ffffff;
+  font-size: 28px;
+  font-weight: 500;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+.hark-roles-lede,
+.hark-roles-agents,
+.hark-roles-bullets,
+.hark-roles-code,
+.hark-roles-footer {
+  display: none;
+}
+
+.hark-roles-cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: center;
+  margin-top: 14px;
+}
+
+.hark-roles-tabbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.hark-segmented {
+  display: flex;
+  flex: 1;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.07);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.12);
+}
+
+.hark-segment {
+  position: relative;
+  flex: 1;
+  height: 34px;
+  padding: 0 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  color: var(--color-ink-muted);
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition:
+    color 160ms ease,
+    background-color 200ms ease,
+    box-shadow 200ms ease;
+}
+
+.hark-segment:hover {
+  color: #ffffff;
+}
+
+.hark-segment.is-selected {
+  background: rgb(255 255 255 / 0.16);
+  color: #ffffff;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.25),
+    0 2px 8px rgb(0 16 12 / 0.18);
+}
+
+/* How long until the next role, while roles still advance on their own. */
+.hark-segment-progress {
+  position: absolute;
+  right: 16px;
+  bottom: 3px;
+  left: 16px;
+  height: 2px;
+  border-radius: 1px;
+  background: rgb(255 255 255 / 0.6);
+  transform: scaleX(0);
+  transform-origin: left;
+}
+
+@keyframes hark-progress {
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.hark-roles-pause {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.07);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.12);
+  color: var(--color-ink-muted);
+  transition:
+    color 160ms ease,
+    background-color 160ms ease;
+}
+
+.hark-roles-pause:hover {
+  background: rgb(255 255 255 / 0.12);
+  color: #ffffff;
+}
+
+.hark-roles-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hark-roles-pitch {
+  /* Two lines on phones, so the demo below never jumps between roles. */
+  min-height: 2.6em;
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+
+.hark-roles-chip {
+  display: block;
+  padding: 7px 12px;
+  overflow-x: auto;
+  border-radius: 12px;
+  background: var(--color-code);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
+  color: var(--color-code-ink);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+
+.hark-code-card {
+  overflow: hidden;
+  border-radius: 16px;
+  background: var(--color-code);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
+}
+
+.hark-code-body {
+  margin: 0;
+}
+
+.hark-code-output {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 8px 16px 9px;
+  border-top: 1px solid rgb(255 255 255 / 0.07);
+  color: var(--color-ink-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.hark-roles-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.hark-roles-stage-inner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hark-roles-stage.is-cropped {
+  -webkit-mask-image: linear-gradient(to bottom, #000 72%, transparent 98%);
+  mask-image: linear-gradient(to bottom, #000 72%, transparent 98%);
+}
+
+.hark-roles-stage.is-cropped .hark-roles-stage-inner {
+  align-items: flex-start;
+  padding-top: 4px;
+}
+
+@media (min-width: 1024px) {
+  .hark-roles {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 34rem) minmax(0, 1fr);
+    column-gap: 3.5rem;
+  }
+
+  .hark-roles-copy {
+    gap: 22px;
+    height: 100%;
+    min-height: 0;
+  }
+
+  .hark-roles-copy > :first-child {
+    margin-top: auto;
+  }
+
+  .hark-roles-title {
+    font-size: clamp(38px, 3.6vw, 50px);
+    line-height: 1.06;
+  }
+
+  .hark-roles-lede {
+    display: block;
+    max-width: 30rem;
+    margin-top: 14px;
+    color: var(--color-ink-muted);
+    font-size: 17px;
+    line-height: 1.5;
+    text-wrap: pretty;
+  }
+
+  .hark-roles-cta {
+    margin-top: 22px;
+    gap: 22px;
+  }
+
+  .hark-roles-agents {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    min-width: 0;
+    margin-top: 18px;
+    font-size: 13.5px;
+  }
+
+  .hark-segmented {
+    flex: none;
+  }
+
+  .hark-segment {
+    padding: 0 18px;
+  }
+
+  /* Fixed height: switching roles never moves the copy above it. */
+  .hark-roles-panel {
+    gap: 0;
+    height: 22rem;
+  }
+
+  .hark-roles-pitch {
+    min-height: 0;
+    font-size: 21px;
+  }
+
+  .hark-roles-bullets {
+    display: grid;
+    gap: 6px;
+    margin-top: 12px;
+  }
+
+  .hark-roles-bullets li {
+    position: relative;
+    padding-left: 20px;
+    color: var(--color-ink-muted);
+    font-size: 15px;
+    line-height: 1.45;
+  }
+
+  .hark-roles-bullets li:nth-child(2) {
+    animation-delay: 40ms;
+  }
+
+  .hark-roles-bullets li:nth-child(3) {
+    animation-delay: 80ms;
+  }
+
+  .hark-roles-bullets li::before {
+    position: absolute;
+    top: 0.62em;
+    left: 3px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-mint);
+    content: "";
+  }
+
+  .hark-roles-code {
+    display: block;
+    margin-top: 18px;
+  }
+
+  .hark-roles-chip {
+    display: none;
+  }
+
+  .hark-roles-footer {
+    display: flex;
+    justify-content: space-between;
+    margin-top: auto;
+    padding: 12px 0 16px;
+    color: var(--color-ink-faint);
+    font-size: 12.5px;
+  }
+}
+
+/* Short laptop screens: the same layout, a little tighter. */
+@media (min-width: 1024px) and (max-height: 800px) {
+  .hark-roles-copy {
+    gap: 16px;
+  }
+
+  .hark-roles-title {
+    font-size: clamp(34px, 3.6vw, 44px);
+  }
+
+  .hark-roles-lede {
+    margin-top: 10px;
+    font-size: 16px;
+  }
+
+  .hark-roles-cta {
+    margin-top: 16px;
+  }
+
+  .hark-roles-agents {
+    margin-top: 14px;
+  }
+
+  .hark-roles-panel {
+    height: 20rem;
+  }
+
+  .hark-roles-pitch {
+    font-size: 19px;
+  }
+
+  .hark-roles-bullets li {
+    font-size: 14px;
+  }
+
+  .hark-roles-code {
+    margin-top: 14px;
+  }
+
+  .hark-roles-footer {
+    padding-bottom: 12px;
+  }
+}
+
+@keyframes hark-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes hark-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* ---- The phone ---------------------------------------------------------- */
+
+.hark-phone {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 11px;
+  border-radius: 67px;
+  background: #050606;
+  box-shadow:
+    0 0 0 2px #4b4f4d,
+    0 0 0 3.5px #1c1e1d,
+    0 0 0 4px rgb(255 255 255 / 0.12),
+    0 40px 80px rgb(0 14 10 / 0.5),
+    0 10px 24px rgb(0 0 0 / 0.28);
+  transform-origin: 0 0;
+}
+
+.hark-phone-btn {
+  position: absolute;
+  width: 4px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #2a2d2c, #555958);
+}
+
+.hark-phone-btn.is-action {
+  top: 120px;
+  left: -6px;
+  height: 32px;
+}
+
+.hark-phone-btn.is-vol-up {
+  top: 182px;
+  left: -6px;
+  height: 60px;
+}
+
+.hark-phone-btn.is-vol-down {
+  top: 256px;
+  left: -6px;
+  height: 60px;
+}
+
+.hark-phone-btn.is-power {
+  top: 214px;
+  right: -6px;
+  height: 96px;
+}
+
+.hark-phone-screen {
+  position: relative;
+  isolation: isolate;
+  width: 393px;
+  height: 852px;
+  overflow: hidden;
+  border-radius: 56px;
+  background: #01231c;
+  color: #ffffff;
+  font-family: var(--font-ios);
+  letter-spacing: -0.01em;
+}
+
+.hark-phone-home {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  z-index: 30;
+  width: 134px;
+  height: 5px;
+  border-radius: 3px;
+  background: rgb(255 255 255 / 0.85);
+  transform: translateX(-50%);
+}
+
+/* A red pulse at the screen's edge while a page rings. */
+.hark-phone-ring {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 0 3px rgb(255 105 97 / 0.85),
+    inset 0 0 70px 12px rgb(255 69 58 / 0.45);
+  transition: opacity 400ms ease;
+}
+
+@keyframes hark-ring {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
+@keyframes hark-buzz {
+  0%,
+  24%,
+  100% {
+    translate: 0 0;
+  }
+  4%,
+  12%,
+  20% {
+    translate: -2px 0;
+  }
+  8%,
+  16% {
+    translate: 2px 0;
+  }
+}
+
+.hark-wallpaper {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(80% 45% at 18% 8%, rgb(94 216 183 / 0.38), transparent 62%),
+    radial-gradient(70% 40% at 95% 70%, rgb(47 85 212 / 0.3), transparent 62%),
+    radial-gradient(90% 50% at 40% 105%, rgb(5 120 96 / 0.85), transparent 70%),
+    linear-gradient(170deg, #05644f 0%, #023f33 46%, #011e18 100%);
+}
+
+.hark-wallpaper.is-blurred::after {
+  position: absolute;
+  inset: 0;
+  background: rgb(0 20 16 / 0.18);
+  content: "";
+}
+
+.hark-phone-status {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 54px;
+  padding: 3px 24px 0 46px;
+}
+
+.hark-phone-status-time {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+/* ---- Dynamic Island ---- */
+
+.hark-dyn-island {
+  position: absolute;
+  top: 11px;
+  left: 50%;
+  z-index: 20;
+  width: 125px;
+  height: 37px;
+  overflow: hidden;
+  border-radius: 19px;
+  background: #000000;
+  translate: -50% 0;
+  transition:
+    width 520ms cubic-bezier(0.32, 0.72, 0, 1),
+    height 520ms cubic-bezier(0.32, 0.72, 0, 1),
+    border-radius 520ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.hark-dyn-island.is-compact {
+  width: 214px;
+}
+
+.hark-dyn-island.is-expanded {
+  width: 371px;
+  height: 86px;
+  border-radius: 43px;
+}
+
+.hark-dyn-compact,
+.hark-dyn-expanded {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 220ms ease;
+}
+
+.hark-dyn-compact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 15px 0 13px;
+}
+
+.hark-dyn-compact > span {
+  display: flex;
+  align-items: center;
+}
+
+.hark-dyn-expanded {
+  padding: 0 22px 0 18px;
+}
+
+.is-compact .hark-dyn-compact,
+.is-expanded .hark-dyn-expanded {
+  opacity: 1;
+  transition-delay: 180ms;
+}
+
+.hark-dyn-island .hark-la-pct {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.hark-dyn-deploy {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  height: 100%;
+}
+
+.hark-dyn-deploy-icon {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgb(94 216 183 / 0.18);
+  color: var(--color-mint);
+}
+
+.hark-dyn-deploy-title {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.hark-dyn-deploy-detail {
+  overflow: hidden;
+  color: rgb(235 235 245 / 0.6);
+  font-size: 13px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.hark-dyn-page {
+  color: #ff6961;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.hark-bell {
+  width: 16px;
+  height: 16px;
+  color: #ff6961;
+  transform-origin: 50% 10%;
+}
+
+@keyframes hark-bell {
+  0%,
+  40%,
+  100% {
+    rotate: 0deg;
+  }
+  8%,
+  24% {
+    rotate: -16deg;
+  }
+  16%,
+  32% {
+    rotate: 16deg;
+  }
+}
+
+/* ---- Lock Screen ---- */
+
+.hark-lock {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  transition: transform 700ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.hark-lock.is-unlocked {
+  transform: translateY(-100%);
+}
+
+.hark-lock-head {
+  position: absolute;
+  top: 60px;
+  right: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: rgb(255 255 255 / 0.94);
+}
+
+.hark-lock-date {
+  margin-top: 8px;
+  font-size: 21px;
+  font-weight: 500;
+}
+
+.hark-lock-clock {
+  margin-top: -6px;
+  font-size: 104px;
+  font-weight: 600;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+.hark-lock-list {
+  position: absolute;
+  top: 252px;
+  right: 10px;
+  left: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* A whole phone stacks notifications above the quick actions, as iOS does. */
+.hark-phone:not(.is-cropped) .hark-lock-list {
+  top: auto;
+  bottom: 118px;
+}
+
+.hark-lock-quick {
+  position: absolute;
+  bottom: 44px;
+  display: grid;
+  place-items: center;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 0.28);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+
+.hark-lock-quick.is-left {
+  left: 46px;
+}
+
+.hark-lock-quick.is-right {
+  right: 46px;
+}
+
+/* ---- Home Screen ---- */
+
+.hark-home {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+.hark-home-grid {
+  position: absolute;
+  top: 74px;
+  right: 22px;
+  left: 22px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  row-gap: 24px;
+}
+
+.hark-home-app {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 500;
+  transition:
+    transform 200ms ease,
+    filter 200ms ease;
+}
+
+.hark-home-app.is-pressed {
+  filter: brightness(0.75);
+  transform: scale(0.88);
+}
+
+.hark-home-icon {
+  display: grid;
+  place-items: center;
+  width: 62px;
+  height: 62px;
+  overflow: hidden;
+  border-radius: 16px;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.2);
+  font-size: 26px;
+  font-weight: 600;
+}
+
+.hark-home-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.hark-mark {
+  width: 46%;
+  height: 46%;
+  border-radius: 24%;
+  background: #ffffff;
+}
+
+.hark-home-dots {
+  position: absolute;
+  bottom: 128px;
+  left: 50%;
+  display: flex;
+  gap: 8px;
+  translate: -50% 0;
+}
+
+.hark-home-dots i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.35);
+}
+
+.hark-home-dots i.is-current {
+  background: #ffffff;
+}
+
+.hark-home-dock {
+  position: absolute;
+  right: 12px;
+  bottom: 22px;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  height: 94px;
+  padding: 0 10px;
+  border-radius: 36px;
+  background: rgb(255 255 255 / 0.16);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+}
+
+.hark-banner {
+  position: absolute;
+  top: 58px;
+  right: 10px;
+  left: 10px;
+  z-index: 8;
+}
+
+.hark-banner .hark-note {
+  background:
+    radial-gradient(120% 90% at 12% 0%, rgb(255 255 255 / 0.12), transparent 55%),
+    rgb(14 38 32 / 0.78);
+  -webkit-backdrop-filter: blur(24px) saturate(1.2);
+  backdrop-filter: blur(24px) saturate(1.2);
+}
+
+@keyframes hark-banner-in {
+  from {
+    opacity: 0;
+    transform: translateY(-130%);
+  }
+}
+
+/* ---- Notifications inside the phone ---- */
+
+.hark-note.is-static {
+  position: relative;
+  top: auto;
+  right: auto;
+  left: auto;
+}
+
+@keyframes hark-note-in {
+  from {
+    opacity: 0;
+    transform: translateY(-16px) scale(0.97);
+  }
+}
+
+.hark-note.is-older {
+  opacity: 0.82;
+}
+
+.hark-note.is-page {
+  background:
+    radial-gradient(120% 90% at 12% 0%, rgb(255 160 150 / 0.22), transparent 55%),
+    rgb(160 30 22 / 0.42);
+}
+
+.hark-note-eyebrow {
+  margin-bottom: 2px;
+}
+
+.hark-note-eyebrow-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.hark-note-tag {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  color: rgb(255 255 255 / 0.62);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.hark-note-tag.is-urgent {
+  color: #ffc6bf;
+}
+
+.hark-note-tag .hark-bell {
+  width: 12px;
+  height: 12px;
+  color: inherit;
+}
+
+.hark-note-repeat {
+  color: #ffd9d4;
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.hark-note-strong {
+  color: #ffffff;
+  font-weight: 500;
+}
+
+.hark-note-actions span {
+  transition:
+    transform 160ms ease,
+    background-color 160ms ease;
+}
+
+.hark-note-actions .is-pressed {
+  background: #ffffff;
+  transform: scale(0.94);
+}
+
+.hark-note-result {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 9px;
+  color: var(--color-mint);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.hark-note-field {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 36px;
+  margin-top: 10px;
+  padding: 6px 6px 6px 12px;
+  border-radius: 18px;
+  background: rgb(0 0 0 / 0.22);
+  box-shadow: inset 0 0 0 0.5px rgb(255 255 255 / 0.2);
+  font-size: 14px;
+}
+
+/* Typed out letter by letter; reduced motion shows the whole reply. */
+.hark-typing {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+@keyframes hark-type {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+.hark-note-send {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.18);
+  color: rgb(255 255 255 / 0.6);
+  font-size: 15px;
+  font-weight: 700;
+  transition:
+    background-color 300ms ease 1.6s,
+    color 300ms ease 1.6s;
+}
+
+.hark-note-send.is-ready {
+  background: #ffffff;
+  color: var(--color-paper);
+}
+
+.hark-note-reply {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: flex-end;
+  margin-top: 10px;
+}
+
+.hark-note-reply > span:first-child {
+  padding: 7px 12px;
+  border-radius: 16px 16px 4px 16px;
+  background: rgb(255 255 255 / 0.92);
+  color: var(--color-paper);
+  font-size: 14px;
+}
+
+.hark-note-reply-meta {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  color: var(--color-mint);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* A fingertip press where the visitor would tap. */
+.hark-tap {
+  position: absolute;
+  z-index: 28;
+  width: 46px;
+  height: 46px;
+  margin: -23px 0 0 -23px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.32);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.55);
+  pointer-events: none;
+}
+
+@keyframes hark-tap {
+  0% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+  30% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+}
+
+/* ---- The Hark app and a signed-in web app ---- */
+
+.hark-app-screen {
+  position: absolute;
+  inset: 0;
+  padding-top: 54px;
+  background: linear-gradient(180deg, #034a3c 0%, #01271f 55%, #011c16 100%);
+}
+
+.hark-app-title {
+  padding: 10px 20px 4px;
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+}
+
+.hark-app-section {
+  margin: 12px 14px 0;
+  padding: 14px 8px 16px;
+  border-radius: 22px;
+  background: rgb(255 255 255 / 0.07);
+  box-shadow: inset 0 0.5px 0 rgb(255 255 255 / 0.2);
+}
+
+.hark-app-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 8px 12px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.hark-app-members {
+  display: flex;
+  align-items: center;
+  color: rgb(255 255 255 / 0.6);
+  font-size: 12.5px;
+  font-weight: 400;
+}
+
+.hark-app-members i {
+  width: 18px;
+  height: 18px;
+  margin-left: -5px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px #0b3a31;
+}
+
+.hark-app-members i:last-of-type {
+  margin-right: 8px;
+}
+
+.hark-app-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.hark-app-tabs {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  justify-content: space-around;
+  height: 84px;
+  padding-top: 14px;
+  border-top: 0.5px solid rgb(255 255 255 / 0.12);
+  background: rgb(1 30 24 / 0.85);
+  color: rgb(255 255 255 / 0.55);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.hark-app-tabs span {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: center;
+}
+
+.hark-app-tabs span::before {
+  width: 24px;
+  height: 22px;
+  border-radius: 7px;
+  background: currentColor;
+  opacity: 0.85;
+  content: "";
+}
+
+.hark-app-tabs .is-current {
+  color: var(--color-mint);
+}
+
+.hark-app-oncall {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin: 0 8px;
+}
+
+.hark-app-oncall-avatar {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.hark-app-oncall-live {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgb(94 216 183 / 0.16);
+  color: var(--color-mint);
+  font-size: 12px;
+}
+
+.hark-webapp-sheet {
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  background: #f4f6f5;
+  transform: translateY(100%);
+  transition: transform 620ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.hark-webapp-sheet.is-open {
+  transform: none;
+}
+
+.hark-phone-screen:has(.hark-webapp-sheet.is-open) .hark-phone-home {
+  background: rgb(0 0 0 / 0.8);
+}
+
+.hark-webapp {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  color: #101412;
+}
+
+.hark-webapp-status {
+  position: absolute;
+  top: 18px;
+  left: 50px;
+  color: #101412;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.hark-webapp-muted {
+  color: #6b7671;
+  font-weight: 400;
+}
+
+.hark-webapp-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 60px 18px 12px;
+  border-bottom: 1px solid rgb(0 0 0 / 0.08);
+  background: #ffffff;
+  font-size: 16px;
+}
+
+.hark-webapp-done {
+  color: var(--color-green);
+  font-weight: 600;
+}
+
+.hark-webapp-url {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: #4d5652;
+  font-size: 14px;
+}
+
+.hark-webapp-lock {
+  color: #0f7a5f;
+  font-size: 9px;
+}
+
+.hark-webapp-more {
+  color: var(--color-green);
+  letter-spacing: 0.08em;
+}
+
+.hark-webapp-pass {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  margin: 14px 16px 0;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: #e1f3ec;
+  color: var(--color-green);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.hark-webapp-body {
+  padding: 18px 16px;
+}
+
+.hark-webapp-kicker {
+  color: #6b7671;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.hark-webapp-title {
+  margin-top: 2px;
+  color: #08362b;
+  font-size: 25px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.hark-webapp-list {
+  margin-top: 14px;
+  padding: 2px 14px;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.06);
+}
+
+.hark-webapp-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 0;
+  border-bottom: 1px solid rgb(0 0 0 / 0.06);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.hark-webapp-row:last-child {
+  border-bottom: 0;
+}
+
+.hark-webapp-bars {
+  display: flex;
+  gap: 2px;
+}
+
+.hark-webapp-bars i {
+  width: 4px;
+  height: 18px;
+  border-radius: 1.5px;
+  background: #2fbf8f;
+}
+
+.hark-webapp-bars i.is-warn {
+  background: #f3c53c;
+}
+
+.hark-webapp-foot {
+  margin-top: 16px;
+  color: #6b7671;
+  font-size: 12.5px;
+  text-align: center;
+}
+
+/* ---- Escalation card beside the phone ---- */
+
+/* Hangs off the phone's right edge in the empty band under the clock. */
+.hark-ladder {
+  position: absolute;
+  top: calc(var(--phone-scale) * 292px);
+  left: calc(100% - 96px);
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 236px;
+  padding: 10px 8px 8px;
+  border-radius: 20px;
+  scale: clamp(0.78, calc(var(--phone-scale) / 0.85), 1);
+  transform-origin: 0 0;
+}
+
+.hark-ladder-head {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 6px 6px;
+  color: var(--color-ink-faint);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.hark-ladder-urgency {
+  color: var(--color-danger);
+}
+
+.hark-ladder-row {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  padding: 5px 6px;
+  border-radius: 13px;
+  transition: background-color 300ms ease;
+}
+
+.hark-ladder-row.is-ring {
+  background: rgb(255 69 58 / 0.16);
+}
+
+.hark-ladder-row.is-ack {
+  background: rgb(94 216 183 / 0.12);
+}
+
+.hark-ladder-avatar {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  transition: opacity 300ms ease;
+}
+
+.hark-ladder-row.is-idle .hark-ladder-avatar {
+  opacity: 0.5;
+}
+
+.hark-ladder-state {
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.hark-ladder-row.is-ring .hark-ladder-state {
+  color: var(--color-danger);
+}
+
+.hark-ladder-row.is-ack .hark-ladder-state {
+  color: var(--color-mint);
+}
+
+.hark-ladder-row.is-idle .hark-ladder-state {
+  color: var(--color-ink-faint);
+}
+
+/* Motion only for visitors who allow it; `--hark-play` pauses it with the demo. */
+.hark-roles {
+  --hark-play: running;
+}
+
+.hark-roles.is-paused {
+  --hark-play: paused;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hark-segment-progress {
+    animation: hark-progress linear forwards;
+    animation-play-state: var(--hark-play);
+  }
+
+  .hark-roles-pitch {
+    animation: hark-fade-up 360ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    animation-play-state: var(--hark-play);
+  }
+
+  .hark-code-body {
+    animation: hark-fade 300ms ease both;
+    animation-play-state: var(--hark-play);
+  }
+
+  .hark-code-output span:last-child {
+    animation: hark-fade 260ms ease both;
+    animation-play-state: var(--hark-play);
+  }
+
+  .hark-roles-bullets li {
+    animation: hark-fade-up 360ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    animation-play-state: var(--hark-play);
+  }
+
+  .hark-phone.is-ringing .hark-phone-ring {
+    animation: hark-ring 1.3s ease-in-out infinite;
+    animation-play-state: var(--hark-play);
+  }
+
+  .hark-phone.is-ringing {
+    animation: hark-buzz 1.3s linear infinite;
+    animation-play-state: var(--hark-play);
+  }
+
+  .hark-phone.is-ringing .hark-bell {
+    animation: hark-bell 1.3s ease-in-out infinite;
+    animation-play-state: var(--hark-play);
+  }
+
+  .hark-note.is-static {
+    animation: hark-note-in 560ms cubic-bezier(0.32, 0.72, 0, 1) both;
+    animation-play-state: var(--hark-play);
+  }
+
+  .hark-note-repeat {
+    animation: hark-fade 300ms ease both;
+    animation-play-state: var(--hark-play);
+  }
+
+  .hark-note-result {
+    animation: hark-fade-up 360ms ease both;
+    animation-play-state: var(--hark-play);
+  }
+
+  .hark-typing {
+    animation: hark-type 1.9s steps(31, end) both;
+    animation-play-state: var(--hark-play);
+  }
+
+  .hark-note-reply {
+    animation: hark-fade-up 360ms ease both;
+    animation-play-state: var(--hark-play);
+  }
+
+  .hark-tap {
+    animation: hark-tap 800ms ease-out both;
+    animation-play-state: var(--hark-play);
+  }
+
+  .hark-webapp-pass {
+    animation: hark-fade-up 420ms ease 420ms both;
+    animation-play-state: var(--hark-play);
+  }
+
+  .hark-ladder {
+    animation: hark-fade-up 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    animation-play-state: var(--hark-play);
+  }
+
+  .hark-banner .hark-note {
+    animation-name: hark-banner-in;
+  }
+
+  .hark-ladder-row.is-ring .hark-ladder-state {
+    animation: hark-ring 1.3s ease-in-out infinite;
+    animation-play-state: var(--hark-play);
+  }
+}

@@ -14,7 +14,7 @@ const STEPS: [number, string, string][] = [
 const STEP_MS = 1700;
 const FADE_MS = 180;
 
-function Gear() {
+export function Gear() {
   return (
     <svg aria-hidden="true" className="hark-gear" fill="currentColor" viewBox="0 0 16 16">
       <path d="M8 5.2a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6zm6.4 3.9-1.3.3a5.1 5.1 0 0 1-.6 1.4l.7 1.2-1.3 1.3-1.2-.7a5.1 5.1 0 0 1-1.4.6l-.3 1.3H7.2l-.3-1.3a5.1 5.1 0 0 1-1.4-.6l-1.2.7L3 12.2l.7-1.2a5.1 5.1 0 0 1-.6-1.4l-1.3-.3V6.9l1.3-.3c.1-.5.3-1 .6-1.4L3 4l1.3-1.3 1.2.7c.4-.3.9-.5 1.4-.6l.3-1.3h1.6l.3 1.3c.5.1 1 .3 1.4.6l1.2-.7L13 4l-.7 1.2c.3.4.5.9.6 1.4l1.3.3z" />
@@ -23,7 +23,7 @@ function Gear() {
 }
 
 /** The real iOS status-bar glyphs: signal, Wi-Fi and battery. */
-function StatusBarIcons() {
+export function StatusBarIcons() {
   return (
     <svg aria-hidden="true" fill="#fff" height="19" viewBox="0 0 82 22" width="72">
       <path d="M3.7 13H2.5a1 1 0 0 0-1 1v2.5a1 1 0 0 0 1 1h1.2a1 1 0 0 0 1-1V14a1 1 0 0 0-1-1m5.2-2.5H7.7a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1h1.2a1 1 0 0 0 1-1v-5a1 1 0 0 0-1-1M14.1 8h-1.2a1 1 0 0 0-1 1v7.5a1 1 0 0 0 1 1h1.2a1 1 0 0 0 1-1V9a1 1 0 0 0-1-1m5.2-2.5h-1.2a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h1.2a1 1 0 0 0 1-1v-10a1 1 0 0 0-1-1" />

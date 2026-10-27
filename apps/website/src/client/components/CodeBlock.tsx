@@ -16,7 +16,19 @@ const KIND_CLASS: Record<Exclude<TokenKind, "plain">, string> = {
   url: "text-code-url",
 };
 
-export function CodeBlock({ code, language }: { code: string; language: "json" | "bash" }) {
+const BLOCK =
+  "overflow-x-auto rounded-2xl bg-code p-4 font-mono text-[13px] leading-relaxed text-code-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.08)]";
+
+export function CodeBlock({
+  code,
+  language,
+  className = BLOCK,
+}: {
+  code: string;
+  language: "json" | "bash";
+  /** Replaces the default panel styling. */
+  className?: string;
+}) {
   const nodes: React.ReactNode[] = [];
   // Byte offset doubles as a stable, unique key without keying on array index.
   let offset = 0;
@@ -35,7 +47,7 @@ export function CodeBlock({ code, language }: { code: string; language: "json" |
   }
 
   return (
-    <pre className="overflow-x-auto rounded-2xl bg-code p-4 font-mono text-[13px] leading-relaxed text-code-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.08)]">
+    <pre className={className}>
       <code>{nodes}</code>
     </pre>
   );
