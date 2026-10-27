@@ -1787,8 +1787,10 @@ address {
   font-weight: 400;
 }
 
+/* The page's own top bar sits under Hark's first-open tip (y 70 to 100),
+   so the tip never covers it. */
 .hark-webapp-head {
-  padding: 62px 20px 22px;
+  padding: 108px 20px 20px;
   background: var(--app-theme);
   color: #ffffff;
 }
@@ -1944,7 +1946,7 @@ address {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   gap: 8px;
-  height: 118px;
+  height: 84px;
   margin-top: 12px;
 }
 
