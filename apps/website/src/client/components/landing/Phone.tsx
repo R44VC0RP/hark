@@ -13,12 +13,10 @@ export const PHONE_H = SCREEN_H + BEZEL * 2;
  */
 export function PhoneFrame({
   scale,
-  ringing = false,
   cropped = false,
   children,
 }: {
   scale: number;
-  ringing?: boolean;
   /** Only the top shows, so content sits under the clock instead of at the bottom. */
   cropped?: boolean;
   children: ReactNode;
@@ -29,7 +27,7 @@ export function PhoneFrame({
       style={{ width: PHONE_W * scale, height: PHONE_H * scale } satisfies CSSProperties}
     >
       <div
-        className={`hark-phone ${ringing ? "is-ringing" : ""} ${cropped ? "is-cropped" : ""}`}
+        className={`hark-phone ${cropped ? "is-cropped" : ""}`}
         style={{ width: PHONE_W, height: PHONE_H, transform: `scale(${scale})` }}
       >
         <span className="hark-phone-btn is-action" />
@@ -38,7 +36,6 @@ export function PhoneFrame({
         <span className="hark-phone-btn is-power" />
         <div className="hark-phone-screen">
           {children}
-          <div className="hark-phone-ring" />
           <div className="hark-phone-home" />
         </div>
       </div>
@@ -47,8 +44,8 @@ export function PhoneFrame({
 }
 
 /** Hark's deep green with soft mint light: the wallpaper on every screen. */
-export function Wallpaper({ blurred = false }: { blurred?: boolean }) {
-  return <div className={`hark-wallpaper ${blurred ? "is-blurred" : ""}`} />;
+export function Wallpaper() {
+  return <div className="hark-wallpaper" />;
 }
 
 export function StatusBar({ time = false }: { time?: boolean }) {
@@ -160,63 +157,6 @@ export function AppIcon({ app, pressed = false }: { app: AppTile; pressed?: bool
         {app.glyph}
       </div>
       <span>{app.name}</span>
-    </div>
-  );
-}
-
-const HOME_APPS: AppTile[] = [
-  { name: "Releases", glyph: "▲", bg: "#171713", fg: "#fff" },
-  { name: "Evals", glyph: "E", bg: "#2F55D4", fg: "#fff" },
-  { name: "Pantry", glyph: "P", bg: "#F3C53C", fg: "#171713" },
-  { name: "Ops Log", glyph: "O", bg: "#fff", fg: "#035B49" },
-  { name: "Invoices", glyph: "I", bg: "#E7F0ED", fg: "#035B49" },
-  { name: "Stripe", glyph: "S", bg: "#635BFF", fg: "#fff" },
-  { name: "Uptime", glyph: "U", bg: "#C93B2C", fg: "#fff" },
-  { name: "Linear", glyph: "L", bg: "#5E6AD2", fg: "#fff" },
-  { name: "Grafana", glyph: "◔", bg: "#F46800", fg: "#fff" },
-  { name: "Vercel", glyph: "▲", bg: "#fff", fg: "#000" },
-  { name: "Sentry", glyph: "◭", bg: "#362D59", fg: "#fff" },
-  { name: "Notes", glyph: "≡", bg: "#FFD52E", fg: "#5A4500" },
-];
-
-/** Hark's own icon: the white mark on its green. */
-export const HARK_GLYPH = <span className="hark-mark" />;
-
-const DOCK_APPS: AppTile[] = [
-  { name: "Hark", glyph: HARK_GLYPH, bg: "#035B49", fg: "#fff" },
-  { name: "Terminal", glyph: ">_", bg: "#1C1C1E", fg: "#fff" },
-  { name: "GitHub", glyph: "G", bg: "#24292F", fg: "#fff" },
-  { name: "Safari", glyph: "◎", bg: "#F2F6FB", fg: "#1A73E8" },
-];
-
-/** A Home Screen behind the Dynamic Island, for activities and banners. */
-export function HomeScreen({ island, children }: { island: ReactNode; children?: ReactNode }) {
-  return (
-    <div className="hark-home">
-      <Wallpaper blurred />
-      <StatusBar time />
-      {island}
-      <div className="hark-home-grid">
-        {HOME_APPS.map((app) => (
-          <AppIcon app={app} key={app.name} />
-        ))}
-      </div>
-      <div className="hark-home-dots">
-        <i className="is-current" />
-        <i />
-      </div>
-      <div className="hark-home-dock">
-        {DOCK_APPS.map((app) => (
-          <div
-            className="hark-home-icon"
-            key={app.name}
-            style={{ background: app.bg, color: app.fg }}
-          >
-            {app.glyph}
-          </div>
-        ))}
-      </div>
-      {children}
     </div>
   );
 }

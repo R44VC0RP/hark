@@ -1,16 +1,10 @@
 import { Link } from "react-router";
-import { RoleSwitcher } from "../components/landing/RoleSwitcher";
+import { Focus } from "../components/landing/Focus";
 import { IOS_DOWNLOAD_URL, SiteHeader } from "../components/SiteChrome";
 import { primaryButton, textLink } from "../components/ui";
 
 /** Wider than the docs column: copy on the left, the phone on the right. */
 const LANDING_COLUMN = "mx-auto w-full max-w-6xl px-6";
-
-const AGENTS = [
-  { name: "Claude Code", src: "/agents/claude.png" },
-  { name: "Codex", src: "/agents/codex.png" },
-  { name: "OpenCode", src: "/agents/opencode.png" },
-];
 
 function AppleGlyph() {
   return (
@@ -20,83 +14,38 @@ function AppleGlyph() {
   );
 }
 
-function Intro() {
+function Cta() {
   return (
-    <div className="hark-roles-intro">
-      <h1 className="hark-roles-title">Every alert your team needs, on the Lock Screen.</h1>
-      <p className="hark-roles-lede">
-        Notifications, approvals, Live Activities, signed-in web apps and on-call paging, from any
-        webhook or coding agent.
-      </p>
-      <div className="hark-roles-cta">
-        <a
-          className={primaryButton}
-          href={IOS_DOWNLOAD_URL}
-          rel="noopener noreferrer"
-          target="_blank"
-        >
-          <AppleGlyph />
-          Download for iPhone
-        </a>
-        <Link className={textLink} to="/docs">
-          Read the docs <span aria-hidden="true">→</span>
-        </Link>
-      </div>
-      <div className="hark-roles-agents">
-        <span className="flex shrink-0 gap-1">
-          {AGENTS.map((agent) => (
-            <img
-              alt={agent.name}
-              className="size-[22px] rounded-[6px]"
-              height={22}
-              key={agent.name}
-              src={agent.src}
-              width={22}
-            />
-          ))}
-        </span>
-        <span className="text-ink-faint">Built for agents:</span>
-        <code className="truncate font-mono text-[0.92em] text-ink">
-          npx skills add R44VC0RP/hark --skill hark
-        </code>
-      </div>
-    </div>
-  );
-}
-
-function FooterLine() {
-  const link = "transition-colors hover:text-white";
-  return (
-    <footer className="hark-roles-footer">
-      <span>© 2026 Hark</span>
-      <nav aria-label="Footer" className="flex gap-4">
-        <Link className={link} to="/pricing">
-          Pricing
-        </Link>
-        <Link className={link} to="/privacy">
-          Privacy
-        </Link>
-        <Link className={link} to="/terms">
-          Terms
-        </Link>
-        <a className={link} href="/oss">
-          GitHub
-        </a>
-      </nav>
-    </footer>
+    <>
+      <a
+        className={primaryButton}
+        href={IOS_DOWNLOAD_URL}
+        rel="noopener noreferrer"
+        target="_blank"
+      >
+        <AppleGlyph />
+        Download for iPhone
+      </a>
+      <Link className={textLink} to="/docs">
+        Read the docs <span aria-hidden="true">→</span>
+      </Link>
+    </>
   );
 }
 
 /**
- * One screen, no scrolling: the pitch and a role switcher whose phone replays
- * what Hark does for an engineer, the person on call, an agent and a team.
+ * One screen, no scrolling, one thing to look at: the niche headline and a
+ * phone that shows notifications, paging, mini apps and teams in turn.
  */
 export function Landing() {
   return (
     <div className="hark-landing flex h-dvh flex-col overflow-hidden">
       <SiteHeader className={LANDING_COLUMN} />
       <main className={`${LANDING_COLUMN} flex min-h-0 flex-1 flex-col`}>
-        <RoleSwitcher footer={<FooterLine />} intro={<Intro />} />
+        <Focus
+          cta={<Cta />}
+          hint="Also: approvals from your agents · Live Activities · MCP & CLI"
+        />
       </main>
     </div>
   );
