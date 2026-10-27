@@ -11,7 +11,7 @@ import {
 } from "react";
 import { usePrefersReducedMotion } from "../../lib/motion";
 import { PHONE_H, PHONE_W, PhoneFrame } from "./Phone";
-import { AppScene, NotifyScene, PageScene, TeamScene } from "./Scenes";
+import { PhoneStage } from "./Scenes";
 import { ShuffleText } from "./ShuffleText";
 import { pinnedStep, SCENE_STEPS, type Scene, STEPS } from "./slides";
 
@@ -81,20 +81,6 @@ function usePhoneFit() {
   return { ref, fit };
 }
 
-function SceneView({ scene, step }: { scene: Scene; step: number }) {
-  switch (scene.kind) {
-    case "notify":
-    case "approve":
-      return <NotifyScene note={scene.note} step={step} />;
-    case "page":
-      return <PageScene page={scene.page} step={step} />;
-    case "app":
-      return <AppScene app={scene.app} step={step} />;
-    case "team":
-      return <TeamScene step={step} team={scene.team} />;
-  }
-}
-
 function sceneLabel(scene: Scene): string {
   switch (scene.kind) {
     case "notify":
@@ -127,7 +113,7 @@ function PlayIcon({ playing }: { playing: boolean }) {
 interface Story {
   index: number;
   step: number;
-  /** Changes on every pick, so re-picking a step restarts it. */
+  /** Changes with every new moment (picked or rotated), so re-picking one restarts it. */
   epoch: number;
   /** A picked step holds a while before the rotation goes on. */
   hold: boolean;
@@ -203,7 +189,7 @@ export function Focus({ cta, hint }: { cta: ReactNode; hint: ReactNode }) {
           : {
               index: (s.index + 1) % STEPS.length,
               step: 0,
-              epoch: s.epoch,
+              epoch: s.epoch + 1,
               hold: false,
               instant: false,
             },
@@ -352,7 +338,7 @@ export function Focus({ cta, hint }: { cta: ReactNode; hint: ReactNode }) {
 
       <div
         aria-labelledby={tabId(current.id)}
-        className={`hark-focus-stage ${fit?.cropped ? "is-cropped" : ""}`}
+        className={`hark-focus-stage ${fit?.cropped ? "is-cropped" : ""} ${story.instant ? "is-instant" : ""}`}
         id={panelId}
         ref={stageRef}
         role="tabpanel"
@@ -362,9 +348,7 @@ export function Focus({ cta, hint }: { cta: ReactNode; hint: ReactNode }) {
           <div className="hark-focus-stage-inner">
             <div aria-label={sceneLabel(current.scene)} role="img">
               <PhoneFrame cropped={fit.cropped} scale={fit.scale}>
-                <div className="hark-focus-scene" key={`${current.id}-${story.epoch}`}>
-                  <SceneView scene={current.scene} step={step} />
-                </div>
+                <PhoneStage id={`${current.id}-${story.epoch}`} scene={current.scene} step={step} />
               </PhoneFrame>
             </div>
           </div>

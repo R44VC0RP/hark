@@ -48,10 +48,14 @@ export function Wallpaper() {
   return <div className="hark-wallpaper" />;
 }
 
-export function StatusBar({ time = false }: { time?: boolean }) {
+/**
+ * The status bar stays put while screens change under it: the time fades in
+ * once the phone is unlocked, and it turns dark over light content.
+ */
+export function StatusBar({ time = false, dark = false }: { time?: boolean; dark?: boolean }) {
   return (
-    <div className="hark-phone-status">
-      <span className="hark-phone-status-time">{time ? "9:41" : ""}</span>
+    <div className={`hark-phone-status ${dark ? "is-dark" : ""}`}>
+      <span className={`hark-phone-status-time ${time ? "" : "is-hidden"}`}>9:41</span>
       <StatusBarIcons />
     </div>
   );
@@ -112,21 +116,18 @@ function Camera() {
 /**
  * The Lock Screen: date, big clock, then notifications and Live Activities
  * stacked under it (close to the clock, so a cropped phone still shows them).
+ * The status bar and Dynamic Island sit above it, so it can slide away.
  */
 export function LockScreen({
-  island,
   children,
   className = "",
 }: {
-  island?: ReactNode;
   children?: ReactNode;
   className?: string;
 }) {
   return (
     <div className={`hark-lock ${className}`}>
       <Wallpaper />
-      <StatusBar />
-      {island ?? <Island mode="idle" />}
       <div className="hark-lock-head">
         <LockGlyph />
         <div className="hark-lock-date">Tuesday, October 27</div>

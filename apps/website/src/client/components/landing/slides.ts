@@ -40,6 +40,8 @@ export interface AppCopy {
   kicker: string;
   headline: string;
   rows: AppRow[];
+  /** A small bar chart under the rows; values are percent of the tallest bar. */
+  chart?: { label: string; delta: string; values: number[] };
 }
 
 export interface TeamCopy {
@@ -117,7 +119,7 @@ export const STEPS: Step[] = [
       kind: "page",
       page: {
         title: "SEV-1 · Checkout API",
-        body: "Error rate 24%. Payments failing in us-east-1.",
+        body: "Error rate at 24%. Payments are failing.",
         claimedBy: "Ben",
         claimedBody: "Ben acknowledged. Incident #431 opened.",
       },
@@ -145,6 +147,11 @@ export const STEPS: Step[] = [
           { label: "Refunds", value: "1" },
           { label: "MRR", value: "$6,920" },
         ],
+        chart: {
+          label: "Last 7 days",
+          delta: "+18%",
+          values: [46, 58, 51, 72, 64, 83, 100],
+        },
       },
     },
   },

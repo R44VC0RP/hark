@@ -473,7 +473,10 @@ address {
   width: 17px;
   height: 17px;
   border-radius: 4.5px;
-  background: var(--color-green);
+  background: linear-gradient(180deg, #0a7a62, var(--color-green));
+  box-shadow:
+    0 0 0 1.5px rgb(8 40 33 / 0.55),
+    inset 0 0.5px 0 rgb(255 255 255 / 0.3);
 }
 
 .hark-note-content {
@@ -832,11 +835,24 @@ address {
 
 .hark-focus-cta {
   display: flex;
+  flex-wrap: wrap;
   grid-area: cta;
-  gap: 22px;
+  gap: 10px 22px;
   align-items: center;
   justify-content: center;
   margin-top: 14px;
+  white-space: nowrap;
+}
+
+/* Narrow phones: tighter, so both actions still fit on one line. */
+@media (max-width: 380px) {
+  .hark-focus-cta {
+    gap: 10px 16px;
+  }
+
+  .hark-focus-cta > a:first-child {
+    padding-inline: 18px;
+  }
 }
 
 .hark-focus-nav {
@@ -960,11 +976,6 @@ address {
 .hark-focus-stage.is-cropped .hark-focus-stage-inner {
   align-items: flex-start;
   padding-top: 12px;
-}
-
-.hark-focus-scene {
-  position: absolute;
-  inset: 0;
 }
 
 @media (min-width: 1024px) {
@@ -1121,7 +1132,8 @@ address {
   top: 0;
   right: 0;
   left: 0;
-  z-index: 5;
+  z-index: 25;
+  color: #ffffff;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1129,9 +1141,17 @@ address {
   padding: 3px 24px 0 46px;
 }
 
+.hark-phone-status.is-dark {
+  color: #101412;
+}
+
 .hark-phone-status-time {
   font-size: 17px;
   font-weight: 600;
+}
+
+.hark-phone-status-time.is-hidden {
+  opacity: 0;
 }
 
 /* ---- Dynamic Island ---- */
@@ -1166,7 +1186,12 @@ address {
   position: absolute;
   inset: 0;
   z-index: 2;
-  transition: transform 700ms cubic-bezier(0.32, 0.72, 0, 1);
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.hark-lock.is-unlocked {
+  transform: translateY(-100%);
 }
 
 .hark-lock-head {
@@ -1242,14 +1267,6 @@ address {
   color: #ffffff;
   font-size: 12px;
   font-weight: 500;
-  transition:
-    transform 200ms ease,
-    filter 200ms ease;
-}
-
-.hark-home-app.is-pressed {
-  filter: brightness(0.75);
-  transform: scale(0.88);
 }
 
 .hark-home-icon {
@@ -1270,6 +1287,18 @@ address {
   object-fit: cover;
 }
 
+/* A press dims and shrinks the icon only; its name stays put, as on iOS. */
+.hark-home-app .hark-home-icon {
+  transition:
+    transform 160ms ease-out,
+    filter 160ms ease-out;
+}
+
+.hark-home-app.is-pressed .hark-home-icon {
+  filter: brightness(0.75);
+  transform: scale(0.9);
+}
+
 /* ---- Notifications inside the phone ---- */
 
 .hark-note.is-static {
@@ -1282,7 +1311,74 @@ address {
 @keyframes hark-note-in {
   from {
     opacity: 0;
-    transform: translateY(-16px) scale(0.97);
+    transform: translateY(26px) scale(0.94);
+  }
+}
+
+@keyframes hark-note-out {
+  to {
+    opacity: 0;
+    filter: blur(3px);
+    transform: translateY(-8px) scale(0.96);
+  }
+}
+
+/* A replaced notification fades out where it was, without moving the next. */
+.hark-note-leaving {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  display: none;
+  pointer-events: none;
+}
+
+.hark-phone:not(.is-cropped) .hark-note-leaving {
+  top: auto;
+  bottom: 0;
+}
+
+/* Approving: a fingertip lands on the button just before the answer shows. */
+.hark-note-actions .is-tapped {
+  position: relative;
+}
+
+.hark-note-tap {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 40px;
+  height: 40px;
+  margin: -20px 0 0 -20px;
+  border-radius: 50%;
+  background: rgb(2 63 51 / 0.22);
+  box-shadow: 0 0 0 1px rgb(2 63 51 / 0.3);
+  opacity: 0;
+  pointer-events: none;
+}
+
+@keyframes hark-press {
+  50% {
+    transform: scale(0.95);
+    filter: brightness(0.9);
+  }
+}
+
+@keyframes hark-ring {
+  0%,
+  100% {
+    transform: rotate(0);
+  }
+  15%,
+  45% {
+    transform: rotate(16deg);
+  }
+  30%,
+  60% {
+    transform: rotate(-16deg);
+  }
+  75% {
+    transform: rotate(6deg);
   }
 }
 
@@ -1341,7 +1437,7 @@ address {
   height: 18px;
   margin-left: -5px;
   border-radius: 50%;
-  box-shadow: 0 0 0 2px rgb(20 60 50);
+  box-shadow: 0 0 0 1.5px rgb(28 72 62);
 }
 
 .hark-note-tag .hark-bell {
@@ -1400,6 +1496,7 @@ address {
 .hark-app-screen {
   position: absolute;
   inset: 0;
+  z-index: 1;
   padding-top: 54px;
   background: linear-gradient(180deg, #034a3c 0%, #01271f 55%, #011c16 100%);
 }
@@ -1452,17 +1549,9 @@ address {
 .hark-app-tabs span {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
   align-items: center;
-}
-
-.hark-app-tabs span::before {
-  width: 24px;
-  height: 22px;
-  border-radius: 7px;
-  background: currentColor;
-  opacity: 0.85;
-  content: "";
+  width: 72px;
 }
 
 .hark-app-tabs .is-current {
@@ -1493,15 +1582,6 @@ address {
   color: #101412;
 }
 
-.hark-webapp-status {
-  position: absolute;
-  top: 18px;
-  left: 50px;
-  color: #101412;
-  font-size: 17px;
-  font-weight: 600;
-}
-
 .hark-webapp-muted {
   color: #6b7671;
   font-weight: 400;
@@ -1530,9 +1610,8 @@ address {
   font-size: 14px;
 }
 
-.hark-webapp-lock {
-  color: #0f7a5f;
-  font-size: 9px;
+.hark-webapp-url svg {
+  color: #6b7671;
 }
 
 .hark-webapp-more {
@@ -1595,6 +1674,68 @@ address {
   border-bottom: 0;
 }
 
+.hark-webapp-chart {
+  margin-top: 12px;
+  padding: 14px 14px 12px;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.06);
+}
+
+.hark-webapp-chart-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.hark-webapp-chart-delta {
+  color: #0f7a5f;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.hark-webapp-bars {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 8px;
+  height: 118px;
+  margin-top: 12px;
+}
+
+.hark-webapp-bars span {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: stretch;
+  justify-content: flex-end;
+  color: #8a948f;
+  font-size: 11px;
+  font-weight: 500;
+  text-align: center;
+}
+
+.hark-webapp-bars i {
+  border-radius: 5px;
+  background: #cfe9df;
+  transform-origin: 50% 100%;
+}
+
+.hark-webapp-bars .is-today {
+  color: #101412;
+}
+
+.hark-webapp-bars .is-today i {
+  background: #635bff;
+}
+
+@keyframes hark-grow {
+  from {
+    transform: scaleY(0.2);
+    opacity: 0;
+  }
+}
+
 /* Motion only for visitors who allow it; `--hark-play` pauses it with the slides. */
 .hark-focus {
   --hark-play: running;
@@ -1614,12 +1755,8 @@ address {
     animation: hark-fade-up 360ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
   }
 
-  .hark-focus-scene {
-    animation: hark-fade 320ms ease both;
-  }
-
   .hark-note.is-static {
-    animation: hark-note-in 400ms cubic-bezier(0.32, 0.72, 0, 1) both;
+    animation: hark-note-in 520ms cubic-bezier(0.32, 0.72, 0, 1) both;
     animation-play-state: var(--hark-play);
   }
 
@@ -1641,7 +1778,52 @@ address {
   }
 
   .hark-webapp-sheet {
-    transition: transform 400ms cubic-bezier(0.32, 0.72, 0, 1);
+    transition: transform 420ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .hark-webapp-bars i {
+    animation: hark-grow 520ms cubic-bezier(0.23, 1, 0.32, 1) both;
+    animation-delay: 380ms;
+  }
+
+  .hark-lock {
+    transition: transform 640ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .hark-phone-status,
+  .hark-phone-status-time {
+    transition:
+      color 240ms ease,
+      opacity 240ms ease;
+  }
+
+  .hark-focus-stage.is-instant .hark-lock {
+    transition: none;
+  }
+
+  .hark-note-leaving {
+    display: block;
+    animation: hark-note-out 280ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  }
+
+  /* The copy doesn't replay its entrance. (Repeated class: outranks the entrances.) */
+  .hark-note-leaving.hark-note-leaving.hark-note-leaving * {
+    animation: none;
+  }
+
+  .hark-note-tap {
+    animation: hark-tap 600ms ease-out 1550ms both;
+    animation-play-state: var(--hark-play);
+  }
+
+  .hark-note-actions .is-tapped {
+    animation: hark-press 260ms ease-out 1650ms;
+    animation-play-state: var(--hark-play);
+  }
+
+  .hark-note-tag.is-urgent .hark-bell {
+    animation: hark-ring 700ms ease-in-out both;
+    animation-play-state: var(--hark-play);
   }
 
   .hark-webapp-pass {

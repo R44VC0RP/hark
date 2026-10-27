@@ -25,7 +25,7 @@ export function Gear() {
 /** The real iOS status-bar glyphs: signal, Wi-Fi and battery. */
 export function StatusBarIcons() {
   return (
-    <svg aria-hidden="true" fill="#fff" height="19" viewBox="0 0 82 22" width="72">
+    <svg aria-hidden="true" fill="currentColor" height="19" viewBox="0 0 82 22" width="72">
       <path d="M3.7 13H2.5a1 1 0 0 0-1 1v2.5a1 1 0 0 0 1 1h1.2a1 1 0 0 0 1-1V14a1 1 0 0 0-1-1m5.2-2.5H7.7a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1h1.2a1 1 0 0 0 1-1v-5a1 1 0 0 0-1-1M14.1 8h-1.2a1 1 0 0 0-1 1v7.5a1 1 0 0 0 1 1h1.2a1 1 0 0 0 1-1V9a1 1 0 0 0-1-1m5.2-2.5h-1.2a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h1.2a1 1 0 0 0 1-1v-10a1 1 0 0 0-1-1" />
       <path
         clipRule="evenodd"

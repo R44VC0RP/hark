@@ -33,6 +33,33 @@ function Cta() {
   );
 }
 
+const hintLink =
+  "underline decoration-white/20 underline-offset-[3px] transition-colors duration-150 hover:text-white hover:decoration-white/60";
+
+/** Everything else Hark does, each a link into the docs. */
+function Hint() {
+  return (
+    <>
+      Also:{" "}
+      <a className={hintLink} href="/docs#activity-api">
+        Live Activities
+      </a>{" "}
+      ·{" "}
+      <a className={hintLink} href="/docs#mcp">
+        MCP
+      </a>{" "}
+      &amp;{" "}
+      <a className={hintLink} href="/docs#cli">
+        CLI
+      </a>{" "}
+      ·{" "}
+      <a className={hintLink} href="/docs">
+        and more
+      </a>
+    </>
+  );
+}
+
 /**
  * One screen, no scrolling, one thing to look at: the niche headline and a
  * phone that shows one matching moment for each audience in turn.
@@ -42,7 +69,7 @@ export function Landing() {
     <div className="hark-landing flex h-dvh flex-col overflow-hidden">
       <SiteHeader className={LANDING_COLUMN} />
       <main className={`${LANDING_COLUMN} flex min-h-0 flex-1 flex-col`}>
-        <Focus cta={<Cta />} hint="Also: Live Activities · MCP & CLI · and more" />
+        <Focus cta={<Cta />} hint={<Hint />} />
       </main>
     </div>
   );
