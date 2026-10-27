@@ -52,7 +52,8 @@ A group's policy is level 0 plus up to 5 levels in `escalation` (contracts:
   Everyone else's ringing stops and their alert is replaced (same collapse ID) by a passive,
   silent "Claimed by <name>" notice carrying `page.claimed`.
 - **Manual Escalate** jumps to the next level now and records who escalated; past the end it pages
-  the group (or the team when `escalationFinal` is `team`). Acknowledge and escalate stay
+  the group (or the team when `escalationFinal` is `team`), at most twice per page and no more
+  than once per repeat interval. Acknowledge and escalate stay
   human-only: no agent route or MCP tool.
 - **Timeline.** `oncall_page_event` rows become `OncallPageDto.timeline`: `paged` (with `level`,
   `loop`, the people, and `escalatedBy` for manual escalation), `acknowledged`, and `resolved`.
