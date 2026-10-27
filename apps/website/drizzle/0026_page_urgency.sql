@@ -1,0 +1,1 @@
+ALTER TABLE `oncall_page` ADD `urgency` text DEFAULT 'high' NOT NULL;

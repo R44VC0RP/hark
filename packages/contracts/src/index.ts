@@ -269,6 +269,14 @@ export const teamIdSchema = z
   .trim()
   .regex(/^team_[A-Za-z0-9_-]{8,64}$/, "Must be a Hark team ID (team_…)");
 
+/**
+ * `high`: rings until acknowledged and follows the escalation policy.
+ * `low`: one quiet alert to whoever is on call; no repeats, no escalation
+ * until a person escalates it (which makes it high).
+ */
+export const ONCALL_PAGE_URGENCIES = ["high", "low"] as const;
+export type OncallPageUrgency = (typeof ONCALL_PAGE_URGENCIES)[number];
+
 export const oncallGroupIdSchema = z
   .string()
   .trim()
@@ -371,6 +379,8 @@ export const webhookRequestSchema = z
      * `deviceIds` and `response`.
      */
     oncall: oncallGroupIdSchema.optional(),
+    /** Page urgency with `oncall`: `high` (default) rings and escalates, `low` alerts once. */
+    urgency: z.enum(ONCALL_PAGE_URGENCIES).optional(),
   })
   .superRefine((value, context) => {
     // Interactive bodies become interaction prompts, whose limit is unchanged.
@@ -1305,6 +1315,8 @@ export const agentNotificationCreateSchema = z.object({
    * `deviceIds`; the response is then an `OncallPageCreateResponse`.
    */
   oncall: oncallGroupIdSchema.optional(),
+  /** Page urgency with `oncall`: `high` (default) rings and escalates, `low` alerts once. */
+  urgency: z.enum(ONCALL_PAGE_URGENCIES).optional(),
 });
 export type AgentNotificationCreateInput = z.infer<typeof agentNotificationCreateSchema>;
 
@@ -1808,6 +1820,8 @@ export const oncallPageCreateSchema = z.strictObject({
   appId: appIdSchema.optional(),
   /** Pages with an open page of the same key are merged instead of re-paging. */
   dedupKey: z.string().trim().min(1).max(200).optional(),
+  /** `high` (default) rings until acknowledged and escalates; `low` alerts once. */
+  urgency: z.enum(ONCALL_PAGE_URGENCIES).optional(),
 });
 export type OncallPageCreateInput = z.infer<typeof oncallPageCreateSchema>;
 
@@ -1821,6 +1835,8 @@ export interface OncallPageDto {
   url: string | null;
   app: AppSummaryDto | null;
   status: OncallPageStatus;
+  /** Absent on older servers, where every page is high urgency. */
+  urgency?: OncallPageUrgency;
   dedupKey: string | null;
   /** How many times a duplicate page was merged into this one. */
   repeatCount: number;

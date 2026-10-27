@@ -503,6 +503,8 @@ export const oncallPage = sqliteTable(
     appId: text("app_id").references(() => app.id, { onDelete: "set null" }),
     /** `triggered`, `acknowledged`, or `resolved`. */
     status: text("status").notNull(),
+    /** `high` rings and escalates; `low` alerts once and waits for a person. */
+    urgency: text("urgency").notNull().default("high"),
     dedupKey: text("dedup_key"),
     repeatCount: integer("repeat_count").notNull().default(0),
     /** Escalation steps already run. */

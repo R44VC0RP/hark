@@ -298,6 +298,9 @@ export const agentRoute = new Hono<AgentEnv>()
     if (idempotencyKey === null) {
       return c.json({ error: "Idempotency-Key must contain between 1 and 200 characters" }, 400);
     }
+    if (parsed.data.urgency && !parsed.data.oncall) {
+      return c.json({ error: "urgency needs oncall" }, 400);
+    }
     if (parsed.data.oncall) {
       // Paging reaches other people, so it needs the on-call scope as well.
       if (!token.scopes.includes("oncall:write")) {
@@ -314,6 +317,7 @@ export const agentRoute = new Hono<AgentEnv>()
         ...(parsed.data.url ? { url: parsed.data.url } : {}),
         ...(parsed.data.appId ? { appId: parsed.data.appId } : {}),
         ...(idempotencyKey ? { dedupKey: idempotencyKey } : {}),
+        ...(parsed.data.urgency ? { urgency: parsed.data.urgency } : {}),
       };
       if (
         idempotencyKey &&

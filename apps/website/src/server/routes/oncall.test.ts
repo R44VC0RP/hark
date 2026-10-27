@@ -651,6 +651,49 @@ describe("escalation policy", () => {
     expect(acked.status).toBe(200);
   });
 
+  it("sends low-urgency pages once, without escalating, until a person escalates them", async () => {
+    const group = await createGroup("Urgency", [{ afterMinutes: 5, target: "next" }]);
+    const created = (await (
+      await page(group.id, { title: "Cert expires in 20 days", urgency: "low" })
+    ).json()) as OncallPageCreateResponse;
+    expect(created.page).toMatchObject({ urgency: "low", nextEscalationAt: null, ringing: [] });
+    expect(sent[0]).toMatchObject({
+      to: "ExponentPushToken[user_a]",
+      sound: "default",
+      interruptionLevel: "active",
+    });
+    sent.length = 0;
+    await oncall.processDueEscalations(new Date(Date.now() + 3_600_000));
+    await runDueRings(created.page.id);
+    expect(sent).toHaveLength(0);
+
+    // Webhooks set it too, and it only makes sense with oncall.
+    const hook = await call("POST", `/hooks/${WEBHOOK}`, {
+      body: "Disk 70%",
+      oncall: group.id,
+      urgency: "low",
+    });
+    expect(hook.status).toBe(201);
+    expect((await call("POST", `/hooks/${WEBHOOK}`, { body: "x", urgency: "low" })).status).toBe(
+      400,
+    );
+
+    // A person escalating it decides it matters: it rings and escalates from here.
+    sent.length = 0;
+    as("user_c");
+    expect((await call("POST", `/api/pages/${created.page.id}/escalate`)).status).toBe(200);
+    expect(sent[0]).toMatchObject({
+      to: "ExponentPushToken[user_b]",
+      sound: "hark-page.caf",
+      interruptionLevel: "time-sensitive",
+    });
+    const upgraded = await pageDetail(created.page.id);
+    expect(upgraded.urgency).toBe("high");
+    expect(upgraded.ringing?.map((ring) => ring.person.userId)).toEqual(["user_b"]);
+    as("user_a");
+    expect((await call("POST", `/api/pages/${created.page.id}/resolve`, {})).status).toBe(200);
+  });
+
   it("jumps to the next level when a person escalates and records who did", async () => {
     const group = await createGroup("Jump", [
       { afterMinutes: 30, target: "next" },

@@ -21,6 +21,7 @@ import {
   ONCALL_ESCALATION_TARGETS,
   ONCALL_PAGE_EVENT_KINDS,
   ONCALL_PAGE_STATUSES,
+  ONCALL_PAGE_URGENCIES,
   ONCALL_ROTATION_PERIODS,
   oncallGroupCreateSchema,
   oncallGroupUpdateSchema,
@@ -448,6 +449,10 @@ const schemas: Record<string, JsonSchema> = {
     url: nullableStr,
     app: { anyOf: [ref("AppSummary"), { type: "null" }] },
     status: { enum: [...ONCALL_PAGE_STATUSES] },
+    urgency: {
+      enum: [...ONCALL_PAGE_URGENCIES],
+      description: "`high` rings and escalates; `low` alerts once until a person escalates it.",
+    },
     dedupKey: nullableStr,
     repeatCount: int,
     notified: arrayOf(ref("OncallPerson")),

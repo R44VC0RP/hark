@@ -321,6 +321,7 @@ export async function toPageDtos(rows: PageRow[]): Promise<OncallPageDto[]> {
       url: row.url,
       app: pageApp ? toAppSummaryDto(pageApp) : null,
       status: row.status as OncallPageStatus,
+      urgency: row.urgency === "low" ? "low" : "high",
       dedupKey: row.dedupKey,
       repeatCount: row.repeatCount,
       notified: recipients
@@ -495,11 +496,14 @@ function ringInterval(group: GroupRow, preference: PreferenceRow | undefined): n
 }
 
 function nextRingAfter(
+  page: Pick<PageRow, "urgency">,
   group: GroupRow,
   preference: PreferenceRow | undefined,
   ringCount: number,
   from: number,
 ): Date | null {
+  // Low-urgency pages alert once.
+  if (page.urgency === "low") return null;
   const interval = ringInterval(group, preference);
   if (interval === null || ringCount >= group.ringMaxRepeats) return null;
   return new Date(from + interval * 1000);
@@ -536,6 +540,7 @@ async function sendPageAlert(
       ...(page.url ? { url: page.url } : {}),
       ...(page.appId ? { appId: page.appId } : {}),
       ring,
+      urgency: page.urgency === "low" ? "low" : "high",
     }),
   );
   await deactivateStale(result.staleTokens);
@@ -566,7 +571,7 @@ async function notifyRecipients(
         step,
         responseTokenHash: hashPageResponseToken(responseToken),
         notifiedAt: new Date(now),
-        nextRingAt: nextRingAfter(group, preferences.get(userId), 0, now),
+        nextRingAt: nextRingAfter(page, group, preferences.get(userId), 0, now),
       })
       .onConflictDoNothing()
       .returning({ userId: oncallPageRecipient.userId });
@@ -625,7 +630,7 @@ async function realert(page: PageRow, group: GroupRow, userIds: string[]): Promi
       .update(oncallPageRecipient)
       .set({
         ringCount: 0,
-        nextRingAt: nextRingAfter(group, preferences.get(userId), 0, now),
+        nextRingAt: nextRingAfter(page, group, preferences.get(userId), 0, now),
         // A fresh alert always carries a fresh one-shot credential, so spending
         // the last one (e.g. on Escalate) never leaves Acknowledge unusable.
         // A spent credential is not kept as the previous one.
@@ -679,6 +684,7 @@ async function ringOnce(
   if (
     row?.page.status !== "triggered" ||
     !team.has(userId) ||
+    row.page.urgency === "low" ||
     ringInterval(row.group, preference) === null ||
     ringCount >= row.group.ringMaxRepeats
   ) {
@@ -692,7 +698,7 @@ async function ringOnce(
     .update(oncallPageRecipient)
     .set({
       ringCount: nextCount,
-      nextRingAt: nextRingAfter(group, preference, nextCount, now),
+      nextRingAt: nextRingAfter(row.page, group, preference, nextCount, now),
       // A fresh alert always carries a fresh one-shot credential, so spending
       // the last one (e.g. on Escalate) never leaves Acknowledge unusable.
       // A spent credential is not kept as the previous one.
@@ -1023,7 +1029,8 @@ export async function idempotentPageConflict(
     open.page.title !== parsed.data.title ||
     open.page.body !== (parsed.data.body ?? null) ||
     open.page.url !== (parsed.data.url ?? null) ||
-    open.page.appId !== (parsed.data.appId ?? null)
+    open.page.appId !== (parsed.data.appId ?? null) ||
+    open.page.urgency !== (parsed.data.urgency ?? "high")
   );
 }
 
@@ -1098,9 +1105,11 @@ export async function raisePage({
     url: input.url ?? null,
     appId,
     status: "triggered",
+    urgency: input.urgency ?? "high",
     dedupKey: input.dedupKey ?? null,
     escalationStep: 0,
-    nextEscalationAt: nextEscalationAt(group, 0, now),
+    // Low-urgency pages wait for a person to escalate them.
+    nextEscalationAt: input.urgency === "low" ? null : nextEscalationAt(group, 0, now),
     lastPagedUserId: initial.length === 1 ? (initial[0] ?? null) : null,
     sourceName,
     createdByUserId: creatorUserId,
@@ -1270,6 +1279,8 @@ export async function escalatePage(
       escalationStep: stepIndex + 1,
       nextEscalationAt: nextEscalationAt(group, stepIndex + 1, now),
       lastPagedUserId,
+      // A person escalating a low-urgency page decides it matters: it rings from here on.
+      ...(manual ? { urgency: "high" } : {}),
       updatedAt: new Date(now),
     })
     .where(

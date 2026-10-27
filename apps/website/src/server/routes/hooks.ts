@@ -177,6 +177,9 @@ export const hooksRoute = new Hono()
       );
     }
 
+    if (parsed.data.urgency && !parsed.data.oncall) {
+      return c.json<WebhookResponse>({ ok: false, error: "urgency needs oncall" }, 400);
+    }
     if (parsed.data.oncall) {
       if (parsed.data.deviceIds || parsed.data.response) {
         return c.json<WebhookResponse>(
@@ -193,6 +196,7 @@ export const hooksRoute = new Hono()
         ...(parsed.data.url ? { url: parsed.data.url } : {}),
         ...(parsed.data.appId ? { appId: parsed.data.appId } : {}),
         ...(idempotencyKey ? { dedupKey: idempotencyKey } : {}),
+        ...(parsed.data.urgency ? { urgency: parsed.data.urgency } : {}),
       };
       if (
         idempotencyKey &&

@@ -211,6 +211,8 @@ export interface BuildPagePushInput {
   appId?: string;
   /** Repeat alert number; 0 for the first alert. */
   ring?: number;
+  /** `low` sends one ordinary alert: default sound, no critical or time-sensitive level. */
+  urgency?: "high" | "low";
 }
 
 /**
@@ -247,12 +249,14 @@ export function buildPagePushMessages(input: BuildPagePushInput): ExpoPushMessag
       body: input.body,
       categoryId: HARK_PAGE_CATEGORY_ID,
       priority: "high",
-      ...(target.critical
-        ? {
-            sound: { critical: true, name: HARK_PAGE_SOUND, volume: 1 },
-            interruptionLevel: "critical" as const,
-          }
-        : { sound: HARK_PAGE_SOUND, interruptionLevel: "time-sensitive" as const }),
+      ...(input.urgency === "low"
+        ? { sound: "default", interruptionLevel: "active" as const }
+        : target.critical
+          ? {
+              sound: { critical: true, name: HARK_PAGE_SOUND, volume: 1 },
+              interruptionLevel: "critical" as const,
+            }
+          : { sound: HARK_PAGE_SOUND, interruptionLevel: "time-sensitive" as const }),
       collapseId: pageCollapseId(input.pageId),
       mutableContent: true,
       data,
