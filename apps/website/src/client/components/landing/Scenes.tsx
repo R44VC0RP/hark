@@ -325,7 +325,7 @@ function AppScene({ app, step }: { app: AppCopy; step: number }) {
         </div>
         <AppTabs />
       </div>
-      {step === APP_TAP ? <Tap style={{ left: 66, top: 216 }} /> : null}
+      {step === APP_TAP ? <Tap style={{ left: 66, top: 223 }} /> : null}
       <div className={`hark-webapp-sheet ${step > APP_TAP ? "is-open" : ""}`}>
         <WebApp app={app} />
       </div>

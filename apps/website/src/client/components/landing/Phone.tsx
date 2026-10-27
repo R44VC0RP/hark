@@ -1,15 +1,22 @@
 import type { CSSProperties, ReactNode } from "react";
 import { StatusBarIcons } from "../LiveActivityDemo";
 
-/** The phone is drawn at iPhone 15 Pro size in points, then scaled to fit. */
-export const SCREEN_W = 393;
-export const SCREEN_H = 852;
-const BEZEL = 11;
+/**
+ * An iPhone 17 Pro, drawn in points from Apple's dimensional drawing
+ * (71.85 × 150.01 mm body, 66.57 × 144.73 mm display = 6.04 pt/mm), then
+ * scaled to fit. The display sits 16 pt (2.64 mm) inside the body on every
+ * side, and the corners are concentric (display 62.5 pt, body 78.5 pt).
+ */
+export const SCREEN_W = 402;
+export const SCREEN_H = 874;
+const BEZEL = 16;
 export const PHONE_W = SCREEN_W + BEZEL * 2;
 export const PHONE_H = SCREEN_H + BEZEL * 2;
 
 /**
- * An iPhone body: titanium rim, black bezel, rounded screen and side buttons.
+ * The body: a metal frame band (7 pt seen from the front), the black glass
+ * border, the display, and the side buttons at their drawn positions
+ * (Action and volume on the left; side button and Camera Control on the right).
  */
 export function PhoneFrame({
   scale,
@@ -33,7 +40,9 @@ export function PhoneFrame({
         <span className="hark-phone-btn is-action" />
         <span className="hark-phone-btn is-vol-up" />
         <span className="hark-phone-btn is-vol-down" />
-        <span className="hark-phone-btn is-power" />
+        <span className="hark-phone-btn is-side" />
+        <span className="hark-phone-btn is-camera" />
+        <div className="hark-phone-glass" />
         <div className="hark-phone-screen">
           {children}
           <div className="hark-phone-home" />
