@@ -117,6 +117,21 @@ async function deleteGroup(actor: Actor, groupId: string): Promise<Outcome> {
   if (!found) return GROUP_NOT_FOUND;
   if (!hasRole(found.role as "member", "admin")) return FORBIDDEN_ADMIN;
   await db.delete(oncallGroup).where(eq(oncallGroup.id, groupId));
+  // Levels in sibling groups that paged this group's on-call now page nobody.
+  const siblings = await db
+    .select()
+    .from(oncallGroup)
+    .where(eq(oncallGroup.teamId, found.group.teamId));
+  for (const sibling of siblings) {
+    if (!sibling.escalation.some((step) => step.groupId === groupId)) continue;
+    await db
+      .update(oncallGroup)
+      .set({
+        escalation: sibling.escalation.filter((step) => step.groupId !== groupId),
+        updatedAt: new Date(),
+      })
+      .where(eq(oncallGroup.id, sibling.id));
+  }
   return result({ ok: true });
 }
 

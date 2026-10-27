@@ -626,17 +626,21 @@ async function realert(page: PageRow, group: GroupRow, userIds: string[]): Promi
       .set({
         ringCount: 0,
         nextRingAt: nextRingAfter(group, preferences.get(userId), 0, now),
-        previousResponseTokenHash: sql`case when ${oncallPageRecipient.responseTokenUsedAt} is null then ${oncallPageRecipient.responseTokenHash} else ${oncallPageRecipient.previousResponseTokenHash} end`,
-        responseTokenHash: sql`case when ${oncallPageRecipient.responseTokenUsedAt} is null then ${hashPageResponseToken(responseToken)} else ${oncallPageRecipient.responseTokenHash} end`,
+        // A fresh alert always carries a fresh one-shot credential, so spending
+        // the last one (e.g. on Escalate) never leaves Acknowledge unusable.
+        // A spent credential is not kept as the previous one.
+        previousResponseTokenHash: sql`case when ${oncallPageRecipient.responseTokenUsedAt} is null then ${oncallPageRecipient.responseTokenHash} else null end`,
+        responseTokenUsedAt: null,
+        responseTokenHash: hashPageResponseToken(responseToken),
       })
       .where(and(eq(oncallPageRecipient.pageId, page.id), eq(oncallPageRecipient.userId, userId)))
-      .returning({ usedAt: oncallPageRecipient.responseTokenUsedAt });
+      .returning({ userId: oncallPageRecipient.userId });
     if (!updated) continue;
     accepted += await sendPageAlert(
       page,
       group.name,
       targets.filter((target) => target.userId === userId),
-      updated.usedAt ? undefined : responseToken,
+      responseToken,
       0,
     );
   }
@@ -689,20 +693,18 @@ async function ringOnce(
     .set({
       ringCount: nextCount,
       nextRingAt: nextRingAfter(group, preference, nextCount, now),
-      previousResponseTokenHash: sql`case when ${oncallPageRecipient.responseTokenUsedAt} is null then ${oncallPageRecipient.responseTokenHash} else ${oncallPageRecipient.previousResponseTokenHash} end`,
-      responseTokenHash: sql`case when ${oncallPageRecipient.responseTokenUsedAt} is null then ${hashPageResponseToken(responseToken)} else ${oncallPageRecipient.responseTokenHash} end`,
+      // A fresh alert always carries a fresh one-shot credential, so spending
+      // the last one (e.g. on Escalate) never leaves Acknowledge unusable.
+      // A spent credential is not kept as the previous one.
+      previousResponseTokenHash: sql`case when ${oncallPageRecipient.responseTokenUsedAt} is null then ${oncallPageRecipient.responseTokenHash} else null end`,
+      responseTokenUsedAt: null,
+      responseTokenHash: hashPageResponseToken(responseToken),
     })
     .where(recipient)
-    .returning({ usedAt: oncallPageRecipient.responseTokenUsedAt });
+    .returning({ userId: oncallPageRecipient.userId });
   if (!claimed) return;
   const targets = await devicesOf([userId]);
-  await sendPageAlert(
-    page,
-    group.name,
-    targets,
-    claimed.usedAt ? undefined : responseToken,
-    nextCount,
-  );
+  await sendPageAlert(page, group.name, targets, responseToken, nextCount);
   // Acknowledged while this repeat was in flight: clear it again.
   const [latest] = await db.select().from(oncallPage).where(eq(oncallPage.id, page.id)).limit(1);
   if (latest && latest.status !== "triggered") {
@@ -919,7 +921,12 @@ async function stepTargets(
           .from(oncallGroup)
           .where(and(eq(oncallGroup.id, step.groupId), eq(oncallGroup.teamId, group.teamId)))
           .limit(1);
-        if (other) source = other;
+        if (!other) {
+          // The referenced group was deleted: page nobody rather than the wrong rotation.
+          console.warn("[oncall] Escalation level names a missing group", step.groupId);
+          break;
+        }
+        source = other;
       }
       const shift = await onCallNow(source, now);
       if (shift && team.has(shift.userId)) {
@@ -1158,6 +1165,29 @@ export type EscalateOutcome =
   | { ok: true; page: PageRow }
   | { ok: false; status: 404 | 409; error: string; page?: PageRow };
 
+const MAX_PAST_END_REPAGES = 2;
+
+/**
+ * Manual escalations past the last level re-page the whole group or team,
+ * so they are capped per page and spaced by at least one repeat interval.
+ */
+async function pastEndLimited(pageId: string, group: GroupRow): Promise<string | null> {
+  const events = await db
+    .select({ level: oncallPageEvent.level, createdAt: oncallPageEvent.createdAt })
+    .from(oncallPageEvent)
+    .where(and(eq(oncallPageEvent.pageId, pageId), eq(oncallPageEvent.kind, "paged")))
+    .orderBy(desc(oncallPageEvent.createdAt));
+  const pastEnd = events.filter((event) => (event.level ?? 0) > group.escalation.length);
+  if (pastEnd.length >= MAX_PAST_END_REPAGES) {
+    return "Everyone has already been paged again; acknowledge or resolve the page";
+  }
+  const latest = events[0];
+  if (latest && Date.now() - latest.createdAt.getTime() < group.ringIntervalSeconds * 1000) {
+    return "Paged moments ago; try again shortly";
+  }
+  return null;
+}
+
 /**
  * Runs the page's next escalation step. The worker calls this when a step
  * is due; a person can run it early (`actorUserId`). Past the last step a
@@ -1224,8 +1254,13 @@ export async function escalatePage(
     ).map((recipient) => recipient.userId),
   );
   const again = targets.filter((id) => notified.has(id) && !ringingNow.has(id));
-  if (manual && fresh.length === 0 && again.length === 0) {
-    return { ok: false, status: 409, error: "Everyone in the group has already been paged", page };
+  if (!planned) {
+    // Manual escalation past the last level: page everyone, but not on a loop.
+    if (fresh.length === 0 && again.length === 0) {
+      return { ok: false, status: 409, error: "Everyone has already been paged", page };
+    }
+    const limited = await pastEndLimited(page.id, group);
+    if (limited) return { ok: false, status: 409, error: limited, page };
   }
 
   // Claimed by step number, so the worker and a person cannot run a step twice.
@@ -1249,7 +1284,6 @@ export async function escalatePage(
     const [latest] = await db.select().from(oncallPage).where(eq(oncallPage.id, page.id)).limit(1);
     return { ok: false, status: 409, error: "Page changed; try again", page: latest ?? page };
   }
-  if (group.escalationMode === "hand_off") await stopRingingExcept(page.id, targets);
   if (fresh.length > 0 || again.length > 0) {
     await recordEvent(page.id, "paged", [...fresh, ...again], {
       level: step.level,
@@ -1262,6 +1296,13 @@ export async function escalatePage(
     (await realert(claimed, group, again));
   if (accepted > 0 && claimed.createdByUserId) {
     await trackNotification(claimed.createdByUserId, `${claimed.id}:${stepIndex + 1}`);
+  }
+  // Hand off only once the new level is actually ringing someone.
+  if (
+    group.escalationMode === "hand_off" &&
+    (accepted > 0 || targets.some((id) => ringingNow.has(id)))
+  ) {
+    await stopRingingExcept(page.id, targets);
   }
   // Claimed by someone while this step was paging: clear what it just sent.
   const [latest] = await db.select().from(oncallPage).where(eq(oncallPage.id, page.id)).limit(1);

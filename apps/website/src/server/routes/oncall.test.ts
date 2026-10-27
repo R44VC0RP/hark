@@ -606,6 +606,51 @@ describe("escalation policy", () => {
     expect((await call("POST", `/api/pages/${created.page.id}/resolve`, {})).status).toBe(200);
   });
 
+  it("re-arms Acknowledge after a lock-screen Escalate and caps re-pages past the last level", async () => {
+    const group = await createGroup("Capped re-page", [{ afterMinutes: 30, target: "next" }]);
+    const created = (await (
+      await page(group.id, { title: "Cache cold" })
+    ).json()) as OncallPageCreateResponse;
+    // Escalating from the lock screen spends Ana's credential...
+    const escalated = await call("POST", `/api/page-responses/${created.page.id}/escalate`, {
+      responseToken: responseTokenFor("user_a"),
+    });
+    expect(escalated.status).toBe(200);
+    // ...but her next repeat carries a fresh one that can still acknowledge.
+    sent.length = 0;
+    await runDueRings(created.page.id);
+    const fresh = responseTokenFor("user_a");
+    expect(pushesTo("user_a")).toHaveLength(1);
+
+    // Past the last level a person can page everyone, but not on a loop.
+    const { eq } = await import("drizzle-orm");
+    const stopAll = () =>
+      db
+        .update(schema.oncallPageRecipient)
+        .set({ nextRingAt: null })
+        .where(eq(schema.oncallPageRecipient.pageId, created.page.id));
+    const backdate = () =>
+      db
+        .update(schema.oncallPageEvent)
+        .set({ createdAt: new Date(Date.now() - 10 * 60_000) })
+        .where(eq(schema.oncallPageEvent.pageId, created.page.id));
+    as("user_b");
+    await backdate();
+    expect((await call("POST", `/api/pages/${created.page.id}/escalate`)).status).toBe(200);
+    await stopAll();
+    expect((await call("POST", `/api/pages/${created.page.id}/escalate`)).status).toBe(409);
+    await backdate();
+    expect((await call("POST", `/api/pages/${created.page.id}/escalate`)).status).toBe(200);
+    await stopAll();
+    await backdate();
+    expect((await call("POST", `/api/pages/${created.page.id}/escalate`)).status).toBe(409);
+
+    const acked = await call("POST", `/api/page-responses/${created.page.id}/acknowledge`, {
+      responseToken: fresh,
+    });
+    expect(acked.status).toBe(200);
+  });
+
   it("jumps to the next level when a person escalates and records who did", async () => {
     const group = await createGroup("Jump", [
       { afterMinutes: 30, target: "next" },
