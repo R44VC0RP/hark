@@ -58,12 +58,13 @@ export function Wallpaper() {
 }
 
 /**
- * The status bar stays put while screens change under it; the time fades in
- * once the phone is unlocked.
+ * The status bar stays put while screens change under it. The Lock Screen
+ * shows no time there (the big clock does); apps show it. It turns dark over
+ * light app content, as iOS does.
  */
-export function StatusBar({ time = false }: { time?: boolean }) {
+export function StatusBar({ time = false, dark = false }: { time?: boolean; dark?: boolean }) {
   return (
-    <div className="hark-phone-status">
+    <div className={`hark-phone-status ${dark ? "is-dark" : ""}`}>
       <span className={`hark-phone-status-time ${time ? "" : "is-hidden"}`}>9:41</span>
       <StatusBarIcons />
     </div>
@@ -98,75 +99,66 @@ export function Island({
   );
 }
 
-function LockGlyph() {
+/**
+ * The bevel on the Lock Screen's glass clock: light from the upper left
+ * catches each glyph's rounded edge (specular lighting on its blurred
+ * outline), added over the translucent fill.
+ */
+function ClockGlass() {
   return (
-    <svg aria-hidden="true" fill="currentColor" height="17" viewBox="0 0 14 18" width="13">
-      <path d="M7 0a4.5 4.5 0 0 0-4.5 4.5V7H2a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-.5V4.5A4.5 4.5 0 0 0 7 0Zm-3 4.5a3 3 0 0 1 6 0V7H4V4.5Z" />
-    </svg>
-  );
-}
-
-function Flashlight() {
-  return (
-    <svg aria-hidden="true" fill="currentColor" height="22" viewBox="0 0 12 22" width="12">
-      <path d="M1 0h10v4L8.5 8v13a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1V8L1 4Zm5 11a1.2 1.2 0 1 0 0 2.4A1.2 1.2 0 0 0 6 11Z" />
-    </svg>
-  );
-}
-
-function Camera() {
-  return (
-    <svg aria-hidden="true" fill="currentColor" height="18" viewBox="0 0 24 18" width="24">
-      <path d="M8.5 0h7l1.6 2.5H21a3 3 0 0 1 3 3V15a3 3 0 0 1-3 3H3a3 3 0 0 1-3-3V5.5a3 3 0 0 1 3-3h3.9Zm3.5 5a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9Zm0 1.6a2.9 2.9 0 1 1 0 5.8 2.9 2.9 0 0 1 0-5.8Z" />
+    <svg aria-hidden="true" className="hark-clock-defs" height="0" width="0">
+      <filter colorInterpolationFilters="sRGB" id="hark-clock-glass">
+        <feGaussianBlur in="SourceAlpha" result="soft" stdDeviation="2" />
+        <feSpecularLighting
+          in="soft"
+          lightingColor="#ffffff"
+          result="light"
+          specularConstant="1.1"
+          specularExponent="22"
+          surfaceScale="3"
+        >
+          <feDistantLight azimuth="235" elevation="38" />
+        </feSpecularLighting>
+        <feComposite in="light" in2="SourceAlpha" operator="in" result="rim" />
+        <feComposite
+          in="SourceGraphic"
+          in2="rim"
+          k2="1"
+          k3="1.1"
+          operator="arithmetic"
+          result="lit"
+        />
+        <feDropShadow dx="0" dy="2" floodColor="#00140e" floodOpacity="0.35" stdDeviation="3" />
+      </filter>
     </svg>
   );
 }
 
 /**
- * The Lock Screen: date, big clock, then notifications and Live Activities
- * stacked under it (close to the clock, so a cropped phone still shows them).
- * The status bar and Dynamic Island sit above it, so it can slide away.
+ * The iOS 27 Lock Screen, measured from the iPhone 17 Pro simulator: a short
+ * date over a large glass clock, and notifications low on the screen. The
+ * status bar and Dynamic Island sit above it, so it can slide away to unlock.
+ * `dimmed` is the blur behind a pressed-and-held notification.
  */
 export function LockScreen({
   children,
   className = "",
+  dimmed = false,
 }: {
   children?: ReactNode;
   className?: string;
+  dimmed?: boolean;
 }) {
   return (
     <div className={`hark-lock ${className}`}>
       <Wallpaper />
+      <ClockGlass />
       <div className="hark-lock-head">
-        <LockGlyph />
-        <div className="hark-lock-date">Tuesday, October 27</div>
+        <div className="hark-lock-date">Tue Oct 27</div>
         <div className="hark-lock-clock">9:41</div>
       </div>
+      <div className={`hark-lock-dim ${dimmed ? "is-on" : ""}`} />
       <div className="hark-lock-list">{children}</div>
-      <div className="hark-lock-quick is-left">
-        <Flashlight />
-      </div>
-      <div className="hark-lock-quick is-right">
-        <Camera />
-      </div>
-    </div>
-  );
-}
-
-export interface AppTile {
-  name: string;
-  glyph: ReactNode;
-  bg: string;
-  fg: string;
-}
-
-export function AppIcon({ app, pressed = false }: { app: AppTile; pressed?: boolean }) {
-  return (
-    <div className={`hark-home-app ${pressed ? "is-pressed" : ""}`}>
-      <div className="hark-home-icon" style={{ background: app.bg, color: app.fg }}>
-        {app.glyph}
-      </div>
-      <span>{app.name}</span>
     </div>
   );
 }
@@ -174,49 +166,87 @@ export function AppIcon({ app, pressed = false }: { app: AppTile; pressed?: bool
 export type Avatar = { text: string; bg: string } | { img: string };
 
 /**
- * An iOS notification in Hark's glass style (shares `.hark-note` with the
- * rest of the site). `badge` false hides the small Hark corner mark.
+ * An iOS notification, measured from a real Hark push on the iPhone 17 Pro
+ * simulator: a glass platter, a 38 pt icon, a 15 pt semibold title, an
+ * optional subtitle, and up to four lines of body. With an `avatar` it is a
+ * communication notification (sender picture with the small Hark icon);
+ * without one it shows the Hark app icon. `stacked` draws the edges of older
+ * notifications from the same app peeking out below.
  */
 export function PhoneNote({
   avatar,
   title,
+  subtitle,
   time = "now",
-  eyebrow,
   body,
-  children,
+  stacked = 0,
   className = "",
 }: {
-  avatar: Avatar;
+  avatar?: Avatar;
   title: string;
+  subtitle?: string;
   time?: string;
-  eyebrow?: ReactNode;
   body: ReactNode;
-  children?: ReactNode;
+  stacked?: number;
   className?: string;
 }) {
   return (
-    <div className={`hark-note is-static ${className}`}>
-      <div className="hark-note-sender">
-        {"img" in avatar ? (
-          <div className="hark-note-avatar">
-            <img alt="" src={avatar.img} />
-          </div>
-        ) : (
-          <div className="hark-note-avatar" style={{ background: avatar.bg }}>
-            {avatar.text}
-          </div>
-        )}
-        <span className="hark-note-badge" />
-      </div>
-      <div className="hark-note-content">
-        {eyebrow ? <div className="hark-note-eyebrow">{eyebrow}</div> : null}
-        <div className="hark-note-row">
-          <span className="hark-note-title">{title}</span>
-          <time>{time}</time>
+    <div className={`hark-ios-note-wrap ${className}`}>
+      {stacked > 1 ? <div aria-hidden="true" className="hark-ios-note-layer is-second" /> : null}
+      {stacked > 0 ? <div aria-hidden="true" className="hark-ios-note-layer is-first" /> : null}
+      <div className="hark-ios-note">
+        <div className="hark-ios-note-icon">
+          {avatar ? (
+            <>
+              {"img" in avatar ? (
+                <div className="hark-ios-note-avatar">
+                  <img alt="" src={avatar.img} />
+                </div>
+              ) : (
+                <div className="hark-ios-note-avatar" style={{ background: avatar.bg }}>
+                  {avatar.text}
+                </div>
+              )}
+              <span className="hark-ios-note-badge" />
+            </>
+          ) : (
+            <span className="hark-ios-note-app" />
+          )}
         </div>
-        <div className="hark-note-msg">{body}</div>
-        {children}
+        <div className="hark-ios-note-content">
+          <div className="hark-ios-note-row">
+            <span className="hark-ios-note-title">{title}</span>
+            <time>{time}</time>
+          </div>
+          {subtitle ? <div className="hark-ios-note-subtitle">{subtitle}</div> : null}
+          <div className="hark-ios-note-body">{body}</div>
+        </div>
       </div>
+    </div>
+  );
+}
+
+/** The menu iOS shows under a pressed-and-held notification. */
+export function NoteActions({
+  actions,
+  tapped,
+}: {
+  actions: { label: string; destructive?: boolean }[];
+  tapped?: string;
+}) {
+  return (
+    <div className="hark-ios-actions">
+      {actions.map((action) => (
+        <div
+          className={`hark-ios-action ${action.destructive ? "is-destructive" : ""} ${
+            tapped === action.label ? "is-tapped" : ""
+          }`}
+          key={action.label}
+        >
+          {action.label}
+          {tapped === action.label ? <i aria-hidden="true" className="hark-note-tap" /> : null}
+        </div>
+      ))}
     </div>
   );
 }

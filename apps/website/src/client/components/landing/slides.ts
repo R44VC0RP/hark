@@ -6,22 +6,25 @@ import type { Avatar } from "./Phone";
  * and one line. `?niche=<id>` pins a step so a link can show one audience.
  */
 
+/** What iOS shows for a push: no extra chrome, only these fields. */
 export interface NoteCopy {
-  avatar: Avatar;
+  /** The sender's picture (a communication notification); else the Hark icon. */
+  avatar?: Avatar;
   title: string;
+  subtitle?: string;
   body: string;
-  /** Shown above the title, e.g. the event name. */
-  eyebrow?: string;
-  /** Turns the notification into a question with two answers. */
-  approval?: { deny: string; approve: string; result: string };
+  /**
+   * A question with actions. On iOS they show only when the notification is
+   * pressed and held; `result` is the follow-up notification after approving.
+   */
+  approval?: { approve: string; deny: string; result: string };
 }
 
 export interface PageCopy {
   title: string;
   body: string;
-  /** Who answers the page. */
+  /** Who answers the page; the page's notification then reads "Claimed by …". */
   claimedBy: string;
-  claimedBody: string;
 }
 
 export interface AppRow {
@@ -47,8 +50,6 @@ export interface AppCopy {
 }
 
 export interface TeamCopy {
-  team: string;
-  people: number;
   note: NoteCopy;
 }
 
@@ -69,14 +70,16 @@ export type SceneKind = Scene["kind"];
 export const SCENE_STEPS: Record<SceneKind, number[]> = {
   // Empty Lock Screen, then the notification lands.
   notify: [500, 4500],
-  // Rings 1×, 2×, then someone claims it.
-  page: [400, 1200, 1300, 2100],
-  // The Apps tab, a tap, then the app opens signed in.
+  // It lands, rings again (a second notification stacks on it), then the
+  // page's notification updates to who claimed it.
+  page: [400, 1300, 1300, 2000],
+  // Hark's Apps screen, a tap, then the app opens signed in.
   app: [900, 450, 3650],
-  // The question lands, then it is approved.
-  approve: [500, 2300, 2200],
-  // The alert lands, then who else got it.
-  team: [500, 1200, 3300],
+  // The question lands; pressed and held, it shows its actions and Approve
+  // is tapped; then the agent's follow-up arrives.
+  approve: [400, 1300, 1500, 1800],
+  // A teammate-wide alert lands.
+  team: [500, 4500],
 };
 
 export interface Step {
@@ -93,9 +96,6 @@ export interface Step {
 
 const STRIPE: Avatar = { text: "S", bg: "#635BFF" };
 
-/** The avatar on a page while it rings. */
-export const PAGE_AVATAR: Avatar = { text: "P", bg: "#C93B2C" };
-
 export const STEPS: Step[] = [
   {
     id: "dev",
@@ -107,7 +107,7 @@ export const STEPS: Step[] = [
       note: {
         avatar: { text: "G", bg: "#24292F" },
         title: "GitHub",
-        eyebrow: "Deployed to production",
+        subtitle: "Deployed to production",
         body: "acme/api is live. 3 commits by Ryan, all checks passed.",
       },
     },
@@ -123,7 +123,6 @@ export const STEPS: Step[] = [
         title: "SEV-1 · Checkout API",
         body: "Error rate at 24%. Payments are failing.",
         claimedBy: "Ben",
-        claimedBody: "Ben acknowledged. Incident #431 opened.",
       },
     },
   },
@@ -171,7 +170,11 @@ export const STEPS: Step[] = [
         avatar: { img: "/agents/claude.png" },
         title: "Claude Code",
         body: "Deploy hark to production? 3 commits, all tests passing.",
-        approval: { deny: "Deny", approve: "Approve", result: "Approved — continuing" },
+        approval: {
+          approve: "Approve",
+          deny: "Deny",
+          result: "Approved. Deploying hark now.",
+        },
       },
     },
   },
@@ -183,12 +186,10 @@ export const STEPS: Step[] = [
     scene: {
       kind: "team",
       team: {
-        team: "Acme",
-        people: 6,
         note: {
           avatar: STRIPE,
           title: "Stripe",
-          eyebrow: "New annual plan",
+          subtitle: "Acme · New annual plan",
           body: "$2,400/yr from Northwind. That's 12 this month.",
         },
       },

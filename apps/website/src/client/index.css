@@ -1147,16 +1147,23 @@ address {
   letter-spacing: -0.01em;
 }
 
+/* 144 × 5 pt, 8 pt from the bottom (measured on the simulator). */
 .hark-phone-home {
   position: absolute;
   bottom: 8px;
   left: 50%;
   z-index: 30;
-  width: 134px;
+  width: 144px;
   height: 5px;
   border-radius: 3px;
-  background: rgb(255 255 255 / 0.85);
+  background: rgb(255 255 255 / 0.9);
   transform: translateX(-50%);
+  transition: background-color 240ms ease;
+}
+
+/* Dark over the (light) apps once the phone is unlocked. */
+.hark-phone-screen:has(.hark-lock.is-unlocked) .hark-phone-home {
+  background: rgb(0 0 0 / 0.85);
 }
 
 .hark-wallpaper {
@@ -1199,6 +1206,10 @@ address {
   height: 22px;
 }
 
+.hark-phone-status.is-dark {
+  color: #000000;
+}
+
 .hark-phone-status-time.is-hidden {
   opacity: 0;
 }
@@ -1223,14 +1234,7 @@ address {
     border-radius 520ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
-.hark-bell {
-  width: 16px;
-  height: 16px;
-  color: #ff6961;
-  transform-origin: 50% 10%;
-}
-
-/* ---- Lock Screen ---- */
+/* ---- Lock Screen (iOS 27, measured from the iPhone 17 Pro simulator) ---- */
 
 .hark-lock {
   position: absolute;
@@ -1246,116 +1250,253 @@ address {
 
 .hark-lock-head {
   position: absolute;
-  top: 60px;
+  top: 80px;
   right: 0;
   left: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  color: rgb(255 255 255 / 0.94);
 }
 
+/* "Tue Oct 27": 16 pt caps centred at y 95. */
 .hark-lock-date {
-  margin-top: 8px;
-  font-size: 21px;
-  font-weight: 500;
+  color: rgb(255 255 255 / 0.78);
+  font-size: 23px;
+  font-weight: 600;
+  line-height: 30px;
+  letter-spacing: 0.005em;
 }
 
+/* The glass clock: digits 86 pt tall (y 118 to 204), 210 pt wide, as on the
+   simulator. A soft translucent fill with a crisp bright rim (a hairline glow
+   around each glyph), a gentle sheen from above and a shadow below. */
 .hark-lock-clock {
-  margin-top: -6px;
-  font-size: 104px;
-  font-weight: 600;
-  line-height: 1.05;
-  letter-spacing: -0.03em;
-  font-variant-numeric: tabular-nums;
+  position: relative;
+  margin-top: -9.4px;
+  color: rgb(226 240 235 / 0.55);
+  font-size: 117px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.025em;
+  filter: url("#hark-clock-glass");
+}
+
+.hark-clock-defs {
+  position: absolute;
+}
+
+/* Behind a pressed-and-held notification. */
+.hark-lock-dim {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  background: rgb(0 10 8 / 0.28);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.hark-lock-dim.is-on {
+  opacity: 1;
 }
 
 .hark-lock-list {
   position: absolute;
-  top: 252px;
-  right: 10px;
-  left: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  top: 228px;
+  right: 14.7px;
+  left: 14.7px;
+  z-index: 4;
 }
 
-/* A whole phone stacks notifications above the quick actions, as iOS does. */
+/* A whole phone keeps notifications low, as iOS does: the newest one's
+   bottom edge at y 737. */
 .hark-phone:not(.is-cropped) .hark-lock-list {
   top: auto;
-  bottom: 118px;
+  bottom: 137px;
 }
 
-.hark-lock-quick {
-  position: absolute;
-  bottom: 44px;
-  display: grid;
-  place-items: center;
-  width: 50px;
-  height: 50px;
-  border-radius: 50%;
-  background: rgb(0 0 0 / 0.28);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
+/* ---- Notifications (measured from a real Hark push) ---- */
+
+.hark-ios-note-wrap {
+  position: relative;
+  transform-origin: 50% 100%;
 }
 
-.hark-lock-quick.is-left {
-  left: 46px;
-}
-
-.hark-lock-quick.is-right {
-  right: 46px;
-}
-
-/* ---- App icons ---- */
-
-.hark-home-app {
+.hark-ios-note {
+  position: relative;
+  z-index: 2;
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  gap: 12.3px;
   align-items: center;
+  padding: 11px 17px 12px 13.3px;
+  border-radius: 25px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.1), rgb(255 255 255 / 0.04)), rgb(120 140 135 / 0.2);
+  -webkit-backdrop-filter: blur(22px) saturate(1.5);
+  backdrop-filter: blur(22px) saturate(1.5);
+  box-shadow:
+    inset 0 0 0 0.5px rgb(255 255 255 / 0.2),
+    inset 0 1px 0 rgb(255 255 255 / 0.22),
+    0 8px 24px rgb(0 0 0 / 0.12);
   color: #ffffff;
-  font-size: 12px;
-  font-weight: 500;
+  font-family: var(--font-ios);
+  font-size: 15px;
+  line-height: 18px;
+  letter-spacing: -0.01em;
 }
 
-.hark-home-icon {
+/* Older notifications from the same app, peeking out under the newest. */
+/* Only the strip below the newest one shows (clipped), so it never shows
+   through the glass above it. */
+.hark-ios-note-layer {
+  position: absolute;
+  right: 12px;
+  bottom: -8px;
+  left: 12px;
+  height: 40px;
+  border-radius: 22px;
+  clip-path: inset(32px 0 0 0);
+  background: rgb(120 140 135 / 0.22);
+  -webkit-backdrop-filter: blur(22px);
+  backdrop-filter: blur(22px);
+  box-shadow: inset 0 -0.5px 0 rgb(255 255 255 / 0.22);
+}
+
+.hark-ios-note-layer.is-second {
+  right: 24px;
+  bottom: -15px;
+  left: 24px;
+  clip-path: inset(33px 0 0 0);
+  opacity: 0.7;
+}
+
+.hark-ios-note-icon {
+  position: relative;
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+}
+
+/* The Hark app icon: solid Hark green. */
+.hark-ios-note-app {
+  display: block;
+  width: 38px;
+  height: 38px;
+  border-radius: 9.5px;
+  background: #035b49;
+  box-shadow: inset 0 0 0 0.5px rgb(255 255 255 / 0.12);
+}
+
+.hark-ios-note-avatar {
   display: grid;
   place-items: center;
-  width: 62px;
-  height: 62px;
+  width: 38px;
+  height: 38px;
   overflow: hidden;
-  border-radius: 16px;
-  box-shadow: 0 1px 3px rgb(0 0 0 / 0.2);
-  font-size: 26px;
+  border-radius: 50%;
+  font-size: 16px;
   font-weight: 600;
 }
 
-.hark-home-icon img {
+.hark-ios-note-avatar img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-/* A press dims and shrinks the icon only; its name stays put, as on iOS. */
-.hark-home-app .hark-home-icon {
-  transition:
-    transform 160ms ease-out,
-    filter 160ms ease-out;
+/* On a communication notification, the app icon sits on the picture. */
+.hark-ios-note-badge {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 4.5px;
+  background: #035b49;
+  box-shadow: 0 0 0 1.5px rgb(0 0 0 / 0.25);
 }
 
-.hark-home-app.is-pressed .hark-home-icon {
-  filter: brightness(0.75);
-  transform: scale(0.9);
+.hark-ios-note-content {
+  flex: 1;
+  min-width: 0;
 }
 
-/* ---- Notifications inside the phone ---- */
+.hark-ios-note-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+}
 
-.hark-note.is-static {
+.hark-ios-note-title,
+.hark-ios-note-subtitle {
+  overflow: hidden;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.hark-ios-note time {
+  flex-shrink: 0;
+  color: rgb(255 255 255 / 0.55);
+  font-size: 14px;
+}
+
+.hark-ios-note-body {
+  display: -webkit-box;
+  overflow: hidden;
+  color: rgb(255 255 255 / 0.95);
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+}
+
+/* Pressed and held: the notification lifts a little and its actions show. */
+/* Held, the notification rises to make room for its actions underneath. */
+.hark-ios-press {
   position: relative;
-  top: auto;
-  right: auto;
-  left: auto;
+}
+
+/* (A cropped phone already shows its notifications high, under the clock.) */
+.hark-phone:not(.is-cropped) .hark-ios-press.is-pressed {
+  transform: translateY(-112px);
+}
+
+.hark-ios-press.is-pressed .hark-ios-note-wrap {
+  transform: scale(1.025);
+}
+
+.hark-ios-actions {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  width: 250px;
+  overflow: hidden;
+  border-radius: 22px;
+  background: rgb(60 66 64 / 0.55);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  backdrop-filter: blur(24px) saturate(1.4);
+  box-shadow:
+    inset 0 0 0 0.5px rgb(255 255 255 / 0.18),
+    0 12px 30px rgb(0 0 0 / 0.25);
+  color: #ffffff;
+  font-family: var(--font-ios);
+  font-size: 17px;
+  letter-spacing: -0.02em;
+  transform-origin: 20% 0;
+}
+
+.hark-ios-action {
+  position: relative;
+  padding: 13px 18px;
+}
+
+.hark-ios-action + .hark-ios-action {
+  box-shadow: inset 0 0.5px 0 rgb(255 255 255 / 0.16);
+}
+
+.hark-ios-action.is-destructive {
+  color: #ff6961;
 }
 
 @keyframes hark-note-in {
@@ -1370,6 +1511,13 @@ address {
     opacity: 0;
     filter: blur(3px);
     transform: translateY(-8px) scale(0.96);
+  }
+}
+
+@keyframes hark-menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
   }
 }
 
@@ -1388,129 +1536,19 @@ address {
   bottom: 0;
 }
 
-/* Approving: a fingertip lands on the button just before the answer shows. */
-.hark-note-actions .is-tapped {
-  position: relative;
-}
-
+/* A fingertip on a notification action, just before the answer lands. */
 .hark-note-tap {
   position: absolute;
   top: 50%;
-  left: 50%;
+  left: 40px;
   width: 40px;
   height: 40px;
   margin: -20px 0 0 -20px;
   border-radius: 50%;
-  background: rgb(2 63 51 / 0.22);
-  box-shadow: 0 0 0 1px rgb(2 63 51 / 0.3);
+  background: rgb(255 255 255 / 0.3);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.5);
   opacity: 0;
   pointer-events: none;
-}
-
-@keyframes hark-press {
-  50% {
-    transform: scale(0.95);
-    filter: brightness(0.9);
-  }
-}
-
-@keyframes hark-ring {
-  0%,
-  100% {
-    transform: rotate(0);
-  }
-  15%,
-  45% {
-    transform: rotate(16deg);
-  }
-  30%,
-  60% {
-    transform: rotate(-16deg);
-  }
-  75% {
-    transform: rotate(6deg);
-  }
-}
-
-.hark-note.is-page {
-  background:
-    radial-gradient(120% 90% at 12% 0%, rgb(255 160 150 / 0.22), transparent 55%),
-    rgb(160 30 22 / 0.42);
-}
-
-.hark-note-eyebrow {
-  margin-bottom: 2px;
-}
-
-.hark-note-eyebrow-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.hark-note-tag {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  color: rgb(255 255 255 / 0.62);
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-}
-
-.hark-note-tag.is-urgent {
-  color: #ffc6bf;
-}
-
-.hark-note-tag.is-claimed {
-  color: var(--color-mint);
-}
-
-.hark-note-shared {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin-top: 9px;
-  color: rgb(255 255 255 / 0.72);
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.hark-note-shared-faces {
-  display: flex;
-  padding-left: 5px;
-}
-
-.hark-note-shared-faces i {
-  width: 18px;
-  height: 18px;
-  margin-left: -5px;
-  border-radius: 50%;
-  box-shadow: 0 0 0 1.5px rgb(28 72 62);
-}
-
-.hark-note-tag .hark-bell {
-  width: 12px;
-  height: 12px;
-  color: inherit;
-}
-
-.hark-note-repeat {
-  color: #ffd9d4;
-  font-size: 12px;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-}
-
-.hark-note-result {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  margin-top: 9px;
-  color: var(--color-mint);
-  font-size: 14px;
-  font-weight: 600;
 }
 
 /* A fingertip press where the visitor would tap. */
@@ -1521,8 +1559,8 @@ address {
   height: 46px;
   margin: -23px 0 0 -23px;
   border-radius: 50%;
-  background: rgb(255 255 255 / 0.32);
-  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.55);
+  background: rgb(0 0 0 / 0.14);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.18);
   pointer-events: none;
 }
 
@@ -1541,7 +1579,16 @@ address {
   }
 }
 
-/* ---- The Hark app and a signed-in web app ---- */
+/* ---- Hark's Apps screen, from the app's own styles ---- */
+
+/* The app's font: Inter Tight, here with its full weight range. */
+@font-face {
+  font-family: "Hark App";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/inter-tight-latin.woff2") format("woff2");
+}
 
 .hark-app-screen {
   position: absolute;
@@ -1551,69 +1598,162 @@ address {
   background: #000000;
 }
 
-.hark-app-title {
-  padding: 10px 20px 4px;
-  font-size: 34px;
-  font-weight: 700;
-  letter-spacing: 0.005em;
-}
-
-.hark-app-section {
-  margin: 12px 14px 0;
-  padding: 14px 8px 16px;
-  border-radius: 22px;
-  background: rgb(255 255 255 / 0.07);
-  box-shadow: inset 0 0.5px 0 rgb(255 255 255 / 0.2);
-}
-
-.hark-app-section-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin: 0 8px 12px;
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.hark-app-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-}
-
-.hark-app-tabs {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  display: flex;
-  justify-content: space-around;
-  height: 84px;
-  padding-top: 14px;
-  border-top: 0.5px solid rgb(255 255 255 / 0.12);
-  background: rgb(1 30 24 / 0.85);
-  color: rgb(255 255 255 / 0.55);
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.hark-app-tabs span {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  align-items: center;
-  width: 72px;
-}
-
-.hark-app-tabs .is-current {
-  color: var(--color-mint);
-}
-
-/* The Hark app slides back a little as the web app pushes in, as in a stack. */
 .hark-app-under {
   position: absolute;
   inset: 0;
-  padding-top: 62px;
-  background: linear-gradient(180deg, #034a3c 0%, #01271f 55%, #011c16 100%);
+  padding: 62px 24px 0;
+  background: #fafaf9;
+  color: #171713;
+  font-family: "Hark App", var(--font-ios);
+  letter-spacing: 0;
+}
+
+.hk-brand-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 60px;
+}
+
+.hk-brand {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.hk-brand i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #035b49;
+}
+
+.hk-actions {
+  display: flex;
+  margin-right: -10px;
+}
+
+.hk-action {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  color: #6b6a63;
+}
+
+.hk-action b {
+  position: absolute;
+  top: 5px;
+  right: 3px;
+  display: grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border: 2px solid #fafaf9;
+  border-radius: 9px;
+  background: #035b49;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.hk-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-height: 50px;
+  border-bottom: 0.5px solid #e7e5e0;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.hk-brand-row + .hk-row {
+  border-top: 0.5px solid #e7e5e0;
+}
+
+.hk-row-icon {
+  display: grid;
+  place-items: center;
+  width: 8px;
+  color: #035b49;
+}
+
+.hk-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #035b49;
+}
+
+.hk-chevron {
+  width: 7px;
+  height: 11px;
+  margin-left: auto;
+  color: #a3a199;
+}
+
+.hk-section {
+  padding-top: 26px;
+  color: #6b6a63;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.hk-section span {
+  margin-left: 8px;
+  color: #a3a199;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.hk-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  row-gap: 22px;
+  margin: 0 -6px;
+  padding-top: 14px;
+}
+
+.hk-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  align-items: center;
+  padding: 0 4px;
+}
+
+.hk-icon {
+  display: grid;
+  place-items: center;
+  width: 62px;
+  height: 62px;
+  border-radius: 17px;
+  box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 0.1);
+  font-size: 25px;
+  font-weight: 600;
+}
+
+.hk-label {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 15px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The app's pressed tile: dimmed and a little smaller. */
+.hk-tile.is-pressed {
+  opacity: 0.7;
+  transform: scale(0.96);
 }
 
 .hark-webapp-sheet {
@@ -1632,10 +1772,6 @@ address {
 .hark-app-screen:has(.hark-webapp-sheet.is-open) .hark-app-under {
   filter: brightness(0.7);
   transform: translateX(-30%);
-}
-
-.hark-phone-screen:has(.hark-webapp-sheet.is-open) .hark-phone-home {
-  background: rgb(0 0 0 / 0.8);
 }
 
 /* Full screen, no browser bar: Hark only paints the status bar strip in the
@@ -1714,7 +1850,8 @@ address {
 /* Hark's first-open tip: how to reach Hark and get back from a full-screen page. */
 .hark-webapp-hint {
   position: absolute;
-  top: 62px;
+  top: 70px;
+  font-family: "Hark App", var(--font-ios);
   left: 50%;
   display: none;
   gap: 7px;
@@ -1863,26 +2000,34 @@ address {
     animation: hark-fade-up 360ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
   }
 
-  .hark-note.is-static {
+  .hark-ios-note-wrap {
     animation: hark-note-in 520ms cubic-bezier(0.32, 0.72, 0, 1) both;
     animation-play-state: var(--hark-play);
+    transition: transform 320ms cubic-bezier(0.32, 0.72, 0, 1);
   }
 
-  .hark-note-repeat,
-  .hark-note-tag.is-claimed {
-    animation: hark-fade 300ms ease both;
-    animation-play-state: var(--hark-play);
+  .hark-lock-dim {
+    transition: opacity 320ms ease;
   }
 
-  .hark-note-result,
-  .hark-note-shared {
-    animation: hark-fade-up 360ms ease both;
+  .hark-ios-press {
+    transition: transform 380ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .hark-ios-actions {
+    animation: hark-menu-in 320ms cubic-bezier(0.32, 0.72, 0, 1) 120ms both;
     animation-play-state: var(--hark-play);
   }
 
   .hark-tap {
     animation: hark-tap 600ms ease-out both;
     animation-play-state: var(--hark-play);
+  }
+
+  .hk-tile {
+    transition:
+      opacity 160ms ease-out,
+      transform 160ms ease-out;
   }
 
   .hark-webapp-sheet,
@@ -1902,6 +2047,11 @@ address {
   .hark-webapp-sheet.is-open .hark-webapp-hint {
     display: flex;
     animation: hark-hint 2600ms ease 700ms both;
+    animation-play-state: var(--hark-play);
+  }
+
+  .hark-webapp-sheet.is-open .hark-webapp-pass {
+    animation: hark-fade-up 360ms ease 300ms both;
     animation-play-state: var(--hark-play);
   }
 
@@ -1930,23 +2080,20 @@ address {
     animation: none;
   }
 
+  /* Approve is tapped near the end of the press. */
   .hark-note-tap {
-    animation: hark-tap 600ms ease-out 1550ms both;
+    animation: hark-tap 600ms ease-out 850ms both;
     animation-play-state: var(--hark-play);
   }
 
-  .hark-note-actions .is-tapped {
-    animation: hark-press 260ms ease-out 1650ms;
+  .hark-ios-action.is-tapped {
+    animation: hark-action-hit 220ms ease-out 950ms both;
     animation-play-state: var(--hark-play);
   }
+}
 
-  .hark-note-tag.is-urgent .hark-bell {
-    animation: hark-ring 700ms ease-in-out both;
-    animation-play-state: var(--hark-play);
-  }
-
-  .hark-webapp-sheet.is-open .hark-webapp-pass {
-    animation: hark-fade-up 360ms ease 300ms both;
-    animation-play-state: var(--hark-play);
+@keyframes hark-action-hit {
+  to {
+    background: rgb(255 255 255 / 0.14);
   }
 }

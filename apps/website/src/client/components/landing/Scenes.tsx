@@ -1,14 +1,6 @@
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react";
-import { AppIcon, type AppTile, Island, LockScreen, PhoneNote, StatusBar, Tap } from "./Phone";
-import {
-  type AppCopy,
-  type NoteCopy,
-  PAGE_AVATAR,
-  type PageCopy,
-  SCENE_STEPS,
-  type Scene,
-  type TeamCopy,
-} from "./slides";
+import { Island, LockScreen, NoteActions, PhoneNote, StatusBar, Tap } from "./Phone";
+import { type AppCopy, type NoteCopy, type PageCopy, SCENE_STEPS, type Scene } from "./slides";
 
 function Check({ size = 14 }: { size?: number }) {
   return (
@@ -24,124 +16,79 @@ function Check({ size = 14 }: { size?: number }) {
   );
 }
 
-function Bell() {
-  return (
-    <svg aria-hidden="true" className="hark-bell" fill="currentColor" viewBox="0 0 16 16">
-      <path d="M8 1.5a1 1 0 0 1 1 1v.6a4.5 4.5 0 0 1 3.5 4.4v2.6l1.2 1.6a.6.6 0 0 1-.5 1H2.8a.6.6 0 0 1-.5-1l1.2-1.6V7.5A4.5 4.5 0 0 1 7 3.1v-.6a1 1 0 0 1 1-1ZM6.2 13.8h3.6a1.8 1.8 0 0 1-3.6 0Z" />
-    </svg>
-  );
-}
-
-/* Notifications: one webhook (or one agent question) lands on the Lock Screen. */
+/* Notifications: one webhook lands on the Lock Screen. */
 
 function NotifyNote({ note, step }: { note: NoteCopy; step: number }) {
   if (step < 1) return null;
-  const answered = step >= 2;
   return (
-    <PhoneNote
-      avatar={note.avatar}
-      body={note.body}
-      eyebrow={note.eyebrow ? <span className="hark-note-tag">{note.eyebrow}</span> : null}
-      title={note.title}
-    >
-      {note.approval ? (
-        answered ? (
-          <div className="hark-note-result">
-            <Check /> {note.approval.result}
-          </div>
-        ) : (
-          <div className="hark-note-actions">
-            <span>{note.approval.deny}</span>
-            <span className="is-primary is-tapped">
-              {note.approval.approve}
-              <i aria-hidden="true" className="hark-note-tap" />
-            </span>
-          </div>
-        )
-      ) : null}
-    </PhoneNote>
+    <PhoneNote avatar={note.avatar} body={note.body} subtitle={note.subtitle} title={note.title} />
   );
 }
 
-/* Paging: one page repeats until someone acknowledges it. */
+/*
+ * An agent's question. iOS keeps a notification's actions out of sight until
+ * it is pressed and held: then the Lock Screen blurs, the notification lifts
+ * and its actions appear under it. After Approve, the agent's follow-up lands.
+ */
+
+const APPROVE_PRESSED = 2;
+const APPROVE_DONE = 3;
+
+function ApproveNote({ note, step }: { note: NoteCopy; step: number }) {
+  if (step < 1 || !note.approval) return null;
+  if (step >= APPROVE_DONE) {
+    return (
+      <PhoneNote avatar={note.avatar} body={note.approval.result} key="result" title={note.title} />
+    );
+  }
+  const pressed = step === APPROVE_PRESSED;
+  return (
+    <div className={`hark-ios-press ${pressed ? "is-pressed" : ""}`} key="question">
+      <PhoneNote avatar={note.avatar} body={note.body} title={note.title} />
+      {pressed ? (
+        <NoteActions
+          actions={[
+            { label: note.approval.approve },
+            { label: note.approval.deny, destructive: true },
+          ]}
+          tapped={note.approval.approve}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/*
+ * Paging: the page repeats as new notifications that stack on each other
+ * until someone acknowledges it; then its notification says who claimed it.
+ */
 
 const PAGE_CLAIMED = SCENE_STEPS.page.length - 1;
 
 function PageNote({ page, step }: { page: PageCopy; step: number }) {
   if (step < 1) return null;
   const claimed = step >= PAGE_CLAIMED;
-  const who = page.claimedBy;
   return (
     <PhoneNote
-      avatar={claimed && who !== "you" ? { text: who.charAt(0), bg: "#2F55D4" } : PAGE_AVATAR}
-      body={claimed ? page.claimedBody : page.body}
-      className={claimed ? "" : "is-page"}
-      eyebrow={
-        claimed ? (
-          <span className="hark-note-tag is-claimed">
-            <Check size={12} /> Claimed by {who}
-          </span>
-        ) : (
-          <span className="hark-note-eyebrow-row">
-            <span className="hark-note-tag is-urgent">
-              {/* Keyed by ring, so the bell swings again on every repeat. */}
-              <Bell key={step} /> Time Sensitive
-            </span>
-            <span className="hark-note-repeat" key={step}>
-              Ringing · {step}×
-            </span>
-          </span>
-        )
-      }
+      body={claimed ? `Claimed by ${page.claimedBy}` : page.body}
+      // Every ring and the claim are new notifications, so each one lands.
+      key={step}
+      stacked={Math.min(step - 1, 2)}
       title={page.title}
-    >
-      {claimed ? null : (
-        <div className="hark-note-actions">
-          <span>Escalate</span>
-          <span className="is-primary">Acknowledge</span>
-        </div>
-      )}
-    </PhoneNote>
-  );
-}
-
-/* Team: the same alert reaches everyone on the team. */
-
-const TEAM_COLORS = ["#2FB58F", "#2F55D4", "#C93B2C", "#F3C53C", "#8A9A94", "#635BFF"];
-
-function TeamNote({ team, step }: { team: TeamCopy; step: number }) {
-  if (step < 1) return null;
-  const { note } = team;
-  return (
-    <PhoneNote
-      avatar={note.avatar}
-      body={note.body}
-      eyebrow={note.eyebrow ? <span className="hark-note-tag">{note.eyebrow}</span> : null}
-      title={note.title}
-    >
-      {step >= 2 ? (
-        <div className="hark-note-shared">
-          <span className="hark-note-shared-faces">
-            {TEAM_COLORS.slice(0, team.people).map((bg) => (
-              <i key={bg} style={{ background: bg }} />
-            ))}
-          </span>
-          Shared with {team.team} · {team.people} people
-        </div>
-      ) : null}
-    </PhoneNote>
+    />
   );
 }
 
 function LockNote({ scene, step }: { scene: Scene; step: number }) {
   switch (scene.kind) {
     case "notify":
-    case "approve":
       return <NotifyNote note={scene.note} step={step} />;
+    case "approve":
+      return <ApproveNote note={scene.note} step={step} />;
     case "page":
       return <PageNote page={scene.page} step={step} />;
     case "team":
-      return <TeamNote step={step} team={scene.team} />;
+      return <NotifyNote note={scene.team.note} step={step} />;
     case "app":
       return null;
   }
@@ -190,12 +137,6 @@ function NoteSwap({ id, children }: { id: string; children: ReactNode }) {
 }
 
 /* Mini apps: tap your own app in Hark and it opens signed in. */
-
-const OTHER_APPS: AppTile[] = [
-  { name: "Deploys", glyph: "▲", bg: "#171713", fg: "#fff" },
-  { name: "Runbooks", glyph: "R", bg: "#F3C53C", fg: "#171713" },
-  { name: "Ops Log", glyph: "O", bg: "#fff", fg: "#035B49" },
-];
 
 const DAYS = ["M", "T", "W", "T", "F", "S", "S"];
 
@@ -263,69 +204,140 @@ function WebApp({ app }: { app: AppCopy }) {
   );
 }
 
-/** The Hark app's tab bar icons, drawn as simple SF Symbol-like strokes. */
-const TAB_ICONS: Record<string, ReactNode> = {
-  Inbox: (
-    <path d="M3 13.5 5.4 6.2A2 2 0 0 1 7.3 5h9.4a2 2 0 0 1 1.9 1.2L21 13.5V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4.5Zm0 0h5l1.5 2.5h5l1.5-2.5h5" />
-  ),
-  Apps: (
-    <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h3A1.5 1.5 0 0 1 10 5.5v3A1.5 1.5 0 0 1 8.5 10h-3A1.5 1.5 0 0 1 4 8.5v-3Zm10 0A1.5 1.5 0 0 1 15.5 4h3A1.5 1.5 0 0 1 20 5.5v3a1.5 1.5 0 0 1-1.5 1.5h-3A1.5 1.5 0 0 1 14 8.5v-3Zm-10 10A1.5 1.5 0 0 1 5.5 14h3a1.5 1.5 0 0 1 1.5 1.5v3A1.5 1.5 0 0 1 8.5 20h-3A1.5 1.5 0 0 1 4 18.5v-3Zm10 0a1.5 1.5 0 0 1 1.5-1.5h3a1.5 1.5 0 0 1 1.5 1.5v3a1.5 1.5 0 0 1-1.5 1.5h-3a1.5 1.5 0 0 1-1.5-1.5v-3Z" />
-  ),
-  "On call": (
-    <path d="M12 3.5a5.5 5.5 0 0 1 5.5 5.5v3.6l1.6 2.6a.8.8 0 0 1-.7 1.3H5.6a.8.8 0 0 1-.7-1.3l1.6-2.6V9A5.5 5.5 0 0 1 12 3.5Zm-2.2 15h4.4a2.2 2.2 0 0 1-4.4 0Z" />
-  ),
-  Settings: <path d="M4 7h9m4 0h3M4 17h3m4 0h9M15 4.5v5M9 14.5v5" />,
-};
+/** Letter tiles for apps without an icon, the same colours the app picks. */
+const FALLBACK_TINTS = [
+  { bg: "#171713", fg: "#FAFAF9" },
+  { bg: "#E7F0ED", fg: "#035B49" },
+  { bg: "#2F55D4", fg: "#FFFFFF" },
+  { bg: "#F3C53C", fg: "#171713" },
+  { bg: "#E7E5E0", fg: "#171713" },
+] as const;
 
-function AppTabs() {
+function fallbackTint(name: string) {
+  let hash = 0;
+  for (const character of name) hash = (hash * 31 + (character.codePointAt(0) ?? 0)) >>> 0;
+  return FALLBACK_TINTS[hash % FALLBACK_TINTS.length] ?? FALLBACK_TINTS[0];
+}
+
+function LetterTile({ name }: { name: string }) {
+  const tint = fallbackTint(name);
   return (
-    <div className="hark-app-tabs">
-      {Object.entries(TAB_ICONS).map(([tab, icon]) => (
-        <span className={tab === "Apps" ? "is-current" : ""} key={tab}>
-          <svg
-            aria-hidden="true"
-            fill={tab === "Apps" ? "currentColor" : "none"}
-            height="24"
-            stroke="currentColor"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth="1.7"
-            viewBox="0 0 24 24"
-            width="24"
-          >
-            {icon}
-          </svg>
-          {tab}
-        </span>
-      ))}
-    </div>
+    <span className="hk-icon" style={{ background: tint.bg, color: tint.fg }}>
+      {name.charAt(0)}
+    </span>
+  );
+}
+
+const YOURS = ["Releases", "Evals", "Ops Log"];
+const TEAM_APPS = ["Status", "Billing", "Flags"];
+
+function Chevron() {
+  return (
+    <svg aria-hidden="true" className="hk-chevron" fill="none" viewBox="0 0 8 13">
+      <path
+        d="m1.5 1.5 5 5-5 5"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
+    </svg>
+  );
+}
+
+/** SF Symbols `tray.fill`, `gearshape.fill` and `bell.fill`, as the app draws them. */
+function TrayIcon() {
+  return (
+    <svg aria-hidden="true" fill="currentColor" height="16" viewBox="0 0 20 16" width="20">
+      <path d="M3.6 0h12.8c1 0 1.9.6 2.2 1.6L20 8v5.5c0 1.4-1.1 2.5-2.5 2.5h-15C1.1 16 0 14.9 0 13.5V8l1.4-6.4C1.7.6 2.6 0 3.6 0Zm-1.5 7.3h4.3c.5 0 .8.4.8.8 0 1.6 1.3 2.9 2.8 2.9s2.8-1.3 2.8-2.9c0-.4.3-.8.8-.8h4.3L16.7 2a.8.8 0 0 0-.7-.5H4a.8.8 0 0 0-.7.5L2.1 7.3Z" />
+    </svg>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg aria-hidden="true" fill="currentColor" height="17" viewBox="0 0 20 20" width="17">
+      <path d="M8.6 0h2.8l.5 2.6c.6.2 1.2.4 1.7.7l2.2-1.5 2 2-1.5 2.2c.3.5.6 1.1.7 1.7l2.6.5v2.8l-2.6.5c-.2.6-.4 1.2-.7 1.7l1.5 2.2-2 2-2.2-1.5c-.5.3-1.1.6-1.7.7l-.5 2.6H8.6l-.5-2.6c-.6-.2-1.2-.4-1.7-.7l-2.2 1.5-2-2 1.5-2.2c-.3-.5-.6-1.1-.7-1.7L.4 11.4V8.6L3 8.1c.2-.6.4-1.2.7-1.7L2.2 4.2l2-2 2.2 1.5c.5-.3 1.1-.6 1.7-.7L8.6 0ZM10 6.6a3.4 3.4 0 1 0 0 6.8 3.4 3.4 0 0 0 0-6.8Z" />
+    </svg>
+  );
+}
+
+function BellIcon() {
+  return (
+    <svg aria-hidden="true" fill="currentColor" height="13" viewBox="0 0 16 16" width="13">
+      <path d="M8 1.5a1 1 0 0 1 1 1v.6a4.5 4.5 0 0 1 3.5 4.4v2.6l1.2 1.6a.6.6 0 0 1-.5 1H2.8a.6.6 0 0 1-.5-1l1.2-1.6V7.5A4.5 4.5 0 0 1 7 3.1v-.6a1 1 0 0 1 1-1ZM6.2 13.8h3.6a1.8 1.8 0 0 1-3.6 0Z" />
+    </svg>
   );
 }
 
 const APP_TAP = 1;
 
+/**
+ * Hark's own Apps screen, built from the app's styles (apps/expo/app/apps):
+ * light paper, Inter Tight, the Hark mark, status rows, then your apps and
+ * your team's apps as icon grids.
+ */
 function AppScene({ app, step }: { app: AppCopy; step: number }) {
-  const tiles: AppTile[] = [
-    { name: app.name, glyph: app.glyph, bg: app.bg, fg: app.fg },
-    ...OTHER_APPS.filter((tile) => tile.name !== app.name),
-  ].slice(0, 4);
   return (
     <div className="hark-app-screen">
       <div className="hark-app-under">
-        <div className="hark-app-title">Apps</div>
-        <div className="hark-app-section">
-          <div className="hark-app-section-head">
-            <span>My apps</span>
-          </div>
-          <div className="hark-app-grid">
-            {tiles.map((tile, index) => (
-              <AppIcon app={tile} key={tile.name} pressed={index === 0 && step === APP_TAP} />
-            ))}
-          </div>
+        <div className="hk-brand-row">
+          <span className="hk-brand">
+            <i />
+            Hark
+          </span>
+          <span className="hk-actions">
+            <span className="hk-action">
+              <TrayIcon />
+              <b>4</b>
+            </span>
+            <span className="hk-action">
+              <GearIcon />
+            </span>
+          </span>
         </div>
-        <AppTabs />
+        <div className="hk-row">
+          <span className="hk-row-icon">
+            <BellIcon />
+          </span>
+          On call for Platform until Mon 9:00 AM
+          <Chevron />
+        </div>
+        <div className="hk-row">
+          <span className="hk-row-icon">
+            <i className="hk-dot" />
+          </span>
+          2 requests are waiting on you
+          <Chevron />
+        </div>
+        <div className="hk-section">Yours</div>
+        <div className="hk-grid">
+          <div className={`hk-tile ${step === APP_TAP ? "is-pressed" : ""}`}>
+            <span className="hk-icon" style={{ background: app.bg, color: app.fg }}>
+              {app.glyph}
+            </span>
+            <span className="hk-label">{app.name}</span>
+          </div>
+          {YOURS.map((name) => (
+            <div className="hk-tile" key={name}>
+              <LetterTile name={name} />
+              <span className="hk-label">{name}</span>
+            </div>
+          ))}
+        </div>
+        <div className="hk-section">
+          Acme <span>4 members</span>
+        </div>
+        <div className="hk-grid">
+          {TEAM_APPS.map((name) => (
+            <div className="hk-tile" key={name}>
+              <LetterTile name={name} />
+              <span className="hk-label">{name}</span>
+            </div>
+          ))}
+        </div>
       </div>
-      {step === APP_TAP ? <Tap style={{ left: 66, top: 223 }} /> : null}
+      {step === APP_TAP ? <Tap style={{ left: 64, top: 316 }} /> : null}
       <div className={`hark-webapp-sheet ${step > APP_TAP ? "is-open" : ""}`}>
         <WebApp app={app} />
       </div>
@@ -352,12 +364,16 @@ export function PhoneStage({ id, scene, step }: { id: string; scene: Scene; step
   return (
     <>
       {app ? <AppScene app={app.app} key={app.id} step={app.step} /> : null}
-      <LockScreen className={isApp ? "is-unlocked" : ""}>
+      <LockScreen
+        className={isApp ? "is-unlocked" : ""}
+        dimmed={scene.kind === "approve" && step === APPROVE_PRESSED}
+      >
         <NoteSwap id={id}>
           <LockNote scene={scene} step={step} />
         </NoteSwap>
       </LockScreen>
-      <StatusBar time={isApp} />
+      {/* Dark over Hark's light Apps screen, light again over the app's colour. */}
+      <StatusBar dark={isApp && step <= APP_TAP} time={isApp} />
       <Island mode="idle" />
     </>
   );

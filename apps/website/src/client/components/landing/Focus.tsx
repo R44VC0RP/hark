@@ -90,9 +90,9 @@ function sceneLabel(scene: Scene): string {
     case "app":
       return `The ${scene.app.name} app opens inside Hark, already signed in.`;
     case "approve":
-      return `${scene.note.title} asks for approval on the Lock Screen, and it is approved.`;
+      return `${scene.note.title} asks for approval on the Lock Screen; it is pressed and approved.`;
     case "team":
-      return `A notification shared with ${scene.team.team}, ${scene.team.people} people.`;
+      return `A ${scene.team.note.title} notification that the whole team gets.`;
   }
 }
 
