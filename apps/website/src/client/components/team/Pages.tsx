@@ -260,6 +260,7 @@ function PageRow({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <Badge tone={status.tone}>{status.label}</Badge>
+            {page.urgency === "low" ? <Badge tone="outline">Low urgency</Badge> : null}
             <p className="min-w-0 font-medium text-white">
               {page.title}
               {page.repeatCount > 0 ? (

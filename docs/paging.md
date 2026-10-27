@@ -64,6 +64,14 @@ compare-and-set on the step number, so timers are idempotent and survive restart
 someone already notified (a loop, or a later level naming them) sends a fresh alert and restarts
 their repeats. Each escalation step that pushes counts once against rate limits and billing.
 
+## Urgency
+
+Pages carry `urgency` (webhooks, agent notifications, the on-call API, MCP `pages_create`,
+`harkctl page --urgency` / `notify --oncall --urgency`). `high` (default) is everything above.
+`low` sends one ordinary alert (default sound, `active`, never critical) to whoever is on call,
+with no repeats and no scheduled escalation. A person escalating a low page upgrades it to
+`high`, so it rings and escalates from then on.
+
 ## Critical Alerts (waiting on Apple)
 
 A critical alert plays at full volume through the silent switch and every Focus. It needs the

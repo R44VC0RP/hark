@@ -173,6 +173,7 @@ export function parseArgs(argv) {
     "escalation-mode",
     "escalation-loops",
     "escalation-final",
+    "urgency",
   ]);
   const booleanFlags = new Set([
     "approval",
@@ -619,6 +620,15 @@ async function waitForInteraction(config, id, timeoutSeconds, runtime) {
   }
 }
 
+/** `--urgency high|low` for pages; undefined when not given. */
+function urgencyOption(options) {
+  if (options.urgency === undefined) return undefined;
+  if (options.urgency !== "high" && options.urgency !== "low") {
+    throw new UsageError("--urgency must be high or low");
+  }
+  return options.urgency;
+}
+
 function help() {
   return `Usage:
   harkctl auth login [--client-name <name>] [--scope <scope>] [--expires-in <duration>]
@@ -627,7 +637,8 @@ function help() {
   harkctl auth status
   harkctl notify <body> [--title <name>] [--image <url>] [--url <url>] [--device <id>]
                  [--project <name>] [--summary <text>] [--markdown | --body-format <text|markdown>]
-                 [--app <app_id>] [--oncall <group_id>] [--idempotency-key <key>]
+                 [--app <app_id>] [--oncall <group_id> [--urgency <high|low>]]
+                 [--idempotency-key <key>]
                  [--stdin [--allow-custom-scheme]]
   harkctl notify ask <prompt> (--approval|--yes-no|--text) [--title <name>] [--image <url>]
                   [--url <url>] [--device <id>] [--expires-in <duration>]
@@ -713,7 +724,7 @@ function help() {
   harkctl oncall override <group_id> --user <user_id> --starts-at <iso> --ends-at <iso>
   harkctl oncall remove-override <group_id> <override_id>
   harkctl page <group_id> <title> [--body <text>] [--url <url>] [--app <app_id>]
-                [--dedup-key <key>]
+                [--dedup-key <key>] [--urgency <high|low>]
   harkctl pages list --team <team_id> [--all] [--limit <n>] [--cursor <c>]
   harkctl pages get <page_id> [--timeline]
   harkctl pages resolve <page_id> [--note <text>]
@@ -754,7 +765,9 @@ team (every member then approves sign-in on their own phone); --personal moves i
 page alerts whoever is on call in an on-call group, then escalates until someone
 acknowledges. Acknowledging and escalating are deliberately human-only (on the phone or
 the website); agents can raise, read, and resolve pages. --dedup-key (or, with
-notify --oncall, --idempotency-key) merges repeats into the open page.
+notify --oncall, --idempotency-key) merges repeats into the open page. --urgency low
+sends one ordinary alert to whoever is on call with no repeats or escalation (a person
+escalating it makes it high); high, the default, rings and escalates.
 
 Pages ring until acknowledged: whoever is being paged is re-alerted every
 --ring-interval seconds (30-300, default 60) up to --ring-repeats times (0-30, default
@@ -1588,6 +1601,7 @@ export async function execute(argv, env = process.env, overrides = {}) {
     const groupId = positionals[1];
     const title = positionals.slice(2).join(" ");
     if (!groupId || !title) throw new UsageError("page requires a group ID and a title");
+    urgencyOption(options);
     const body = await scopedRequest(
       config,
       `/api/agent/oncall/${encodeURIComponent(groupId)}/pages`,
@@ -1599,6 +1613,7 @@ export async function execute(argv, env = process.env, overrides = {}) {
           ...(options.url ? { url: options.url } : {}),
           ...(options.app ? { appId: options.app } : {}),
           ...(options["dedup-key"] ? { dedupKey: options["dedup-key"] } : {}),
+          ...(urgencyOption(options) ? { urgency: urgencyOption(options) } : {}),
         }),
       },
     );
@@ -1744,9 +1759,13 @@ export async function execute(argv, env = process.env, overrides = {}) {
       ...(bodyFormat ? { bodyFormat } : {}),
       ...(options.app ? { appId: options.app } : {}),
       ...(options.oncall ? { oncall: options.oncall } : {}),
+      ...(urgencyOption(options) ? { urgency: urgencyOption(options) } : {}),
     };
     if (options.oncall && options.device.length > 0) {
       throw new UsageError("--oncall cannot be combined with --device");
+    }
+    if (options.urgency && !options.oncall) {
+      throw new UsageError("--urgency needs --oncall");
     }
     const body = await request(config, "/api/agent/notifications", {
       method: "POST",

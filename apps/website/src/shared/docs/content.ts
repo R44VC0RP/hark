@@ -1440,10 +1440,17 @@ harkctl apps remove app_...`,
             text: "The default policy pages the next person in the rotation after 5 minutes, then the whole group 10 minutes later. Pages with the same `dedupKey` merge into the open page (its `repeatCount` grows) instead of paging again.",
           },
           {
+            kind: "p",
+            text: "Each page has an `urgency`. `high` (the default) rings until someone acknowledges and follows the escalation policy. `low` sends one ordinary alert (default sound, never critical) to whoever is on call, with no repeats and no escalation; if a person escalates it, it becomes `high` and rings from there. Use `low` for things that can wait until morning.",
+          },
+          {
             kind: "code",
             language: "bash",
             code: `harkctl page ocg_... "API error rate above 20%" \\
-  --body "5xx since 14:02" --dedup-key api-5xx`,
+  --body "5xx since 14:02" --dedup-key api-5xx
+
+# Can wait until morning: one quiet alert, no ringing or escalation
+harkctl page ocg_... "Cert expires in 20 days" --urgency low`,
           },
         ],
       },
@@ -1635,12 +1642,13 @@ harkctl oncall settings set --ring-until-ack on --ring-interval group`,
             code: `{
   "title": "Checkout API",
   "body": "Error rate above 20% for 5 minutes",
-  "oncall": "ocg_..."
+  "oncall": "ocg_...",
+  "urgency": "high"
 }`,
           },
           {
             kind: "p",
-            text: "The response carries `pageId` and `delivered`. Page bodies are limited to 2,000 characters. Agents page with `harkctl page` or `harkctl notify --oncall`.",
+            text: "`urgency` is optional (`high` or `low`, default `high`) and only valid with `oncall`. The response carries `pageId` and `delivered`. Page bodies are limited to 2,000 characters. Agents page with `harkctl page` or `harkctl notify --oncall`.",
           },
         ],
       },

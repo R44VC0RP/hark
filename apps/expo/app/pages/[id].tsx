@@ -254,6 +254,9 @@ export default function PageDetailScreen() {
 
             <View style={ui.metaBlock}>
               <MetaRow label="Group" value={page.groupName} />
+              {page.urgency === "low" ? (
+                <MetaRow label="Urgency" value="Low · one alert, no escalation" />
+              ) : null}
               <MetaRow label="From" value={page.source} />
               <MetaRow
                 label="Raised"

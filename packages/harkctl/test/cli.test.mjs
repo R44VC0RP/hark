@@ -1548,6 +1548,25 @@ test("page raises an on-call page and exits 7 when nobody was reached", async ()
     execute(["notify", "x", "--oncall", "ocg_1", "--device", "dev_1"], AGENT_ENV),
     /cannot be combined/,
   );
+  await withMockServer(
+    () => Response.json({ page: { id: "page_1" }, deduplicated: false, accepted: 1 }),
+    async (requests) => {
+      await execute(
+        ["notify", "Cert expiring", "--oncall", "ocg_1", "--urgency", "low"],
+        AGENT_ENV,
+      );
+      assert.deepEqual(requests[0].body, {
+        body: "Cert expiring",
+        oncall: "ocg_1",
+        urgency: "low",
+      });
+    },
+  );
+  await assert.rejects(execute(["notify", "x", "--urgency", "low"], AGENT_ENV), /needs --oncall/);
+  await assert.rejects(
+    execute(["notify", "x", "--oncall", "ocg_1", "--urgency", "urgent"], AGENT_ENV),
+    /high or low/,
+  );
 });
 
 test("apps share moves an app into a team or back", async () => {

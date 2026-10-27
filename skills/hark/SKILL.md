@@ -427,6 +427,9 @@ harkctl pages resolve page_XXXX --note "Rolled back"
   read, and resolve pages. Use a stable `--dedup-key` for repeating alerts so they merge into the
   open page instead of paging again. `notify "<body>" --oncall ocg_XXXX` pages too, using
   `--idempotency-key` as the dedup key. Page bodies are at most 2,000 characters.
+- `--urgency low` (or `"urgency": "low"`) sends one ordinary alert to whoever is on call, with no
+  repeats and no escalation; a person escalating it makes it high. `high` (the default) rings until
+  acknowledged and escalates. Use `low` for things that can wait until morning.
 - Escalation policy (per group): level 0 is whoever is on call; `escalation` adds up to 5 levels
   of `{ afterMinutes, target, userIds?, groupId? }`, where `afterMinutes` (1–1440) is the previous
   level's acknowledgement timeout and `target` is `next`, `oncall` (optional `groupId` of another

@@ -199,7 +199,9 @@ Every member approves sign-in to a team app for themselves; the Hark pass then i
 and `team_role`, and removing someone from the team stops their passes immediately. A page goes to
 the person on call (rotations hand off at a local time and follow DST), then escalates to the next
 person and the whole group until someone acknowledges from the lock screen or the website. Webhooks
-page by adding `"oncall": "ocg_..."` to the payload. Acknowledging is human-only; agents can raise
+page by adding `"oncall": "ocg_..."` to the payload; add `"urgency": "low"` for a single quiet alert
+with no ringing or escalation (the default, `high`, rings until acknowledged). Acknowledging is
+human-only; agents can raise
 and resolve pages. See the [Teams](https://hark.ryan.ceo/docs#teams) and
 [On-call](https://hark.ryan.ceo/docs#oncall) docs.
 
