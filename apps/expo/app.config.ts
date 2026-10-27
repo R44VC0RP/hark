@@ -1,5 +1,14 @@
 import type { ConfigContext, ExpoConfig } from "expo/config";
 
+/**
+ * Critical Alerts need an entitlement Apple grants on request. Leave this off
+ * until Apple approves it: with it on, the build asks for an entitlement the
+ * provisioning profile doesn't have and signing fails. Set
+ * `HARK_CRITICAL_ALERTS=1` in the build environment (EAS profile `env`) once
+ * the App ID has the capability.
+ */
+const criticalAlerts = process.env.HARK_CRITICAL_ALERTS === "1";
+
 export default ({ config: _config }: ConfigContext): ExpoConfig => ({
   name: "Hark",
   slug: "hark",
@@ -20,6 +29,7 @@ export default ({ config: _config }: ConfigContext): ExpoConfig => ({
       "aps-environment": "development",
       "com.apple.developer.usernotifications.communication": true,
       "com.apple.developer.siri": true,
+      ...(criticalAlerts ? { "com.apple.developer.usernotifications.critical-alerts": true } : {}),
     },
     infoPlist: {
       ITSAppUsesNonExemptEncryption: false,
@@ -112,6 +122,8 @@ export default ({ config: _config }: ConfigContext): ExpoConfig => ({
       "expo-notifications",
       {
         enableBackgroundRemoteNotifications: true,
+        // Alarm for on-call pages (generated, 28 s, under the 30 s iOS limit).
+        sounds: ["./assets/sounds/hark-page.caf"],
       },
     ],
     "expo-web-browser",
@@ -146,6 +158,8 @@ export default ({ config: _config }: ConfigContext): ExpoConfig => ({
     ],
   ],
   extra: {
+    /** Read by the app to decide whether to offer the Critical Alerts prompt. */
+    criticalAlerts,
     eas: {
       projectId: process.env.EAS_PROJECT_ID ?? "0fce08a7-f312-4b58-a907-85a648113946",
     },

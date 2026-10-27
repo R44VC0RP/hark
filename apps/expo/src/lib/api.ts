@@ -4,6 +4,7 @@ import type {
   AppPassResponse,
   AppShareInput,
   AppSharingInput,
+  DeviceAlertSettingsInput,
   DeviceDto,
   DeviceRegisterInput,
   DeviceUnregisterInput,
@@ -23,6 +24,8 @@ import type {
   LiveActivityUpdateTokenInput,
   OncallGroupDto,
   OncallPageDto,
+  OncallSettingsDto,
+  OncallSettingsUpdateInput,
   OncallShiftDto,
   TeamDto,
   TeamInviteCreateResponse,
@@ -59,6 +62,11 @@ export const api = {
   listDevices: () => request<{ devices: DeviceDto[] }>("/api/devices"),
   registerDevice: (input: DeviceRegisterInput) =>
     request<{ device: { id: string } }>("/api/devices", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  reportAlertSettings: (input: DeviceAlertSettingsInput) =>
+    request<{ device: DeviceDto }>("/api/devices/alert-settings", {
       method: "POST",
       body: JSON.stringify(input),
     }),
@@ -211,6 +219,12 @@ export const api = {
   getOncallGroup: (groupId: string) =>
     request<{ group: OncallGroupDto }>(`/api/oncall/${encodeURIComponent(groupId)}`),
   getMyOncall: () => request<OncallMeDto>("/api/oncall/me"),
+  getOncallSettings: () => request<{ settings: OncallSettingsDto }>("/api/oncall/settings"),
+  updateOncallSettings: (input: OncallSettingsUpdateInput) =>
+    request<{ settings: OncallSettingsDto }>("/api/oncall/settings", {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
   listTeamPages: (teamId: string, params: { status?: "open" | "all"; cursor?: string } = {}) => {
     const query = new URLSearchParams({ status: params.status ?? "open" });
     if (params.cursor) query.set("cursor", params.cursor);
@@ -253,4 +267,6 @@ export type OncallMeShiftDto = OncallShiftDto & {
 export interface OncallMeDto {
   shifts: OncallMeShiftDto[];
   pages: OncallPageDto[];
+  /** Ringing settings; absent on older servers. */
+  settings?: OncallSettingsDto;
 }

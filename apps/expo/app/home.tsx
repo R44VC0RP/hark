@@ -21,6 +21,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { trackAppEvent, trackOnboardingCompleted } from "../src/lib/analytics";
 import { api } from "../src/lib/api";
 import { authClient, useSession } from "../src/lib/auth";
+import { readCriticalAlertState } from "../src/lib/critical-alerts";
 import {
   clearInteractionResponses,
   DEVICE_ID_KEY,
@@ -108,6 +109,7 @@ export default function HomeScreen() {
       }
 
       await registerInteractionCategories();
+      const criticalAlerts = await readCriticalAlertState().catch(() => undefined);
       const registered = await api.registerDevice({
         expoPushToken: expoToken,
         ...(apns ? { apnsToken: apns } : {}),
@@ -117,6 +119,7 @@ export default function HomeScreen() {
         ...(Number.parseFloat(String(Platform.Version)) >= 17
           ? { liveActivityInteractionVersion: 1 as const }
           : {}),
+        ...(criticalAlerts ? { criticalAlerts } : {}),
       });
 
       await SecureStore.setItemAsync(EXPO_TOKEN_KEY, expoToken);

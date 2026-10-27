@@ -34,6 +34,17 @@ final class NotificationService: UNNotificationServiceExtension {
       self.completeOnce(with: self.bestAttemptContent ?? content)
     }
 
+    if let pageId = Self.pageId(from: request.content.userInfo) {
+      // On-call pages keep their alarm sound and actions untouched. Repeat
+      // alerts share an APNs collapse ID, so iOS replaces the alert on
+      // screen; this also clears any earlier alert for the same page that
+      // arrived with a different identifier (e.g. from an older server).
+      Self.removeEarlierAlerts(forPage: pageId, keeping: request.identifier) { [weak self] in
+        self?.completeOnce(with: content)
+      }
+      return
+    }
+
     guard
       let data = Self.extractHarkData(from: request.content.userInfo),
       let sourceName = data["sourceName"] as? String,
@@ -90,6 +101,54 @@ final class NotificationService: UNNotificationServiceExtension {
       return result
     }
     return nil
+  }
+
+  // MARK: - On-call pages
+
+  static let pageCategoryId = "HARK_PAGE_V1"
+
+  /// Page ID of an on-call page alert (not the silent `page.claimed` command).
+  static func pageId(from userInfo: [AnyHashable: Any]) -> String? {
+    var candidates: [[String: Any]] = []
+    if let body = userInfo["body"] as? [String: Any] { candidates.append(body) }
+    if let bodyString = userInfo["body"] as? String,
+      let object = try? JSONSerialization.jsonObject(with: Data(bodyString.utf8)),
+      let parsed = object as? [String: Any]
+    {
+      candidates.append(parsed)
+    }
+    var topLevel: [String: Any] = [:]
+    for (key, value) in userInfo {
+      if let key = key as? String { topLevel[key] = value }
+    }
+    candidates.append(topLevel)
+    for candidate in candidates {
+      if candidate["categoryId"] as? String == pageCategoryId,
+        let pageId = candidate["pageId"] as? String, !pageId.isEmpty
+      {
+        return pageId
+      }
+    }
+    return nil
+  }
+
+  static func removeEarlierAlerts(
+    forPage pageId: String,
+    keeping identifier: String,
+    completion: @escaping () -> Void
+  ) {
+    let center = UNUserNotificationCenter.current()
+    center.getDeliveredNotifications { delivered in
+      let earlier =
+        delivered
+        .filter { $0.request.identifier != identifier }
+        .filter { Self.pageId(from: $0.request.content.userInfo) == pageId }
+        .map { $0.request.identifier }
+      if !earlier.isEmpty {
+        center.removeDeliveredNotifications(withIdentifiers: earlier)
+      }
+      completion()
+    }
   }
 
   // MARK: - Avatar
