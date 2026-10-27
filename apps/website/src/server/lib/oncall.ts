@@ -6,6 +6,7 @@ import {
   type OncallPageCreateInput,
   type OncallPageCreateResponse,
   type OncallPageDto,
+  type OncallPageEventDto,
   type OncallPageStatus,
   type OncallPersonDto,
   type OncallRingingDto,
@@ -39,6 +40,7 @@ import {
   oncallGroup,
   oncallOverride,
   oncallPage,
+  oncallPageEvent,
   oncallPageRecipient,
   oncallPreference,
   teamMember,
@@ -168,6 +170,12 @@ export async function toGroupDto(group: GroupRow, now = Date.now()): Promise<Onc
     escalation: group.escalation,
     ringIntervalSeconds: group.ringIntervalSeconds,
     ringMaxRepeats: group.ringMaxRepeats,
+    escalationMode: group.escalationMode === "hand_off" ? "hand_off" : "fan_out",
+    escalationLoops: group.escalationLoops,
+    escalationFinal:
+      group.escalationFinal === "group" || group.escalationFinal === "team"
+        ? group.escalationFinal
+        : "none",
     current: current ? toShiftDto(current, map) : null,
     upcoming: shifts.map((shift) => toShiftDto(shift, map)),
     overrides,
@@ -234,6 +242,29 @@ export async function checkRotation(
   };
 }
 
+/** Escalation levels may only name people and groups in the team. */
+export async function checkEscalation(
+  teamId: string,
+  steps: GroupRow["escalation"],
+  groupId?: string,
+): Promise<string | null> {
+  const members = new Set(await memberIds(teamId));
+  for (const step of steps) {
+    if (step.userIds && !step.userIds.every((id) => members.has(id))) {
+      return "Every person in an escalation level must belong to the team";
+    }
+    if (step.groupId && step.groupId !== groupId) {
+      const [other] = await db
+        .select({ id: oncallGroup.id })
+        .from(oncallGroup)
+        .where(and(eq(oncallGroup.id, step.groupId), eq(oncallGroup.teamId, teamId)))
+        .limit(1);
+      if (!other) return "An escalation level's groupId must be an on-call group in the team";
+    }
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Pages
 // ---------------------------------------------------------------------------
@@ -241,7 +272,7 @@ export async function checkRotation(
 export async function toPageDtos(rows: PageRow[]): Promise<OncallPageDto[]> {
   if (rows.length === 0) return [];
   const pageIds = rows.map((row) => row.id);
-  const [groups, recipients, apps] = await Promise.all([
+  const [groups, recipients, apps, events] = await Promise.all([
     db
       .select({ id: oncallGroup.id, name: oncallGroup.name })
       .from(oncallGroup)
@@ -260,11 +291,20 @@ export async function toPageDtos(rows: PageRow[]): Promise<OncallPageDto[]> {
           rows.flatMap((row) => (row.appId ? [row.appId] : [])),
         ),
       ),
+    db
+      .select()
+      .from(oncallPageEvent)
+      .where(inArray(oncallPageEvent.pageId, pageIds))
+      .orderBy(asc(oncallPageEvent.createdAt)),
   ]);
   const groupNames = new Map(groups.map((group) => [group.id, group.name]));
   const appsById = new Map(apps.map((row) => [row.id, row]));
   const map = await people([
     ...recipients.map((recipient) => recipient.userId),
+    ...events.flatMap((event) => [
+      ...event.userIds,
+      ...(event.actorUserId ? [event.actorUserId] : []),
+    ]),
     ...rows
       .flatMap((row) => [row.acknowledgedByUserId, row.resolvedByUserId])
       .filter((id): id is string => typeof id === "string"),
@@ -298,6 +338,12 @@ export async function toPageDtos(rows: PageRow[]): Promise<OncallPageDto[]> {
                 }),
               )
           : [],
+      timeline: pageTimeline(
+        row,
+        events.filter((event) => event.pageId === row.id),
+        recipients.filter((recipient) => recipient.pageId === row.id),
+        map,
+      ),
       escalationStep: row.escalationStep,
       nextEscalationAt: row.nextEscalationAt?.toISOString() ?? null,
       acknowledgedBy: row.acknowledgedByUserId
@@ -309,6 +355,82 @@ export async function toPageDtos(rows: PageRow[]): Promise<OncallPageDto[]> {
       source: row.sourceName,
       createdAt: row.createdAt.toISOString(),
     };
+  });
+}
+
+type EventRow = typeof oncallPageEvent.$inferSelect;
+type RecipientRow = typeof oncallPageRecipient.$inferSelect;
+
+/**
+ * The page's timeline from its events. Pages raised before events existed
+ * fall back to their recipients (one entry per step) and acknowledgement.
+ */
+function pageTimeline(
+  row: PageRow,
+  events: EventRow[],
+  recipients: RecipientRow[],
+  map: Map<string, OncallPersonDto>,
+): OncallPageEventDto[] {
+  if (events.length > 0) {
+    return events.map((event) => ({
+      at: event.createdAt.toISOString(),
+      kind: event.kind as OncallPageEventDto["kind"],
+      level: event.level,
+      loop: event.loop,
+      people: event.userIds.map((id) => personOrUnknown(map, id)),
+      escalatedBy: event.actorUserId ? personOrUnknown(map, event.actorUserId) : null,
+    }));
+  }
+  const steps = new Map<number, RecipientRow[]>();
+  for (const recipient of recipients) {
+    steps.set(recipient.step, [...(steps.get(recipient.step) ?? []), recipient]);
+  }
+  const timeline: OncallPageEventDto[] = [...steps.entries()].map(([step, group]) => ({
+    at: (group[0] as RecipientRow).notifiedAt.toISOString(),
+    kind: "paged",
+    level: step,
+    loop: 0,
+    people: group.map((recipient) => personOrUnknown(map, recipient.userId)),
+    escalatedBy: null,
+  }));
+  if (row.acknowledgedAt && row.acknowledgedByUserId) {
+    timeline.push({
+      at: row.acknowledgedAt.toISOString(),
+      kind: "acknowledged",
+      level: null,
+      loop: null,
+      people: [personOrUnknown(map, row.acknowledgedByUserId)],
+      escalatedBy: null,
+    });
+  }
+  if (row.resolvedAt && row.resolvedByUserId) {
+    timeline.push({
+      at: row.resolvedAt.toISOString(),
+      kind: "resolved",
+      level: null,
+      loop: null,
+      people: [personOrUnknown(map, row.resolvedByUserId)],
+      escalatedBy: null,
+    });
+  }
+  return timeline.sort((a, b) => a.at.localeCompare(b.at));
+}
+
+async function recordEvent(
+  pageId: string,
+  kind: OncallPageEventDto["kind"],
+  userIds: string[],
+  extra: { level?: number; loop?: number; actorUserId?: string | null } = {},
+): Promise<void> {
+  await db.insert(oncallPageEvent).values({
+    id: newId("pev"),
+    pageId,
+    kind,
+    level: extra.level ?? null,
+    loop: extra.loop ?? null,
+    userIds,
+    actorUserId: extra.actorUserId ?? null,
+    createdAt: new Date(),
   });
 }
 
@@ -469,49 +591,56 @@ async function stopRinging(pageId: string): Promise<void> {
     .where(and(eq(oncallPageRecipient.pageId, pageId), isNotNull(oncallPageRecipient.nextRingAt)));
 }
 
+/** `hand_off` groups: silences everyone on the page except `keep`. */
+async function stopRingingExcept(pageId: string, keep: string[]): Promise<void> {
+  if (keep.length === 0) return;
+  await db
+    .update(oncallPageRecipient)
+    .set({ nextRingAt: null })
+    .where(
+      and(
+        eq(oncallPageRecipient.pageId, pageId),
+        isNotNull(oncallPageRecipient.nextRingAt),
+        sql`${oncallPageRecipient.userId} not in (${sql.join(
+          keep.map((id) => sql`${id}`),
+          sql`, `,
+        )})`,
+      ),
+    );
+}
+
 /**
- * Moves ringing to an escalation step's targets. A `next` step stops
- * everyone else; a `group` step makes every notified member due again on the
- * worker's next tick, so people handed off earlier hear it went to everyone.
+ * Pages someone the page already reached again (a policy loop, or a level
+ * that names them after their ringing stopped): a fresh alert now, a fresh
+ * credential, and their repeat count restarted.
  */
-async function handOffRinging(
-  page: PageRow,
-  group: GroupRow,
-  target: "next" | "group",
-  newTargets: string[],
-): Promise<void> {
-  if (target === "next") {
-    if (newTargets.length === 0) return;
-    await db
+async function realert(page: PageRow, group: GroupRow, userIds: string[]): Promise<number> {
+  if (userIds.length === 0) return 0;
+  const [targets, preferences] = await Promise.all([devicesOf(userIds), preferencesOf(userIds)]);
+  let accepted = 0;
+  for (const userId of userIds) {
+    const responseToken = generatePageResponseToken();
+    const now = Date.now();
+    const [updated] = await db
       .update(oncallPageRecipient)
-      .set({ nextRingAt: null })
-      .where(
-        and(
-          eq(oncallPageRecipient.pageId, page.id),
-          isNotNull(oncallPageRecipient.nextRingAt),
-          sql`${oncallPageRecipient.userId} not in (${sql.join(
-            newTargets.map((id) => sql`${id}`),
-            sql`, `,
-          )})`,
-        ),
-      );
-    return;
+      .set({
+        ringCount: 0,
+        nextRingAt: nextRingAfter(group, preferences.get(userId), 0, now),
+        previousResponseTokenHash: sql`case when ${oncallPageRecipient.responseTokenUsedAt} is null then ${oncallPageRecipient.responseTokenHash} else ${oncallPageRecipient.previousResponseTokenHash} end`,
+        responseTokenHash: sql`case when ${oncallPageRecipient.responseTokenUsedAt} is null then ${hashPageResponseToken(responseToken)} else ${oncallPageRecipient.responseTokenHash} end`,
+      })
+      .where(and(eq(oncallPageRecipient.pageId, page.id), eq(oncallPageRecipient.userId, userId)))
+      .returning({ usedAt: oncallPageRecipient.responseTokenUsedAt });
+    if (!updated) continue;
+    accepted += await sendPageAlert(
+      page,
+      group.name,
+      targets.filter((target) => target.userId === userId),
+      updated.usedAt ? undefined : responseToken,
+      0,
+    );
   }
-  const team = new Set(await memberIds(group.teamId));
-  const fresh = new Set(newTargets);
-  const earlier = [...(await notifiedUserIds(page.id))].filter(
-    (id) => team.has(id) && !fresh.has(id),
-  );
-  if (earlier.length === 0) return;
-  const preferences = await preferencesOf(earlier);
-  const now = new Date();
-  for (const userId of earlier) {
-    if (ringInterval(group, preferences.get(userId)) === null) continue;
-    await db
-      .update(oncallPageRecipient)
-      .set({ nextRingAt: now, ringCount: 0 })
-      .where(and(eq(oncallPageRecipient.pageId, page.id), eq(oncallPageRecipient.userId, userId)));
-  }
+  return accepted;
 }
 
 const RINGS_PER_TICK = 100;
@@ -575,21 +704,10 @@ async function ringOnce(
     nextCount,
   );
   // Acknowledged while this repeat was in flight: clear it again.
-  const [latest] = await db
-    .select({ status: oncallPage.status, ackBy: oncallPage.acknowledgedByUserId })
-    .from(oncallPage)
-    .where(eq(oncallPage.id, page.id))
-    .limit(1);
-  if (latest && latest.status !== "triggered" && targets.length > 0) {
-    const claimedBy = latest.ackBy ? await userName(latest.ackBy) : "Someone";
-    const result = await sendPushMessages(
-      buildPageClaimedPushMessages(
-        targets.map((target) => target.token),
-        page.id,
-        claimedBy,
-      ),
-    );
-    await deactivateStale(result.staleTokens);
+  const [latest] = await db.select().from(oncallPage).where(eq(oncallPage.id, page.id)).limit(1);
+  if (latest && latest.status !== "triggered") {
+    const by = latest.acknowledgedByUserId ?? latest.resolvedByUserId;
+    await sendClaimed(latest, [userId], by ? await userName(by) : "Someone", latest.status);
   }
 }
 
@@ -697,9 +815,132 @@ async function groupMembers(group: GroupRow): Promise<string[]> {
   return rotation.length > 0 ? rotation : [...team];
 }
 
-function nextEscalationAt(group: GroupRow, step: number, from: number): Date | null {
-  const next = group.escalation[step];
-  return next ? new Date(from + next.afterMinutes * 60_000) : null;
+type EscalationTarget =
+  | GroupRow["escalation"][number]["target"]
+  /** Level 0: whoever is on call, or the whole group when nobody is. */
+  | "initial";
+
+interface PlannedStep {
+  /** Policy level (0 = whoever was on call first). */
+  level: number;
+  /** 0 on the first pass through the policy, then 1, 2, ... */
+  loop: number;
+  target: EscalationTarget;
+  userIds?: string[];
+  groupId?: string;
+  /** Minutes without an acknowledgement before this step runs. */
+  delayMinutes: number;
+}
+
+const DEFAULT_FINAL_DELAY_MINUTES = 5;
+
+/**
+ * The escalation step a page runs after `index` steps: the group's levels
+ * in order, then the whole policy again (from level 0) `escalationLoops`
+ * times, then the optional final fan-out to the group or team. The last
+ * level waits as long as the first before a loop or the final step.
+ */
+export function plannedStep(
+  group: Pick<GroupRow, "escalation" | "escalationLoops" | "escalationFinal">,
+  index: number,
+): PlannedStep | null {
+  const steps = group.escalation;
+  const count = steps.length;
+  const firstDelay = steps[0]?.afterMinutes ?? DEFAULT_FINAL_DELAY_MINUTES;
+  const level = (position: number, loop: number): PlannedStep => {
+    if (position === 0) return { level: 0, loop, target: "initial", delayMinutes: firstDelay };
+    const step = steps[position - 1] as GroupRow["escalation"][number];
+    return {
+      level: position,
+      loop,
+      target: step.target,
+      ...(step.userIds ? { userIds: step.userIds } : {}),
+      ...(step.groupId ? { groupId: step.groupId } : {}),
+      delayMinutes: step.afterMinutes,
+    };
+  };
+  if (index < count) return level(index + 1, 0);
+  const cycle = count + 1;
+  const loops = count > 0 ? group.escalationLoops : 0;
+  const looped = index - count;
+  if (looped < cycle * loops) return level(looped % cycle, Math.floor(looped / cycle) + 1);
+  if (
+    looped === cycle * loops &&
+    (group.escalationFinal === "group" || group.escalationFinal === "team")
+  ) {
+    return {
+      level: count + 1,
+      loop: loops,
+      target: group.escalationFinal,
+      delayMinutes: firstDelay,
+    };
+  }
+  return null;
+}
+
+function nextEscalationAt(group: GroupRow, index: number, from: number): Date | null {
+  const next = plannedStep(group, index);
+  return next ? new Date(from + next.delayMinutes * 60_000) : null;
+}
+
+/** Who a step pages, in the team as it is now. */
+async function stepTargets(
+  step: PlannedStep,
+  group: GroupRow,
+  page: PageRow,
+  team: Set<string>,
+  notified: Set<string>,
+  now: number,
+): Promise<{ userIds: string[]; lastPagedUserId: string | null }> {
+  let lastPagedUserId = page.lastPagedUserId;
+  let userIds: string[] = [];
+  switch (step.target) {
+    case "next": {
+      const rotation = rotationOf(group);
+      const next = nextInRotation(
+        { ...rotation, memberIds: rotation.memberIds.filter((id) => team.has(id)) },
+        page.lastPagedUserId,
+        // On a loop everyone has been paged once; keep walking the rotation.
+        step.loop > 0 ? new Set() : notified,
+        now,
+      );
+      if (next) {
+        userIds = [next];
+        lastPagedUserId = next;
+      }
+      break;
+    }
+    case "initial":
+    case "oncall": {
+      let source = group;
+      if (step.target === "oncall" && step.groupId && step.groupId !== group.id) {
+        const [other] = await db
+          .select()
+          .from(oncallGroup)
+          .where(and(eq(oncallGroup.id, step.groupId), eq(oncallGroup.teamId, group.teamId)))
+          .limit(1);
+        if (other) source = other;
+      }
+      const shift = await onCallNow(source, now);
+      if (shift && team.has(shift.userId)) {
+        userIds = [shift.userId];
+        lastPagedUserId = shift.userId;
+      } else if (step.target === "initial") {
+        userIds = await groupMembers(group);
+      }
+      break;
+    }
+    case "people":
+      userIds = (step.userIds ?? []).filter((id) => team.has(id));
+      break;
+    case "group":
+      userIds = await groupMembers(group);
+      break;
+    case "team":
+      userIds = [...team];
+      break;
+  }
+  return { userIds: [...new Set(userIds)], lastPagedUserId };
 }
 
 export interface RaisePageInput {
@@ -895,6 +1136,7 @@ export async function raisePage({
   }
   const page = created;
 
+  await recordEvent(page.id, "paged", initial, { level: 0, loop: 0 });
   const accepted = await notifyRecipients(page, group, initial, 0);
   if (accepted > 0) await trackNotification(creatorUserId, page.id);
   return {
@@ -918,10 +1160,15 @@ export type EscalateOutcome =
 
 /**
  * Runs the page's next escalation step. The worker calls this when a step
- * is due; a person can run it early. Past the last configured step a manual
- * escalation pages the whole group.
+ * is due; a person can run it early (`actorUserId`). Past the last step a
+ * manual escalation pages the whole group (or team, when that is the
+ * group's final step).
  */
-export async function escalatePage(pageId: string, manual: boolean): Promise<EscalateOutcome> {
+export async function escalatePage(
+  pageId: string,
+  manual: boolean,
+  actorUserId: string | null = null,
+): Promise<EscalateOutcome> {
   const [row] = await db
     .select({ page: oncallPage, group: oncallGroup })
     .from(oncallPage)
@@ -934,8 +1181,17 @@ export async function escalatePage(pageId: string, manual: boolean): Promise<Esc
     return { ok: false, status: 409, error: `Page is already ${page.status}`, page };
   }
   const stepIndex = page.escalationStep;
-  const configured = group.escalation[stepIndex];
-  const step = configured ?? (manual ? { afterMinutes: 0, target: "group" as const } : null);
+  const planned = plannedStep(group, stepIndex);
+  const step: PlannedStep | null =
+    planned ??
+    (manual
+      ? {
+          level: group.escalation.length + 1,
+          loop: 0,
+          target: group.escalationFinal === "team" ? "team" : "group",
+          delayMinutes: 0,
+        }
+      : null);
   const now = Date.now();
   if (!step) {
     await db
@@ -947,22 +1203,28 @@ export async function escalatePage(pageId: string, manual: boolean): Promise<Esc
 
   const notified = await notifiedUserIds(page.id);
   const team = new Set(await memberIds(group.teamId));
-  let targets: string[];
-  let lastPagedUserId = page.lastPagedUserId;
-  if (step.target === "next") {
-    const rotation = rotationOf(group);
-    const next = nextInRotation(
-      { ...rotation, memberIds: rotation.memberIds.filter((id) => team.has(id)) },
-      page.lastPagedUserId,
-      notified,
-      now,
-    );
-    targets = next ? [next] : [];
-    if (next) lastPagedUserId = next;
-  } else {
-    targets = (await groupMembers(group)).filter((id) => !notified.has(id));
-  }
-  if (manual && targets.length === 0) {
+  const { userIds: targets, lastPagedUserId } = await stepTargets(
+    step,
+    group,
+    page,
+    team,
+    notified,
+    now,
+  );
+  const fresh = targets.filter((id) => !notified.has(id));
+  // Already paged and no longer ringing (handed off, out of repeats, or a loop).
+  const ringingNow = new Set(
+    (
+      await db
+        .select({ userId: oncallPageRecipient.userId })
+        .from(oncallPageRecipient)
+        .where(
+          and(eq(oncallPageRecipient.pageId, page.id), isNotNull(oncallPageRecipient.nextRingAt)),
+        )
+    ).map((recipient) => recipient.userId),
+  );
+  const again = targets.filter((id) => notified.has(id) && !ringingNow.has(id));
+  if (manual && fresh.length === 0 && again.length === 0) {
     return { ok: false, status: 409, error: "Everyone in the group has already been paged", page };
   }
 
@@ -987,27 +1249,64 @@ export async function escalatePage(pageId: string, manual: boolean): Promise<Esc
     const [latest] = await db.select().from(oncallPage).where(eq(oncallPage.id, page.id)).limit(1);
     return { ok: false, status: 409, error: "Page changed; try again", page: latest ?? page };
   }
-  await handOffRinging(claimed, group, step.target, targets);
-  const accepted = await notifyRecipients(claimed, group, targets, stepIndex + 1);
+  if (group.escalationMode === "hand_off") await stopRingingExcept(page.id, targets);
+  if (fresh.length > 0 || again.length > 0) {
+    await recordEvent(page.id, "paged", [...fresh, ...again], {
+      level: step.level,
+      loop: step.loop,
+      actorUserId: manual ? actorUserId : null,
+    });
+  }
+  const accepted =
+    (await notifyRecipients(claimed, group, fresh, stepIndex + 1)) +
+    (await realert(claimed, group, again));
   if (accepted > 0 && claimed.createdByUserId) {
     await trackNotification(claimed.createdByUserId, `${claimed.id}:${stepIndex + 1}`);
+  }
+  // Claimed by someone while this step was paging: clear what it just sent.
+  const [latest] = await db.select().from(oncallPage).where(eq(oncallPage.id, page.id)).limit(1);
+  if (latest && latest.status !== "triggered") {
+    await stopRinging(page.id);
+    const by = latest.acknowledgedByUserId ?? latest.resolvedByUserId;
+    await sendClaimed(
+      latest,
+      [...fresh, ...again],
+      by ? await userName(by) : "Someone",
+      latest.status,
+    );
   }
   return { ok: true, page: claimed };
 }
 
-/** Clears the page from everyone else's devices once it is claimed. */
-async function sendClaimed(page: PageRow, exceptUserId: string, claimedBy: string): Promise<void> {
-  const recipients = [...(await notifiedUserIds(page.id))].filter((id) => id !== exceptUserId);
-  const targets = await devicesOf(recipients);
+/**
+ * Replaces the ringing alert on `userIds`' phones with a quiet "Claimed by"
+ * (or "Resolved by") notice: same collapse ID, no sound, passive. It also
+ * carries the silent `page.claimed` command for the app.
+ */
+async function sendClaimed(
+  page: PageRow,
+  userIds: string[],
+  claimedBy: string,
+  status: string,
+): Promise<void> {
+  const targets = await devicesOf(userIds);
   if (targets.length === 0) return;
   const result = await sendPushMessages(
     buildPageClaimedPushMessages(
       targets.map((target) => target.token),
       page.id,
       claimedBy,
+      {
+        title: page.title,
+        body: `${status === "resolved" ? "Resolved" : "Claimed"} by ${claimedBy}`,
+      },
     ),
   );
   await deactivateStale(result.staleTokens);
+}
+
+async function othersOnPage(pageId: string, exceptUserId: string): Promise<string[]> {
+  return [...(await notifiedUserIds(pageId))].filter((id) => id !== exceptUserId);
 }
 
 async function userName(userId: string): Promise<string> {
@@ -1043,9 +1342,13 @@ export async function acknowledgePage(page: PageRow, userId: string): Promise<Pa
     return { ok: false, status: 409, error: `Page is already ${current.status}`, page: current };
   }
   await stopRinging(updated.id);
-  void sendClaimed(updated, userId, await userName(userId)).catch((error: unknown) => {
-    console.error("[oncall] Could not send page.claimed", error);
-  });
+  await recordEvent(updated.id, "acknowledged", [userId]);
+  const name = await userName(userId);
+  void othersOnPage(updated.id, userId)
+    .then((others) => sendClaimed(updated, others, name, "acknowledged"))
+    .catch((error: unknown) => {
+      console.error("[oncall] Could not send page.claimed", error);
+    });
   return { ok: true, page: updated };
 }
 
@@ -1072,11 +1375,15 @@ export async function resolvePage(
     return { ok: false, status: 409, error: "Page is already resolved", page: latest ?? page };
   }
   await stopRinging(updated.id);
+  await recordEvent(updated.id, "resolved", [userId]);
   // An unacknowledged page is still ringing on phones; clear it.
   if (page.status === "triggered") {
-    void sendClaimed(updated, userId, await userName(userId)).catch((error: unknown) => {
-      console.error("[oncall] Could not send page.claimed", error);
-    });
+    const name = await userName(userId);
+    void othersOnPage(updated.id, userId)
+      .then((others) => sendClaimed(updated, others, name, "resolved"))
+      .catch((error: unknown) => {
+        console.error("[oncall] Could not send page.claimed", error);
+      });
   }
   return { ok: true, page: updated };
 }

@@ -16,6 +16,7 @@ import { oncallGroup, oncallOverride, oncallPage, team, teamMember } from "../db
 import { newId } from "../lib/id";
 import {
   acknowledgePage,
+  checkEscalation,
   checkRotation,
   claimPageResponseToken,
   escalatePage,
@@ -78,6 +79,10 @@ async function updateGroup(actor: Actor, groupId: string, input: unknown): Promi
     if (!rotation.ok) return failure(400, rotation.error);
     rotationValues = rotation.values;
   }
+  if (parsed.data.escalation) {
+    const invalid = await checkEscalation(found.group.teamId, parsed.data.escalation, groupId);
+    if (invalid) return failure(400, invalid);
+  }
   const [updated] = await db
     .update(oncallGroup)
     .set({
@@ -89,6 +94,15 @@ async function updateGroup(actor: Actor, groupId: string, input: unknown): Promi
         : {}),
       ...(parsed.data.ringMaxRepeats !== undefined
         ? { ringMaxRepeats: parsed.data.ringMaxRepeats }
+        : {}),
+      ...(parsed.data.escalationMode !== undefined
+        ? { escalationMode: parsed.data.escalationMode }
+        : {}),
+      ...(parsed.data.escalationLoops !== undefined
+        ? { escalationLoops: parsed.data.escalationLoops }
+        : {}),
+      ...(parsed.data.escalationFinal !== undefined
+        ? { escalationFinal: parsed.data.escalationFinal }
         : {}),
       updatedAt: new Date(),
     })
@@ -330,7 +344,7 @@ export const pagesSessionRoute = new Hono<AuthedEnv>()
     const actor = sessionActor(c);
     const page = await memberPage(c.req.param("id"), actor.id);
     if (!page) return send(c, PAGE_NOT_FOUND);
-    const outcome = await escalatePage(page.id, true);
+    const outcome = await escalatePage(page.id, true, actor.id);
     if (!outcome.ok) {
       return c.json(
         {
@@ -379,7 +393,7 @@ export const pageResponsesRoute = new Hono()
     if (found.usedAt || !(await claimPageResponseToken(found.page.id, found.userId))) {
       return spentCredential(c, found.page);
     }
-    const outcome = await escalatePage(found.page.id, true);
+    const outcome = await escalatePage(found.page.id, true, found.userId);
     if (!outcome.ok) {
       await releasePageResponseToken(found.page.id, found.userId);
       return c.json(

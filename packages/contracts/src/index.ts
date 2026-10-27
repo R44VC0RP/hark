@@ -1613,7 +1613,21 @@ export const API_ERROR_CODE_SEAT_LIMIT = "seat_limit" as const;
 
 export const ONCALL_ROTATION_PERIODS = ["daily", "weekly"] as const;
 export const oncallRotationPeriodSchema = z.enum(ONCALL_ROTATION_PERIODS);
-export const ONCALL_ESCALATION_TARGETS = ["next", "group"] as const;
+/**
+ * Who an escalation level pages:
+ * - `next`: the next person in the group's rotation;
+ * - `oncall`: whoever is on call now in this group, or in `groupId`;
+ * - `people`: the people in `userIds`, all at once;
+ * - `group`: every member of the group;
+ * - `team`: every member of the team.
+ */
+export const ONCALL_ESCALATION_TARGETS = ["next", "oncall", "people", "group", "team"] as const;
+/** `fan_out`: earlier levels keep ringing. `hand_off`: a new level silences earlier ones. */
+export const ONCALL_ESCALATION_MODES = ["fan_out", "hand_off"] as const;
+/** Paged once after the last level (and any loops): nobody more, the group, or the team. */
+export const ONCALL_ESCALATION_FINALS = ["none", "group", "team"] as const;
+export const MAX_ESCALATION_LOOPS = 3 as const;
+export const MAX_ESCALATION_PEOPLE = 20 as const;
 export const MAX_ONCALL_GROUPS_PER_TEAM = 50 as const;
 /** Active (not yet ended) overrides per on-call group, and per member within it. */
 export const MAX_ACTIVE_OVERRIDES_PER_GROUP = 100 as const;
@@ -1636,12 +1650,30 @@ export const oncallRingMaxRepeatsSchema = z
   .min(0)
   .max(ONCALL_RING_MAX_REPEATS_LIMIT);
 
-export const oncallEscalationStepSchema = z.strictObject({
-  /** Minutes after the previous step (or the page) with no acknowledgement. */
-  afterMinutes: z.number().int().min(1).max(1440),
-  /** `next`: the next person in the rotation. `group`: every member of the group. */
-  target: z.enum(ONCALL_ESCALATION_TARGETS),
-});
+export const oncallEscalationStepSchema = z
+  .strictObject({
+    /**
+     * Minutes the previous level (or the first page) has to acknowledge
+     * before this level starts ringing: the previous level's ack timeout.
+     */
+    afterMinutes: z.number().int().min(1).max(1440),
+    target: z.enum(ONCALL_ESCALATION_TARGETS),
+    /** For `people`: who to page at once. Every ID must be a team member. */
+    userIds: z.array(z.string().min(1).max(100)).min(1).max(MAX_ESCALATION_PEOPLE).optional(),
+    /** For `oncall`: another on-call group in the same team (defaults to this group). */
+    groupId: oncallGroupIdSchema.optional(),
+  })
+  .superRefine((step, context) => {
+    if (step.target === "people" && !step.userIds) {
+      context.addIssue({ code: "custom", path: ["userIds"], message: "people needs userIds" });
+    }
+    if (step.target !== "people" && step.userIds) {
+      context.addIssue({ code: "custom", path: ["userIds"], message: "Only people takes userIds" });
+    }
+    if (step.target !== "oncall" && step.groupId) {
+      context.addIssue({ code: "custom", path: ["groupId"], message: "Only oncall takes groupId" });
+    }
+  });
 export type OncallEscalationStep = z.infer<typeof oncallEscalationStepSchema>;
 
 export const oncallRotationSchema = z.strictObject({
@@ -1675,6 +1707,16 @@ export const oncallGroupCreateSchema = z.strictObject({
   ringIntervalSeconds: oncallRingIntervalSchema.default(ONCALL_RING_INTERVAL_DEFAULT_SECONDS),
   /** Repeat alerts per person after the first (0–30, default 10); 0 alerts once. */
   ringMaxRepeats: oncallRingMaxRepeatsSchema.default(ONCALL_RING_MAX_REPEATS_DEFAULT),
+  /** `fan_out` (default) keeps earlier levels ringing; `hand_off` silences them. */
+  escalationMode: z.enum(ONCALL_ESCALATION_MODES).default("fan_out"),
+  /**
+   * Times to run the whole policy again after the last level (0–3). Each
+   * loop restarts at whoever is on call; the last level waits as long as the
+   * first before a loop starts.
+   */
+  escalationLoops: z.number().int().min(0).max(MAX_ESCALATION_LOOPS).default(0),
+  /** Who to page after the last level and loops (default `none`). */
+  escalationFinal: z.enum(ONCALL_ESCALATION_FINALS).default("none"),
 });
 /** Request body; the escalation and ringing fields fall back to their defaults. */
 export type OncallGroupCreateInput = z.input<typeof oncallGroupCreateSchema>;
@@ -1686,6 +1728,9 @@ export const oncallGroupUpdateSchema = z
     escalation: z.array(oncallEscalationStepSchema).max(MAX_ESCALATION_STEPS).optional(),
     ringIntervalSeconds: oncallRingIntervalSchema.optional(),
     ringMaxRepeats: oncallRingMaxRepeatsSchema.optional(),
+    escalationMode: z.enum(ONCALL_ESCALATION_MODES).optional(),
+    escalationLoops: z.number().int().min(0).max(MAX_ESCALATION_LOOPS).optional(),
+    escalationFinal: z.enum(ONCALL_ESCALATION_FINALS).optional(),
   })
   .refine((input) => Object.keys(input).length > 0, "At least one field is required");
 export type OncallGroupUpdateInput = z.infer<typeof oncallGroupUpdateSchema>;
@@ -1738,6 +1783,10 @@ export interface OncallGroupDto {
   ringIntervalSeconds?: number;
   /** Repeat alerts per person after the first; absent on older servers. */
   ringMaxRepeats?: number;
+  /** Absent on older servers, which hand off on `next` and never loop. */
+  escalationMode?: (typeof ONCALL_ESCALATION_MODES)[number];
+  escalationLoops?: number;
+  escalationFinal?: (typeof ONCALL_ESCALATION_FINALS)[number];
   current: OncallShiftDto | null;
   /** The next few shifts, current first. */
   upcoming: OncallShiftDto[];
@@ -1783,6 +1832,8 @@ export interface OncallPageDto {
    * absent on older servers.
    */
   ringing?: OncallRingingDto[];
+  /** Who was paged and when, and who claimed or resolved it; absent on older servers. */
+  timeline?: OncallPageEventDto[];
   escalationStep: number;
   nextEscalationAt: string | null;
   acknowledgedBy: OncallPersonDto | null;
@@ -1792,6 +1843,21 @@ export interface OncallPageDto {
   /** Service or token name that raised the page. */
   source: string;
   createdAt: string;
+}
+
+export const ONCALL_PAGE_EVENT_KINDS = ["paged", "acknowledged", "resolved"] as const;
+
+export interface OncallPageEventDto {
+  at: string;
+  kind: (typeof ONCALL_PAGE_EVENT_KINDS)[number];
+  /** Escalation level paged (0 = whoever was on call first); null for other kinds. */
+  level: number | null;
+  /** Policy loop (0 = first pass); null for other kinds. */
+  loop: number | null;
+  /** People paged; for `acknowledged` / `resolved`, the person who did it. */
+  people: OncallPersonDto[];
+  /** Set when a person escalated by hand. */
+  escalatedBy: OncallPersonDto | null;
 }
 
 export interface OncallRingingDto {

@@ -26,7 +26,7 @@ import { app, oncallGroup, team, teamInvite, teamMember, user as userTable } fro
 import { env } from "../env";
 import { selectAppsWithJoins, toAppDto } from "../lib/apps";
 import { newId } from "../lib/id";
-import { checkRotation, listTeamPages, toGroupDto } from "../lib/oncall";
+import { checkEscalation, checkRotation, listTeamPages, toGroupDto } from "../lib/oncall";
 import {
   createTeamBillingPortal,
   createTeamCheckout,
@@ -482,6 +482,8 @@ async function createGroup(actor: Actor, teamId: string, input: unknown): Promis
   }
   const rotation = await checkRotation(teamId, parsed.data.rotation);
   if (!rotation.ok) return failure(400, rotation.error);
+  const invalidEscalation = await checkEscalation(teamId, parsed.data.escalation);
+  if (invalidEscalation) return failure(400, invalidEscalation);
   const now = new Date();
   const [group] = await db
     .insert(oncallGroup)
@@ -493,6 +495,9 @@ async function createGroup(actor: Actor, teamId: string, input: unknown): Promis
       escalation: parsed.data.escalation,
       ringIntervalSeconds: parsed.data.ringIntervalSeconds,
       ringMaxRepeats: parsed.data.ringMaxRepeats,
+      escalationMode: parsed.data.escalationMode,
+      escalationLoops: parsed.data.escalationLoops,
+      escalationFinal: parsed.data.escalationFinal,
       createdAt: now,
       updatedAt: now,
     })

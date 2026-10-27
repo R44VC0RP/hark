@@ -260,14 +260,32 @@ export function buildPagePushMessages(input: BuildPagePushInput): ExpoPushMessag
   );
 }
 
-/** Silent command that clears a page from other devices once it is claimed. */
+/**
+ * Clears a page from devices once someone claims it. With `notice`, the push
+ * also replaces the ringing alert (same collapse ID) with a quiet, passive
+ * "Claimed by <name>" notification instead of just withdrawing it.
+ */
 export function buildPageClaimedPushMessages(
   to: string[],
   pageId: string,
   claimedBy: string,
+  notice?: { title: string; body: string },
 ): ExpoPushMessage[] {
   const data: PushData = { v: PUSH_SCHEMA_VERSION, command: "page.claimed", pageId, claimedBy };
-  return to.map((token) => ({ to: token, data, _contentAvailable: true }));
+  return to.map((token) => ({
+    to: token,
+    data,
+    _contentAvailable: true,
+    ...(notice
+      ? {
+          title: notice.title,
+          body: notice.body,
+          sound: null,
+          interruptionLevel: "passive" as const,
+          collapseId: pageCollapseId(pageId),
+        }
+      : {}),
+  }));
 }
 
 let expoClient: Expo | undefined;

@@ -16,7 +16,10 @@ import {
   liveActivityEndSchema,
   liveActivityStartSchema,
   liveActivityUpdateSchema,
+  ONCALL_ESCALATION_FINALS,
+  ONCALL_ESCALATION_MODES,
   ONCALL_ESCALATION_TARGETS,
+  ONCALL_PAGE_EVENT_KINDS,
   ONCALL_PAGE_STATUSES,
   ONCALL_ROTATION_PERIODS,
   oncallGroupCreateSchema,
@@ -397,8 +400,28 @@ const schemas: Record<string, JsonSchema> = {
         startsAt: dateTime,
       }),
       escalation: arrayOf(
-        object({ afterMinutes: int, target: { enum: [...ONCALL_ESCALATION_TARGETS] } }),
+        object(
+          {
+            afterMinutes: {
+              ...int,
+              description: "The previous level's ack timeout before this level starts ringing.",
+            },
+            target: { enum: [...ONCALL_ESCALATION_TARGETS] },
+            userIds: { ...arrayOf(str), description: "For `people`: paged at once." },
+            groupId: { ...str, description: "For `oncall`: another group in the team." },
+          },
+          ["userIds", "groupId"],
+        ),
       ),
+      escalationMode: {
+        enum: [...ONCALL_ESCALATION_MODES],
+        description: "`fan_out` keeps earlier levels ringing; `hand_off` silences them.",
+      },
+      escalationLoops: { ...int, description: "Times the policy runs again after its last level." },
+      escalationFinal: {
+        enum: [...ONCALL_ESCALATION_FINALS],
+        description: "Paged once after the last level and loops.",
+      },
       ringIntervalSeconds: {
         ...int,
         description: "Seconds between repeat alerts while a page is unacknowledged.",
@@ -431,6 +454,19 @@ const schemas: Record<string, JsonSchema> = {
     ringing: {
       ...arrayOf(object({ person: ref("OncallPerson"), ringCount: int, nextRingAt: dateTime })),
       description: "People still being re-alerted; empty once acknowledged or resolved.",
+    },
+    timeline: {
+      ...arrayOf(
+        object({
+          at: dateTime,
+          kind: { enum: [...ONCALL_PAGE_EVENT_KINDS] },
+          level: { type: ["integer", "null"] },
+          loop: { type: ["integer", "null"] },
+          people: arrayOf(ref("OncallPerson")),
+          escalatedBy: { anyOf: [ref("OncallPerson"), { type: "null" }] },
+        }),
+      ),
+      description: "Who was paged at each level and when, and who claimed or resolved it.",
     },
     escalationStep: int,
     nextEscalationAt: nullableDateTime,

@@ -445,8 +445,21 @@ export const oncallGroup = sqliteTable(
     /** First handoff, normalized to `handoffAt` in `timezone`. */
     startsAt: integer("starts_at", { mode: "timestamp_ms" }).notNull(),
     escalation: text("escalation", { mode: "json" })
-      .$type<Array<{ afterMinutes: number; target: "next" | "group" }>>()
+      .$type<
+        Array<{
+          afterMinutes: number;
+          target: "next" | "oncall" | "people" | "group" | "team";
+          userIds?: string[];
+          groupId?: string;
+        }>
+      >()
       .notNull(),
+    /** `fan_out`: earlier levels keep ringing; `hand_off`: a new level silences them. */
+    escalationMode: text("escalation_mode").notNull().default("fan_out"),
+    /** Times the policy runs again after its last level. */
+    escalationLoops: integer("escalation_loops").notNull().default(0),
+    /** `none`, `group`, or `team`: paged once after the last level and loops. */
+    escalationFinal: text("escalation_final").notNull().default("none"),
     /** Seconds between repeat alerts while a page is unacknowledged. */
     ringIntervalSeconds: integer("ring_interval_seconds").notNull().default(60),
     /** Repeat alerts per person after the first; 0 alerts once. */
@@ -562,6 +575,26 @@ export const oncallPageRecipient = sqliteTable(
     index("oncall_page_recipient_user_idx").on(table.userId, table.notifiedAt),
     index("oncall_page_recipient_ring_idx").on(table.nextRingAt),
   ],
+);
+
+/** Page timeline: who was paged at which level, and who claimed or resolved it. */
+export const oncallPageEvent = sqliteTable(
+  "oncall_page_event",
+  {
+    id: text("id").primaryKey(),
+    pageId: text("page_id")
+      .notNull()
+      .references(() => oncallPage.id, { onDelete: "cascade" }),
+    /** `paged`, `acknowledged`, or `resolved`. */
+    kind: text("kind").notNull(),
+    level: integer("level"),
+    loop: integer("loop"),
+    userIds: text("user_ids", { mode: "json" }).$type<string[]>().notNull(),
+    /** Person who escalated by hand; null for scheduled escalations. */
+    actorUserId: text("actor_user_id").references(() => user.id, { onDelete: "set null" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("oncall_page_event_page_idx").on(table.pageId, table.createdAt)],
 );
 
 /** A person's own paging preferences, shared by every group they are in. */

@@ -376,11 +376,12 @@ describe("ringing", () => {
     expect(sent.filter((message) => message.categoryId === "HARK_PAGE_V1")).toHaveLength(0);
   });
 
-  it("hands ringing to the next person on escalation and stops after the last repeat", async () => {
+  it("hands ringing to the next person in hand-off groups and stops after the last repeat", async () => {
     const group = await createGroup("Handoff", [{ afterMinutes: 5, target: "next" }]);
     const patched = await call("PATCH", `/api/oncall/${group.id}`, {
       ringIntervalSeconds: 30,
       ringMaxRepeats: 2,
+      escalationMode: "hand_off",
     });
     expect(((await patched.json()) as { group: OncallGroupDto }).group).toMatchObject({
       ringIntervalSeconds: 30,
@@ -463,6 +464,172 @@ describe("ringing", () => {
       deviceId: "dev_user_a",
       criticalAlerts: "unavailable",
     });
+  });
+});
+
+describe("escalation policy", () => {
+  it("rejects levels that name people or groups outside the team", async () => {
+    as("user_a");
+    const base = {
+      name: "Invalid",
+      rotation: { memberIds: ["user_a"], period: "daily", handoffAt: "09:00", timezone: "UTC" },
+    };
+    const outsider = await call("POST", `/api/teams/${TEAM_ID}/oncall`, {
+      ...base,
+      escalation: [{ afterMinutes: 5, target: "people", userIds: ["user_x"] }],
+    });
+    expect(outsider.status).toBe(400);
+    const missing = await call("POST", `/api/teams/${TEAM_ID}/oncall`, {
+      ...base,
+      escalation: [{ afterMinutes: 5, target: "people" }],
+    });
+    expect(missing.status).toBe(400);
+    const foreignGroup = await call("POST", `/api/teams/${TEAM_ID}/oncall`, {
+      ...base,
+      escalation: [{ afterMinutes: 5, target: "oncall", groupId: "ocg_doesnotexist01" }],
+    });
+    expect(foreignGroup.status).toBe(400);
+  });
+
+  it("pages each level in turn, keeps earlier levels ringing, loops, then pages the team", async () => {
+    const group = await createGroup("Fan-out", [
+      { afterMinutes: 5, target: "next" },
+      { afterMinutes: 5, target: "people", userIds: ["user_c"] },
+    ]);
+    expect(group.escalationMode).toBe("fan_out");
+    const patched = await call("PATCH", `/api/oncall/${group.id}`, {
+      escalationLoops: 1,
+      escalationFinal: "team",
+    });
+    expect(((await patched.json()) as { group: OncallGroupDto }).group).toMatchObject({
+      escalationLoops: 1,
+      escalationFinal: "team",
+    });
+    const created = (await (
+      await page(group.id, { title: "Checkout 500s" })
+    ).json()) as OncallPageCreateResponse;
+    expect(created.page.notified.map((person) => person.userId)).toEqual(["user_a"]);
+
+    sent.length = 0;
+    await runDueEscalation(created.page.id);
+    expect(pushesTo("user_b")).toHaveLength(1);
+    await runDueEscalation(created.page.id);
+    expect(pushesTo("user_c")).toHaveLength(1);
+    // Fan-out: every level so far is still ringing.
+    expect(
+      (await pageDetail(created.page.id)).ringing?.map((ring) => ring.person.userId).sort(),
+    ).toEqual(["user_a", "user_b", "user_c"]);
+
+    // Let ringing run out so the loop has to page everyone again.
+    const { eq } = await import("drizzle-orm");
+    await db
+      .update(schema.oncallPageRecipient)
+      .set({ nextRingAt: null })
+      .where(eq(schema.oncallPageRecipient.pageId, created.page.id));
+    sent.length = 0;
+    await runDueEscalation(created.page.id); // loop 1, level 0: whoever is on call
+    expect(sent.map((message) => message.to)).toEqual(["ExponentPushToken[user_a]"]);
+    await runDueEscalation(created.page.id); // loop 1, level 1: next in rotation
+    await runDueEscalation(created.page.id); // loop 1, level 2: user_c
+    expect(sent.map((message) => message.to)).toEqual([
+      "ExponentPushToken[user_a]",
+      "ExponentPushToken[user_b]",
+      "ExponentPushToken[user_c]",
+    ]);
+    await db
+      .update(schema.oncallPageRecipient)
+      .set({ nextRingAt: null })
+      .where(eq(schema.oncallPageRecipient.pageId, created.page.id));
+    sent.length = 0;
+    await runDueEscalation(created.page.id); // final: the whole team
+    expect(sent).toHaveLength(3);
+
+    const done = await pageDetail(created.page.id);
+    expect(done.nextEscalationAt).toBeNull();
+    expect(
+      done.timeline
+        ?.filter((event) => event.kind === "paged")
+        .map((event) => [event.level, event.loop]),
+    ).toEqual([
+      [0, 0],
+      [1, 0],
+      [2, 0],
+      [0, 1],
+      [1, 1],
+      [2, 1],
+      [3, 1],
+    ]);
+    sent.length = 0;
+    await runDueEscalation(created.page.id);
+    expect(sent).toHaveLength(0);
+    expect((await call("POST", `/api/pages/${created.page.id}/resolve`, {})).status).toBe(200);
+  });
+
+  it("lets exactly one simultaneous acknowledgement claim the page and quietly tells everyone else", async () => {
+    const group = await createGroup("Claim", [{ afterMinutes: 5, target: "group" }]);
+    const created = (await (
+      await page(group.id, { title: "Disk 95%" })
+    ).json()) as OncallPageCreateResponse;
+    await runDueEscalation(created.page.id);
+    const bToken = responseTokenFor("user_b");
+    const cToken = responseTokenFor("user_c");
+    sent.length = 0;
+    const [bAck, cAck] = await Promise.all([
+      call("POST", `/api/page-responses/${created.page.id}/acknowledge`, { responseToken: bToken }),
+      call("POST", `/api/page-responses/${created.page.id}/acknowledge`, { responseToken: cToken }),
+    ]);
+    expect([bAck.status, cAck.status].sort()).toEqual([200, 409]);
+    const winner = bAck.status === 200 ? "user_b" : "user_c";
+    const winnerName = winner === "user_b" ? "Ben" : "Cal";
+    await settle();
+
+    const detail = await pageDetail(created.page.id);
+    expect(detail).toMatchObject({ status: "acknowledged", acknowledgedBy: { userId: winner } });
+    expect(detail.ringing).toEqual([]);
+    expect(detail.timeline?.at(-1)).toMatchObject({
+      kind: "acknowledged",
+      people: [{ userId: winner }],
+    });
+    // Everyone else's ringing alert is replaced by a quiet notice; nobody is paged again.
+    const notices = sent.filter((message) => message.to !== `ExponentPushToken[${winner}]`);
+    expect(notices).toHaveLength(2);
+    for (const notice of notices) {
+      expect(notice).toMatchObject({
+        body: `Claimed by ${winnerName}`,
+        interruptionLevel: "passive",
+        sound: null,
+        collapseId: `hark-page-${created.page.id}`,
+        data: { command: "page.claimed", pageId: created.page.id },
+      });
+    }
+    expect(sent.filter((message) => message.categoryId === "HARK_PAGE_V1")).toHaveLength(0);
+    expect((await call("POST", `/api/pages/${created.page.id}/resolve`, {})).status).toBe(200);
+  });
+
+  it("jumps to the next level when a person escalates and records who did", async () => {
+    const group = await createGroup("Jump", [
+      { afterMinutes: 30, target: "next" },
+      { afterMinutes: 30, target: "people", userIds: ["user_c"] },
+    ]);
+    const created = (await (
+      await page(group.id, { title: "Latency" })
+    ).json()) as OncallPageCreateResponse;
+    sent.length = 0;
+    as("user_c");
+    const escalated = await call("POST", `/api/pages/${created.page.id}/escalate`);
+    expect(escalated.status).toBe(200);
+    expect(pushesTo("user_b")).toHaveLength(1);
+    const detail = await pageDetail(created.page.id);
+    expect(detail.escalationStep).toBe(1);
+    expect(Date.parse(detail.nextEscalationAt ?? "") - Date.now()).toBeGreaterThan(29 * 60_000);
+    expect(detail.timeline?.at(-1)).toMatchObject({
+      kind: "paged",
+      level: 1,
+      people: [{ userId: "user_b" }],
+      escalatedBy: { userId: "user_c" },
+    });
+    as("user_a");
+    expect((await call("POST", `/api/pages/${created.page.id}/resolve`, {})).status).toBe(200);
   });
 });
 
