@@ -491,6 +491,8 @@ async function createGroup(actor: Actor, teamId: string, input: unknown): Promis
       name: parsed.data.name,
       ...rotation.values,
       escalation: parsed.data.escalation,
+      ringIntervalSeconds: parsed.data.ringIntervalSeconds,
+      ringMaxRepeats: parsed.data.ringMaxRepeats,
       createdAt: now,
       updatedAt: now,
     })

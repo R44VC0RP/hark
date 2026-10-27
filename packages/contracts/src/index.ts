@@ -423,6 +423,19 @@ const expoPushTokenSchema = z
   .max(400)
   .regex(/^(?:ExponentPushToken|ExpoPushToken)\[[A-Za-z0-9_-]+\]$/, "Must be an Expo push token");
 
+/**
+ * Critical Alerts permission as the app reports it. `unavailable` means the
+ * build has no Critical Alerts entitlement (or the feature flag is off).
+ */
+export const CRITICAL_ALERT_STATES = [
+  "authorized",
+  "denied",
+  "notDetermined",
+  "unavailable",
+] as const;
+export const criticalAlertStateSchema = z.enum(CRITICAL_ALERT_STATES);
+export type CriticalAlertState = z.infer<typeof criticalAlertStateSchema>;
+
 export const deviceRegisterSchema = z.object({
   expoPushToken: expoPushTokenSchema,
   apnsToken: z.string().min(1).max(400).optional(),
@@ -430,6 +443,8 @@ export const deviceRegisterSchema = z.object({
   deviceName: z.string().trim().max(80).optional(),
   interactionSchemaVersion: z.literal(1).optional(),
   liveActivityInteractionVersion: z.literal(1).optional(),
+  /** Critical Alerts permission; omitted by builds that predate it. */
+  criticalAlerts: criticalAlertStateSchema.optional(),
 });
 export type DeviceRegisterInput = z.infer<typeof deviceRegisterSchema>;
 
@@ -437,6 +452,13 @@ export const deviceUnregisterSchema = z.object({
   expoPushToken: z.string().min(1).max(400),
 });
 export type DeviceUnregisterInput = z.infer<typeof deviceUnregisterSchema>;
+
+/** The app reports permission changes (e.g. after the Critical Alerts prompt). */
+export const deviceAlertSettingsSchema = z.strictObject({
+  deviceId: z.string().min(1).max(100),
+  criticalAlerts: criticalAlertStateSchema,
+});
+export type DeviceAlertSettingsInput = z.infer<typeof deviceAlertSettingsSchema>;
 
 // ---------------------------------------------------------------------------
 // Product analytics
@@ -512,6 +534,8 @@ export interface DeviceDto {
   liveActivityTokenEnvironment: "sandbox" | "production" | null;
   liveActivityTokenUpdatedAt: string | null;
   interactiveLiveActivitiesCapable: boolean;
+  /** Critical Alerts permission last reported by the app; null when unknown. */
+  criticalAlerts?: CriticalAlertState | null;
   createdAt: string;
   lastSeenAt: string;
 }
@@ -1050,6 +1074,11 @@ export const HARK_YES_NO_CATEGORY_ID = "HARK_YES_NO_V1" as const;
 export const HARK_PAGE_CATEGORY_ID = "HARK_PAGE_V1" as const;
 export const HARK_ACKNOWLEDGE_ACTION_ID = "HARK_ACKNOWLEDGE" as const;
 export const HARK_ESCALATE_ACTION_ID = "HARK_ESCALATE" as const;
+/**
+ * Alarm sound bundled in the iOS app for on-call pages. Builds without the
+ * file fall back to the default sound, so the name is safe to send to any build.
+ */
+export const HARK_PAGE_SOUND = "hark-page.caf" as const;
 export const HARK_APPROVE_ACTION_ID = "HARK_APPROVE" as const;
 export const HARK_DENY_ACTION_ID = "HARK_DENY" as const;
 export const HARK_REPLY_ACTION_ID = "HARK_REPLY" as const;
@@ -1590,6 +1619,22 @@ export const MAX_ONCALL_GROUPS_PER_TEAM = 50 as const;
 export const MAX_ACTIVE_OVERRIDES_PER_GROUP = 100 as const;
 export const MAX_ACTIVE_OVERRIDES_PER_MEMBER = 20 as const;
 export const MAX_ESCALATION_STEPS = 5 as const;
+/** Repeat alerts ("ring until acknowledged") while a page is unacknowledged. */
+export const ONCALL_RING_INTERVAL_MIN_SECONDS = 30 as const;
+export const ONCALL_RING_INTERVAL_MAX_SECONDS = 300 as const;
+export const ONCALL_RING_INTERVAL_DEFAULT_SECONDS = 60 as const;
+export const ONCALL_RING_MAX_REPEATS_LIMIT = 30 as const;
+export const ONCALL_RING_MAX_REPEATS_DEFAULT = 10 as const;
+export const oncallRingIntervalSchema = z
+  .number()
+  .int()
+  .min(ONCALL_RING_INTERVAL_MIN_SECONDS)
+  .max(ONCALL_RING_INTERVAL_MAX_SECONDS);
+export const oncallRingMaxRepeatsSchema = z
+  .number()
+  .int()
+  .min(0)
+  .max(ONCALL_RING_MAX_REPEATS_LIMIT);
 
 export const oncallEscalationStepSchema = z.strictObject({
   /** Minutes after the previous step (or the page) with no acknowledgement. */
@@ -1626,14 +1671,21 @@ export const oncallGroupCreateSchema = z.strictObject({
       { afterMinutes: 5, target: "next" },
       { afterMinutes: 10, target: "group" },
     ]),
+  /** Seconds between repeat alerts to whoever is being paged (30–300, default 60). */
+  ringIntervalSeconds: oncallRingIntervalSchema.default(ONCALL_RING_INTERVAL_DEFAULT_SECONDS),
+  /** Repeat alerts per person after the first (0–30, default 10); 0 alerts once. */
+  ringMaxRepeats: oncallRingMaxRepeatsSchema.default(ONCALL_RING_MAX_REPEATS_DEFAULT),
 });
-export type OncallGroupCreateInput = z.infer<typeof oncallGroupCreateSchema>;
+/** Request body; the escalation and ringing fields fall back to their defaults. */
+export type OncallGroupCreateInput = z.input<typeof oncallGroupCreateSchema>;
 
 export const oncallGroupUpdateSchema = z
   .strictObject({
     name: teamNameSchema.optional(),
     rotation: oncallRotationSchema.optional(),
     escalation: z.array(oncallEscalationStepSchema).max(MAX_ESCALATION_STEPS).optional(),
+    ringIntervalSeconds: oncallRingIntervalSchema.optional(),
+    ringMaxRepeats: oncallRingMaxRepeatsSchema.optional(),
   })
   .refine((input) => Object.keys(input).length > 0, "At least one field is required");
 export type OncallGroupUpdateInput = z.infer<typeof oncallGroupUpdateSchema>;
@@ -1682,6 +1734,10 @@ export interface OncallGroupDto {
     startsAt: string;
   };
   escalation: OncallEscalationStep[];
+  /** Seconds between repeat alerts; absent on older servers. */
+  ringIntervalSeconds?: number;
+  /** Repeat alerts per person after the first; absent on older servers. */
+  ringMaxRepeats?: number;
   current: OncallShiftDto | null;
   /** The next few shifts, current first. */
   upcoming: OncallShiftDto[];
@@ -1721,6 +1777,12 @@ export interface OncallPageDto {
   repeatCount: number;
   /** People notified so far, in order. */
   notified: OncallPersonDto[];
+  /**
+   * People whose phones are still being re-alerted, with the repeats sent so
+   * far and when the next one goes out. Empty once acknowledged or resolved;
+   * absent on older servers.
+   */
+  ringing?: OncallRingingDto[];
   escalationStep: number;
   nextEscalationAt: string | null;
   acknowledgedBy: OncallPersonDto | null;
@@ -1730,6 +1792,12 @@ export interface OncallPageDto {
   /** Service or token name that raised the page. */
   source: string;
   createdAt: string;
+}
+
+export interface OncallRingingDto {
+  person: OncallPersonDto;
+  ringCount: number;
+  nextRingAt: string;
 }
 
 export interface OncallPageCreateResponse {
@@ -1743,6 +1811,32 @@ export interface OncallPageCreateResponse {
 export const oncallPageResolveSchema = z.strictObject({
   note: z.string().trim().max(500).optional(),
 });
+
+/** A person's own paging preferences; they apply in every group. */
+export interface OncallSettingsDto {
+  /** Repeat page alerts until someone acknowledges (default true). */
+  ringUntilAcknowledged: boolean;
+  /** Personal repeat interval in seconds; null uses each group's interval. */
+  ringIntervalSeconds: number | null;
+  /**
+   * Best Critical Alerts state across the person's active iPhones:
+   * `authorized` when any device allows them, null when no device reported.
+   */
+  criticalAlerts: CriticalAlertState | null;
+  devices: Array<{
+    id: string;
+    deviceName: string | null;
+    criticalAlerts: CriticalAlertState | null;
+  }>;
+}
+
+export const oncallSettingsUpdateSchema = z
+  .strictObject({
+    ringUntilAcknowledged: z.boolean().optional(),
+    ringIntervalSeconds: oncallRingIntervalSchema.nullable().optional(),
+  })
+  .refine((input) => Object.keys(input).length > 0, "At least one field is required");
+export type OncallSettingsUpdateInput = z.infer<typeof oncallSettingsUpdateSchema>;
 
 // ---------------------------------------------------------------------------
 // Project inbox (session-authenticated mobile API)
@@ -1941,6 +2035,8 @@ export const oncallPagePushDataSchema = z.object({
     .optional(),
   url: tapDestinationUrlSchema.optional(),
   appId: z.string().optional(),
+  /** Repeat alert number; 0 or absent for the first alert. */
+  ring: z.number().int().min(0).optional(),
 });
 /** Silent command clearing a page from devices once someone acknowledges it. */
 export const oncallPageClaimedPushDataSchema = z.object({

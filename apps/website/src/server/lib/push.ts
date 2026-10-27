@@ -1,6 +1,7 @@
 import {
   HARK_APPROVAL_CATEGORY_ID,
   HARK_PAGE_CATEGORY_ID,
+  HARK_PAGE_SOUND,
   HARK_REPLY_CATEGORY_ID,
   HARK_YES_NO_CATEGORY_ID,
   type InteractionKind,
@@ -192,19 +193,41 @@ export function buildInteractionPushMessages(input: BuildInteractionPushInput): 
   );
 }
 
+export interface PageTarget {
+  token: string;
+  /** The device reported that its user allowed Critical Alerts. */
+  critical: boolean;
+}
+
 export interface BuildPagePushInput {
-  to: string[];
+  to: PageTarget[];
   pageId: string;
   teamId: string;
   groupName: string;
   title: string;
   body: string;
-  responseToken: string;
+  responseToken?: string;
   url?: string;
   appId?: string;
+  /** Repeat alert number; 0 for the first alert. */
+  ring?: number;
 }
 
-/** An on-call page: time-sensitive, with Acknowledge / Escalate actions. */
+/**
+ * APNs collapse ID shared by every alert for one page, so a repeat replaces
+ * the alert on screen instead of stacking. A replaced alert still plays its
+ * sound. Kept well under the 64-byte APNs limit.
+ */
+export function pageCollapseId(pageId: string): string {
+  return `hark-page-${pageId}`.slice(0, 64);
+}
+
+/**
+ * An on-call page, with Acknowledge / Escalate actions and the bundled alarm
+ * sound. Devices whose user allowed Critical Alerts get a critical alert at
+ * full volume, which plays through the silent switch and Focus; everyone else
+ * gets a time-sensitive alert, which breaks through Focus but not silent mode.
+ */
 export function buildPagePushMessages(input: BuildPagePushInput): ExpoPushMessage[] {
   const data: OncallPagePushData = {
     v: PUSH_SCHEMA_VERSION,
@@ -212,19 +235,25 @@ export function buildPagePushMessages(input: BuildPagePushInput): ExpoPushMessag
     teamId: input.teamId,
     groupName: input.groupName,
     categoryId: HARK_PAGE_CATEGORY_ID,
-    responseToken: input.responseToken,
+    ...(input.responseToken ? { responseToken: input.responseToken } : {}),
     ...(input.url ? { url: input.url } : {}),
     ...(input.appId ? { appId: input.appId } : {}),
+    ...(input.ring ? { ring: input.ring } : {}),
   };
-  return input.to.map((to) =>
+  return input.to.map((target) =>
     fitPushMessage({
-      to,
+      to: target.token,
       title: input.title,
       body: input.body,
       categoryId: HARK_PAGE_CATEGORY_ID,
       priority: "high",
-      sound: "default",
-      interruptionLevel: "time-sensitive",
+      ...(target.critical
+        ? {
+            sound: { critical: true, name: HARK_PAGE_SOUND, volume: 1 },
+            interruptionLevel: "critical" as const,
+          }
+        : { sound: HARK_PAGE_SOUND, interruptionLevel: "time-sensitive" as const }),
+      collapseId: pageCollapseId(input.pageId),
       mutableContent: true,
       data,
     }),

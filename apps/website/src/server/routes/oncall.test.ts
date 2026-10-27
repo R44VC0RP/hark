@@ -2,6 +2,7 @@ import type {
   OncallGroupDto,
   OncallPageCreateResponse,
   OncallPageDto,
+  OncallSettingsDto,
   OncallShiftDto,
 } from "@hark/contracts";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -303,6 +304,165 @@ describe("on-call groups", () => {
       })),
     );
     expect((await override("user_a", 30)).status).toBe(409);
+  });
+});
+
+/** Makes every ringing recipient of a page due now and runs the ring worker. */
+async function runDueRings(pageId: string) {
+  const { and, eq, isNotNull } = await import("drizzle-orm");
+  await db
+    .update(schema.oncallPageRecipient)
+    .set({ nextRingAt: new Date(Date.now() - 1000) })
+    .where(
+      and(
+        eq(schema.oncallPageRecipient.pageId, pageId),
+        isNotNull(schema.oncallPageRecipient.nextRingAt),
+      ),
+    );
+  await oncall.processDueRings();
+}
+
+async function pageDetail(pageId: string): Promise<OncallPageDto> {
+  return ((await (await call("GET", `/api/pages/${pageId}`)).json()) as { page: OncallPageDto })
+    .page;
+}
+
+describe("ringing", () => {
+  it("re-alerts the paged person with the alarm sound until someone acknowledges", async () => {
+    const group = await createGroup("Ringing", [{ afterMinutes: 30, target: "next" }]);
+    expect(group).toMatchObject({ ringIntervalSeconds: 60, ringMaxRepeats: 10 });
+    const created = (await (
+      await page(group.id, { title: "DB down" })
+    ).json()) as OncallPageCreateResponse;
+    expect(sent[0]).toMatchObject({
+      to: "ExponentPushToken[user_a]",
+      sound: "hark-page.caf",
+      interruptionLevel: "time-sensitive",
+      collapseId: `hark-page-${created.page.id}`,
+    });
+    expect(created.page.ringing).toMatchObject([{ person: { userId: "user_a" }, ringCount: 0 }]);
+    const firstToken = responseTokenFor("user_a");
+
+    sent.length = 0;
+    await runDueRings(created.page.id);
+    await runDueRings(created.page.id);
+    expect(pushesTo("user_a")).toHaveLength(2);
+    expect(sent).toHaveLength(2);
+    // Every repeat replaces the alert on screen and still plays the alarm.
+    expect(sent[1]).toMatchObject({
+      sound: "hark-page.caf",
+      collapseId: `hark-page-${created.page.id}`,
+      data: { pageId: created.page.id, ring: 2 },
+    });
+    // Each repeat rotates the credential; the one just replaced still works.
+    const latestToken = responseTokenFor("user_a");
+    expect(latestToken).not.toBe(firstToken);
+    expect(
+      (
+        await call("POST", `/api/page-responses/${created.page.id}/acknowledge`, {
+          responseToken: firstToken,
+        })
+      ).status,
+    ).toBe(404);
+    sent.length = 0;
+    const acked = await call("POST", `/api/page-responses/${created.page.id}/acknowledge`, {
+      responseToken: latestToken,
+    });
+    expect(await acked.json()).toEqual({ ok: true, status: "acknowledged" });
+    expect((await pageDetail(created.page.id)).ringing).toEqual([]);
+
+    await runDueRings(created.page.id);
+    await settle();
+    expect(sent.filter((message) => message.categoryId === "HARK_PAGE_V1")).toHaveLength(0);
+  });
+
+  it("hands ringing to the next person on escalation and stops after the last repeat", async () => {
+    const group = await createGroup("Handoff", [{ afterMinutes: 5, target: "next" }]);
+    const patched = await call("PATCH", `/api/oncall/${group.id}`, {
+      ringIntervalSeconds: 30,
+      ringMaxRepeats: 2,
+    });
+    expect(((await patched.json()) as { group: OncallGroupDto }).group).toMatchObject({
+      ringIntervalSeconds: 30,
+      ringMaxRepeats: 2,
+    });
+    expect(
+      (await call("PATCH", `/api/oncall/${group.id}`, { ringIntervalSeconds: 10 })).status,
+    ).toBe(400);
+
+    const created = (await (
+      await page(group.id, { title: "Queue stuck" })
+    ).json()) as OncallPageCreateResponse;
+    await runDueEscalation(created.page.id);
+    const escalated = await pageDetail(created.page.id);
+    expect(escalated.ringing?.map((ring) => ring.person.userId)).toEqual(["user_b"]);
+
+    sent.length = 0;
+    await runDueRings(created.page.id);
+    await runDueRings(created.page.id);
+    await runDueRings(created.page.id);
+    expect(pushesTo("user_a")).toHaveLength(0);
+    expect(pushesTo("user_b")).toHaveLength(2);
+    expect((await pageDetail(created.page.id)).ringing).toEqual([]);
+
+    expect((await call("POST", `/api/pages/${created.page.id}/resolve`, {})).status).toBe(200);
+  });
+
+  it("follows personal settings and sends critical alerts to devices that allow them", async () => {
+    const group = await createGroup("Critical", [{ afterMinutes: 30, target: "group" }]);
+    as("user_a");
+    expect(
+      (
+        await call("POST", "/api/devices/alert-settings", {
+          deviceId: "dev_user_a",
+          criticalAlerts: "authorized",
+        })
+      ).status,
+    ).toBe(200);
+    const settings = (await (await call("GET", "/api/oncall/settings")).json()) as {
+      settings: OncallSettingsDto;
+    };
+    expect(settings.settings).toMatchObject({
+      ringUntilAcknowledged: true,
+      ringIntervalSeconds: null,
+      criticalAlerts: "authorized",
+    });
+
+    sent.length = 0;
+    const created = (await (
+      await page(group.id, { title: "Payments failing" })
+    ).json()) as OncallPageCreateResponse;
+    expect(sent[0]).toMatchObject({
+      to: "ExponentPushToken[user_a]",
+      sound: { critical: true, name: "hark-page.caf", volume: 1 },
+      interruptionLevel: "critical",
+    });
+
+    // Turning ringing off silences the page that is ringing now, too.
+    const updated = await call(
+      "PATCH",
+      "/api/agent/oncall/settings",
+      { ringUntilAcknowledged: false },
+      WRITER,
+    );
+    expect(((await updated.json()) as { settings: OncallSettingsDto }).settings).toMatchObject({
+      ringUntilAcknowledged: false,
+    });
+    expect(
+      (await call("PATCH", "/api/agent/oncall/settings", { ringUntilAcknowledged: true }, READER))
+        .status,
+    ).toBe(403);
+    sent.length = 0;
+    await runDueRings(created.page.id);
+    expect(sent).toHaveLength(0);
+    expect((await pageDetail(created.page.id)).ringing).toEqual([]);
+
+    expect((await call("POST", `/api/pages/${created.page.id}/resolve`, {})).status).toBe(200);
+    await call("PATCH", "/api/oncall/settings", { ringUntilAcknowledged: true });
+    await call("POST", "/api/devices/alert-settings", {
+      deviceId: "dev_user_a",
+      criticalAlerts: "unavailable",
+    });
   });
 });
 

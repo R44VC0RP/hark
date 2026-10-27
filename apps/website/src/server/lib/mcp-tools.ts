@@ -527,6 +527,20 @@ export const MCP_TOOLS: McpToolSpec[] = [
     untrusted: true,
   },
   {
+    name: "oncall_settings_get",
+    title: "Your ringing settings",
+    operation: "GET /oncall/settings",
+    kind: "read",
+  },
+  {
+    name: "oncall_settings_update",
+    title: "Change your ringing settings",
+    operation: "PATCH /oncall/settings",
+    kind: "write",
+    guidance:
+      "Turning `ringUntilAcknowledged` off makes pages alert once instead of repeating, including pages ringing now. Change these only when the user asked.",
+  },
+  {
     name: "oncall_get",
     title: "Get an on-call group",
     operation: "GET /oncall/{groupId}",

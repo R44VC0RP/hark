@@ -6,6 +6,7 @@ import {
   oncallOverrideCreateSchema,
   oncallPageCreateSchema,
   oncallPageResolveSchema,
+  oncallSettingsUpdateSchema,
 } from "@hark/contracts";
 import { and, asc, count, eq, gt } from "drizzle-orm";
 import { type Context, Hono } from "hono";
@@ -20,6 +21,7 @@ import {
   escalatePage,
   memberGroup,
   memberPage,
+  oncallSettings,
   openPagesFor,
   pageRecipientByToken,
   people,
@@ -29,6 +31,7 @@ import {
   rotationOf,
   toGroupDto,
   toPageDto,
+  updateOncallSettings,
 } from "../lib/oncall";
 import { upcomingShifts } from "../lib/oncall-schedule";
 import { hasRole } from "../lib/teams";
@@ -81,6 +84,12 @@ async function updateGroup(actor: Actor, groupId: string, input: unknown): Promi
       ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
       ...rotationValues,
       ...(parsed.data.escalation !== undefined ? { escalation: parsed.data.escalation } : {}),
+      ...(parsed.data.ringIntervalSeconds !== undefined
+        ? { ringIntervalSeconds: parsed.data.ringIntervalSeconds }
+        : {}),
+      ...(parsed.data.ringMaxRepeats !== undefined
+        ? { ringMaxRepeats: parsed.data.ringMaxRepeats }
+        : {}),
       updatedAt: new Date(),
     })
     .where(eq(oncallGroup.id, groupId))
@@ -247,7 +256,24 @@ async function myOncall(actor: Actor): Promise<Outcome> {
     }
   }
   shifts.sort((a, b) => a.startsAt.localeCompare(b.startsAt));
-  return result({ shifts, pages: await openPagesFor(actor.id) });
+  return result({
+    shifts,
+    pages: await openPagesFor(actor.id),
+    settings: await oncallSettings(actor.id),
+  });
+}
+
+async function getSettings(actor: Actor): Promise<Outcome> {
+  return result({ settings: await oncallSettings(actor.id) });
+}
+
+/** A person's own ringing preferences; they apply in every group. */
+async function updateSettings(actor: Actor, input: unknown): Promise<Outcome> {
+  const parsed = oncallSettingsUpdateSchema.safeParse(input);
+  if (!parsed.success) {
+    return failure(400, "Invalid on-call settings", { issues: parsed.error.issues });
+  }
+  return result({ settings: await updateOncallSettings(actor.id, parsed.data) });
 }
 
 // ---------------------------------------------------------------------------
@@ -262,6 +288,10 @@ function sessionActor(c: { get(key: "user"): { id: string; name: string; email: 
 export const oncallSessionRoute = new Hono<AuthedEnv>()
   .use("*", requireAuth)
   .get("/me", async (c) => send(c, await myOncall(sessionActor(c))))
+  .get("/settings", async (c) => send(c, await getSettings(sessionActor(c))))
+  .patch("/settings", async (c) =>
+    send(c, await updateSettings(sessionActor(c), await readJson(c))),
+  )
   .get("/:groupId", async (c) => send(c, await getGroup(sessionActor(c), c.req.param("groupId"))))
   .patch("/:groupId", async (c) =>
     send(c, await updateGroup(sessionActor(c), c.req.param("groupId"), await readJson(c))),
@@ -396,6 +426,12 @@ async function spentCredential(c: Context, page: { id: string; status: string })
 export const oncallAgentRoute = new Hono<AgentEnv>()
   .use("*", requireApiToken)
   .get("/me", requireScopes("oncall:read"), async (c) => withAgent(c, (actor) => myOncall(actor)))
+  .get("/settings", requireScopes("oncall:read"), async (c) =>
+    withAgent(c, (actor) => getSettings(actor)),
+  )
+  .patch("/settings", requireScopes("oncall:write"), async (c) =>
+    withAgent(c, async (actor) => updateSettings(actor, await readJson(c))),
+  )
   .get("/:groupId", requireScopes("oncall:read"), async (c) =>
     withAgent(c, (actor) => getGroup(actor, c.req.param("groupId"))),
   )

@@ -5,6 +5,7 @@ import {
   appCreateSchema,
   appShareSchema,
   appUpdateSchema,
+  CRITICAL_ALERT_STATES,
   INBOX_ACTIVITY_KINDS,
   INBOX_PAGE_MAX_LIMIT,
   INTERACTION_KINDS,
@@ -23,6 +24,7 @@ import {
   oncallOverrideCreateSchema,
   oncallPageCreateSchema,
   oncallPageResolveSchema,
+  oncallSettingsUpdateSchema,
   serviceCreateSchema,
   serviceUpdateSchema,
   TEAM_ROLES,
@@ -397,6 +399,11 @@ const schemas: Record<string, JsonSchema> = {
       escalation: arrayOf(
         object({ afterMinutes: int, target: { enum: [...ONCALL_ESCALATION_TARGETS] } }),
       ),
+      ringIntervalSeconds: {
+        ...int,
+        description: "Seconds between repeat alerts while a page is unacknowledged.",
+      },
+      ringMaxRepeats: { ...int, description: "Repeat alerts per person after the first." },
       current: { anyOf: [ref("OncallShift"), { type: "null" }] },
       upcoming: arrayOf(ref("OncallShift")),
       overrides: arrayOf(
@@ -421,6 +428,10 @@ const schemas: Record<string, JsonSchema> = {
     dedupKey: nullableStr,
     repeatCount: int,
     notified: arrayOf(ref("OncallPerson")),
+    ringing: {
+      ...arrayOf(object({ person: ref("OncallPerson"), ringCount: int, nextRingAt: dateTime })),
+      description: "People still being re-alerted; empty once acknowledged or resolved.",
+    },
     escalationStep: int,
     nextEscalationAt: nullableDateTime,
     acknowledgedBy: { anyOf: [ref("OncallPerson"), { type: "null" }] },
@@ -429,6 +440,21 @@ const schemas: Record<string, JsonSchema> = {
     resolvedAt: nullableDateTime,
     source: str,
     createdAt: dateTime,
+  }),
+  OncallSettings: object({
+    ringUntilAcknowledged: bool,
+    ringIntervalSeconds: {
+      type: ["integer", "null"],
+      description: "Personal repeat interval; null uses each group's.",
+    },
+    criticalAlerts: { anyOf: [{ enum: [...CRITICAL_ALERT_STATES] }, { type: "null" }] },
+    devices: arrayOf(
+      object({
+        id: str,
+        deviceName: nullableStr,
+        criticalAlerts: { anyOf: [{ enum: [...CRITICAL_ALERT_STATES] }, { type: "null" }] },
+      }),
+    ),
   }),
   OncallPageCreated: object({
     page: ref("OncallPage"),
@@ -867,7 +893,21 @@ export const agentOperations: Record<string, Partial<Record<AgentMethod, AgentOp
           ],
         }),
         pages: arrayOf(ref("OncallPage")),
+        settings: ref("OncallSettings"),
       }),
+    },
+  },
+  "/oncall/settings": {
+    get: {
+      summary: "Your ringing settings and each iPhone's Critical Alerts permission",
+      scopes: ["oncall:read"],
+      response: wrap("settings", ref("OncallSettings")),
+    },
+    patch: {
+      summary: "Change your ringing settings (ring until acknowledged, repeat interval)",
+      scopes: ["oncall:write"],
+      request: oncallSettingsUpdateSchema,
+      response: wrap("settings", ref("OncallSettings")),
     },
   },
   "/oncall/{groupId}": {
@@ -878,7 +918,7 @@ export const agentOperations: Record<string, Partial<Record<AgentMethod, AgentOp
       response: wrap("group", ref("OncallGroup")),
     },
     patch: {
-      summary: "Edit a group's name, rotation, or escalation (admin or owner)",
+      summary: "Edit a group's name, rotation, escalation, or ringing (admin or owner)",
       scopes: ["oncall:write"],
       params: [idParam("groupId")],
       request: oncallGroupUpdateSchema,

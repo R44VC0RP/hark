@@ -1,4 +1,6 @@
 import {
+  type CriticalAlertState,
+  criticalAlertStateSchema,
   type OncallGroupDto,
   type OncallOverrideDto,
   type OncallPageCreateInput,
@@ -6,7 +8,10 @@ import {
   type OncallPageDto,
   type OncallPageStatus,
   type OncallPersonDto,
+  type OncallRingingDto,
   type OncallRotationInput,
+  type OncallSettingsDto,
+  type OncallSettingsUpdateInput,
   type OncallShiftDto,
   oncallPageCreateSchema,
 } from "@hark/contracts";
@@ -35,6 +40,7 @@ import {
   oncallOverride,
   oncallPage,
   oncallPageRecipient,
+  oncallPreference,
   teamMember,
   user as userTable,
 } from "../db/schema";
@@ -51,7 +57,12 @@ import {
   type Shift,
   upcomingShifts,
 } from "./oncall-schedule";
-import { buildPageClaimedPushMessages, buildPagePushMessages, sendPushMessages } from "./push";
+import {
+  buildPageClaimedPushMessages,
+  buildPagePushMessages,
+  type PageTarget,
+  sendPushMessages,
+} from "./push";
 import { memberIds } from "./teams";
 import { generatePageResponseToken, hashPageResponseToken } from "./token";
 
@@ -155,6 +166,8 @@ export async function toGroupDto(group: GroupRow, now = Date.now()): Promise<Onc
       startsAt: group.startsAt.toISOString(),
     },
     escalation: group.escalation,
+    ringIntervalSeconds: group.ringIntervalSeconds,
+    ringMaxRepeats: group.ringMaxRepeats,
     current: current ? toShiftDto(current, map) : null,
     upcoming: shifts.map((shift) => toShiftDto(shift, map)),
     overrides,
@@ -273,6 +286,18 @@ export async function toPageDtos(rows: PageRow[]): Promise<OncallPageDto[]> {
       notified: recipients
         .filter((recipient) => recipient.pageId === row.id)
         .map((recipient) => personOrUnknown(map, recipient.userId)),
+      ringing:
+        row.status === "triggered"
+          ? recipients
+              .filter((recipient) => recipient.pageId === row.id && recipient.nextRingAt)
+              .map(
+                (recipient): OncallRingingDto => ({
+                  person: personOrUnknown(map, recipient.userId),
+                  ringCount: recipient.ringCount,
+                  nextRingAt: (recipient.nextRingAt as Date).toISOString(),
+                }),
+              )
+          : [],
       escalationStep: row.escalationStep,
       nextEscalationAt: row.nextEscalationAt?.toISOString() ?? null,
       acknowledgedBy: row.acknowledgedByUserId
@@ -309,7 +334,11 @@ export async function memberPage(pageId: string, userId: string): Promise<PageRo
 async function devicesOf(userIds: string[]) {
   if (userIds.length === 0) return [];
   return db
-    .select({ userId: device.userId, token: device.expoPushToken })
+    .select({
+      userId: device.userId,
+      token: device.expoPushToken,
+      criticalAlerts: device.criticalAlerts,
+    })
     .from(device)
     .where(
       and(inArray(device.userId, userIds), eq(device.active, true), eq(device.platform, "ios")),
@@ -321,20 +350,92 @@ async function deactivateStale(tokens: string[]): Promise<void> {
   await db.update(device).set({ active: false }).where(inArray(device.expoPushToken, tokens));
 }
 
+// ---------------------------------------------------------------------------
+// Ringing: repeat alerts until someone acknowledges
+// ---------------------------------------------------------------------------
+
+type PreferenceRow = typeof oncallPreference.$inferSelect;
+
+async function preferencesOf(userIds: string[]): Promise<Map<string, PreferenceRow>> {
+  if (userIds.length === 0) return new Map();
+  const rows = await db
+    .select()
+    .from(oncallPreference)
+    .where(inArray(oncallPreference.userId, [...new Set(userIds)]));
+  return new Map(rows.map((row) => [row.userId, row]));
+}
+
+/** Seconds between this person's repeat alerts, or null when they ring once. */
+function ringInterval(group: GroupRow, preference: PreferenceRow | undefined): number | null {
+  if (preference && !preference.ringUntilAcknowledged) return null;
+  if (group.ringMaxRepeats <= 0) return null;
+  return preference?.ringIntervalSeconds ?? group.ringIntervalSeconds;
+}
+
+function nextRingAfter(
+  group: GroupRow,
+  preference: PreferenceRow | undefined,
+  ringCount: number,
+  from: number,
+): Date | null {
+  const interval = ringInterval(group, preference);
+  if (interval === null || ringCount >= group.ringMaxRepeats) return null;
+  return new Date(from + interval * 1000);
+}
+
+/**
+ * Sends one page alert to a person's iPhones: critical where the device
+ * reported Critical Alerts as allowed, time-sensitive with the alarm sound
+ * elsewhere. Every alert for a page shares a collapse ID, so a repeat
+ * replaces the one on screen.
+ */
+async function sendPageAlert(
+  page: PageRow,
+  groupName: string,
+  targets: Array<{ token: string; criticalAlerts: string | null }>,
+  responseToken: string | undefined,
+  ring: number,
+): Promise<number> {
+  if (targets.length === 0) return 0;
+  const result = await sendPushMessages(
+    buildPagePushMessages({
+      to: targets.map(
+        (target): PageTarget => ({
+          token: target.token,
+          critical: target.criticalAlerts === "authorized",
+        }),
+      ),
+      pageId: page.id,
+      teamId: page.teamId,
+      groupName,
+      title: page.title,
+      body: page.body ?? `${groupName}: paged by ${page.sourceName}`,
+      ...(responseToken ? { responseToken } : {}),
+      ...(page.url ? { url: page.url } : {}),
+      ...(page.appId ? { appId: page.appId } : {}),
+      ring,
+    }),
+  );
+  await deactivateStale(result.staleTokens);
+  return result.accepted;
+}
+
 /**
  * Pages `userIds` (skipping anyone already notified), each with their own
- * one-shot lock-screen credential. Returns pushes accepted by Expo.
+ * one-shot lock-screen credential, and schedules their repeat alerts.
+ * Returns pushes accepted by Expo.
  */
 async function notifyRecipients(
   page: PageRow,
-  groupName: string,
+  group: GroupRow,
   userIds: string[],
   step: number,
 ): Promise<number> {
   let accepted = 0;
-  const targets = await devicesOf(userIds);
+  const [targets, preferences] = await Promise.all([devicesOf(userIds), preferencesOf(userIds)]);
   for (const userId of userIds) {
     const responseToken = generatePageResponseToken();
+    const now = Date.now();
     const inserted = await db
       .insert(oncallPageRecipient)
       .values({
@@ -342,34 +443,251 @@ async function notifyRecipients(
         userId,
         step,
         responseTokenHash: hashPageResponseToken(responseToken),
-        notifiedAt: new Date(),
+        notifiedAt: new Date(now),
+        nextRingAt: nextRingAfter(group, preferences.get(userId), 0, now),
       })
       .onConflictDoNothing()
       .returning({ userId: oncallPageRecipient.userId });
     if (inserted.length === 0) continue;
-    const tokens = targets.filter((target) => target.userId === userId).map((t) => t.token);
+    const tokens = targets.filter((target) => target.userId === userId);
     if (tokens.length === 0) continue;
-    const result = await sendPushMessages(
-      buildPagePushMessages({
-        to: tokens,
-        pageId: page.id,
-        teamId: page.teamId,
-        groupName,
-        title: page.title,
-        body: page.body ?? `${groupName}: paged by ${page.sourceName}`,
-        responseToken,
-        ...(page.url ? { url: page.url } : {}),
-        ...(page.appId ? { appId: page.appId } : {}),
-      }),
-    );
-    await deactivateStale(result.staleTokens);
+    const sent = await sendPageAlert(page, group.name, tokens, responseToken, 0);
     await db
       .update(oncallPageRecipient)
-      .set({ acceptedCount: result.accepted })
+      .set({ acceptedCount: sent })
       .where(and(eq(oncallPageRecipient.pageId, page.id), eq(oncallPageRecipient.userId, userId)));
-    accepted += result.accepted;
+    accepted += sent;
   }
   return accepted;
+}
+
+/** Stops every repeat alert for a page (acknowledged or resolved). */
+async function stopRinging(pageId: string): Promise<void> {
+  await db
+    .update(oncallPageRecipient)
+    .set({ nextRingAt: null })
+    .where(and(eq(oncallPageRecipient.pageId, pageId), isNotNull(oncallPageRecipient.nextRingAt)));
+}
+
+/**
+ * Moves ringing to an escalation step's targets. A `next` step stops
+ * everyone else; a `group` step makes every notified member due again on the
+ * worker's next tick, so people handed off earlier hear it went to everyone.
+ */
+async function handOffRinging(
+  page: PageRow,
+  group: GroupRow,
+  target: "next" | "group",
+  newTargets: string[],
+): Promise<void> {
+  if (target === "next") {
+    if (newTargets.length === 0) return;
+    await db
+      .update(oncallPageRecipient)
+      .set({ nextRingAt: null })
+      .where(
+        and(
+          eq(oncallPageRecipient.pageId, page.id),
+          isNotNull(oncallPageRecipient.nextRingAt),
+          sql`${oncallPageRecipient.userId} not in (${sql.join(
+            newTargets.map((id) => sql`${id}`),
+            sql`, `,
+          )})`,
+        ),
+      );
+    return;
+  }
+  const team = new Set(await memberIds(group.teamId));
+  const fresh = new Set(newTargets);
+  const earlier = [...(await notifiedUserIds(page.id))].filter(
+    (id) => team.has(id) && !fresh.has(id),
+  );
+  if (earlier.length === 0) return;
+  const preferences = await preferencesOf(earlier);
+  const now = new Date();
+  for (const userId of earlier) {
+    if (ringInterval(group, preferences.get(userId)) === null) continue;
+    await db
+      .update(oncallPageRecipient)
+      .set({ nextRingAt: now, ringCount: 0 })
+      .where(and(eq(oncallPageRecipient.pageId, page.id), eq(oncallPageRecipient.userId, userId)));
+  }
+}
+
+const RINGS_PER_TICK = 100;
+
+/**
+ * Sends one due repeat alert. The recipient row is claimed by its ring count
+ * and due time, so two workers (or a restart mid-tick) never send the same
+ * repeat twice. Each repeat rotates the lock-screen credential; the previous
+ * one stays valid for a tap that races the repeat.
+ */
+async function ringOnce(
+  pageId: string,
+  userId: string,
+  ringCount: number,
+  dueAt: Date,
+  now: number,
+): Promise<void> {
+  const [row] = await db
+    .select({ page: oncallPage, group: oncallGroup })
+    .from(oncallPage)
+    .innerJoin(oncallGroup, eq(oncallGroup.id, oncallPage.groupId))
+    .where(eq(oncallPage.id, pageId))
+    .limit(1);
+  const recipient = and(
+    eq(oncallPageRecipient.pageId, pageId),
+    eq(oncallPageRecipient.userId, userId),
+    eq(oncallPageRecipient.ringCount, ringCount),
+    eq(oncallPageRecipient.nextRingAt, dueAt),
+  );
+  const team = row ? new Set(await memberIds(row.group.teamId)) : new Set<string>();
+  const preference = (await preferencesOf([userId])).get(userId);
+  if (
+    row?.page.status !== "triggered" ||
+    !team.has(userId) ||
+    ringInterval(row.group, preference) === null ||
+    ringCount >= row.group.ringMaxRepeats
+  ) {
+    await db.update(oncallPageRecipient).set({ nextRingAt: null }).where(recipient);
+    return;
+  }
+  const { page, group } = row;
+  const nextCount = ringCount + 1;
+  const responseToken = generatePageResponseToken();
+  const [claimed] = await db
+    .update(oncallPageRecipient)
+    .set({
+      ringCount: nextCount,
+      nextRingAt: nextRingAfter(group, preference, nextCount, now),
+      previousResponseTokenHash: sql`case when ${oncallPageRecipient.responseTokenUsedAt} is null then ${oncallPageRecipient.responseTokenHash} else ${oncallPageRecipient.previousResponseTokenHash} end`,
+      responseTokenHash: sql`case when ${oncallPageRecipient.responseTokenUsedAt} is null then ${hashPageResponseToken(responseToken)} else ${oncallPageRecipient.responseTokenHash} end`,
+    })
+    .where(recipient)
+    .returning({ usedAt: oncallPageRecipient.responseTokenUsedAt });
+  if (!claimed) return;
+  const targets = await devicesOf([userId]);
+  await sendPageAlert(
+    page,
+    group.name,
+    targets,
+    claimed.usedAt ? undefined : responseToken,
+    nextCount,
+  );
+  // Acknowledged while this repeat was in flight: clear it again.
+  const [latest] = await db
+    .select({ status: oncallPage.status, ackBy: oncallPage.acknowledgedByUserId })
+    .from(oncallPage)
+    .where(eq(oncallPage.id, page.id))
+    .limit(1);
+  if (latest && latest.status !== "triggered" && targets.length > 0) {
+    const claimedBy = latest.ackBy ? await userName(latest.ackBy) : "Someone";
+    const result = await sendPushMessages(
+      buildPageClaimedPushMessages(
+        targets.map((target) => target.token),
+        page.id,
+        claimedBy,
+      ),
+    );
+    await deactivateStale(result.staleTokens);
+  }
+}
+
+/** Sends every due repeat alert. State lives in the database, so restarts resume. */
+export async function processDueRings(now = new Date()): Promise<void> {
+  const due = await db
+    .select({
+      pageId: oncallPageRecipient.pageId,
+      userId: oncallPageRecipient.userId,
+      ringCount: oncallPageRecipient.ringCount,
+      nextRingAt: oncallPageRecipient.nextRingAt,
+    })
+    .from(oncallPageRecipient)
+    .innerJoin(oncallPage, eq(oncallPage.id, oncallPageRecipient.pageId))
+    .where(and(isNotNull(oncallPageRecipient.nextRingAt), lte(oncallPageRecipient.nextRingAt, now)))
+    .orderBy(asc(oncallPageRecipient.nextRingAt))
+    .limit(RINGS_PER_TICK);
+  for (const ring of due) {
+    if (!ring.nextRingAt) continue;
+    try {
+      await ringOnce(ring.pageId, ring.userId, ring.ringCount, ring.nextRingAt, now.getTime());
+    } catch (error) {
+      console.error("[oncall] Repeat alert failed", error);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Personal paging settings
+// ---------------------------------------------------------------------------
+
+function criticalState(value: string | null): CriticalAlertState | null {
+  const parsed = criticalAlertStateSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+const CRITICAL_RANK: Record<CriticalAlertState, number> = {
+  authorized: 3,
+  notDetermined: 2,
+  denied: 1,
+  unavailable: 0,
+};
+
+export async function oncallSettings(userId: string): Promise<OncallSettingsDto> {
+  const [preference] = await db
+    .select()
+    .from(oncallPreference)
+    .where(eq(oncallPreference.userId, userId))
+    .limit(1);
+  const devices = await db
+    .select({ id: device.id, deviceName: device.deviceName, criticalAlerts: device.criticalAlerts })
+    .from(device)
+    .where(and(eq(device.userId, userId), eq(device.active, true)))
+    .orderBy(desc(device.lastSeenAt));
+  const states = devices.map((row) => criticalState(row.criticalAlerts));
+  const best = states
+    .filter((state): state is CriticalAlertState => state !== null)
+    .sort((a, b) => CRITICAL_RANK[b] - CRITICAL_RANK[a])[0];
+  return {
+    ringUntilAcknowledged: preference?.ringUntilAcknowledged ?? true,
+    ringIntervalSeconds: preference?.ringIntervalSeconds ?? null,
+    criticalAlerts: best ?? null,
+    devices: devices.map((row, index) => ({
+      id: row.id,
+      deviceName: row.deviceName,
+      criticalAlerts: states[index] ?? null,
+    })),
+  };
+}
+
+export async function updateOncallSettings(
+  userId: string,
+  input: OncallSettingsUpdateInput,
+): Promise<OncallSettingsDto> {
+  const now = new Date();
+  const values = {
+    ...(input.ringUntilAcknowledged !== undefined
+      ? { ringUntilAcknowledged: input.ringUntilAcknowledged }
+      : {}),
+    ...(input.ringIntervalSeconds !== undefined
+      ? { ringIntervalSeconds: input.ringIntervalSeconds }
+      : {}),
+    updatedAt: now,
+  };
+  await db
+    .insert(oncallPreference)
+    .values({ userId, ...values })
+    .onConflictDoUpdate({ target: oncallPreference.userId, set: values });
+  if (input.ringUntilAcknowledged === false) {
+    // Turning ringing off silences pages that are ringing right now too.
+    await db
+      .update(oncallPageRecipient)
+      .set({ nextRingAt: null })
+      .where(
+        and(eq(oncallPageRecipient.userId, userId), isNotNull(oncallPageRecipient.nextRingAt)),
+      );
+  }
+  return oncallSettings(userId);
 }
 
 /** Rotation members still in the team, or the whole team when the rotation is empty. */
@@ -577,7 +895,7 @@ export async function raisePage({
   }
   const page = created;
 
-  const accepted = await notifyRecipients(page, group.name, initial, 0);
+  const accepted = await notifyRecipients(page, group, initial, 0);
   if (accepted > 0) await trackNotification(creatorUserId, page.id);
   return {
     ok: true,
@@ -669,7 +987,8 @@ export async function escalatePage(pageId: string, manual: boolean): Promise<Esc
     const [latest] = await db.select().from(oncallPage).where(eq(oncallPage.id, page.id)).limit(1);
     return { ok: false, status: 409, error: "Page changed; try again", page: latest ?? page };
   }
-  const accepted = await notifyRecipients(claimed, group.name, targets, stepIndex + 1);
+  await handOffRinging(claimed, group, step.target, targets);
+  const accepted = await notifyRecipients(claimed, group, targets, stepIndex + 1);
   if (accepted > 0 && claimed.createdByUserId) {
     await trackNotification(claimed.createdByUserId, `${claimed.id}:${stepIndex + 1}`);
   }
@@ -723,6 +1042,7 @@ export async function acknowledgePage(page: PageRow, userId: string): Promise<Pa
     const current = latest ?? page;
     return { ok: false, status: 409, error: `Page is already ${current.status}`, page: current };
   }
+  await stopRinging(updated.id);
   void sendClaimed(updated, userId, await userName(userId)).catch((error: unknown) => {
     console.error("[oncall] Could not send page.claimed", error);
   });
@@ -751,6 +1071,7 @@ export async function resolvePage(
     const [latest] = await db.select().from(oncallPage).where(eq(oncallPage.id, page.id)).limit(1);
     return { ok: false, status: 409, error: "Page is already resolved", page: latest ?? page };
   }
+  await stopRinging(updated.id);
   // An unacknowledged page is still ringing on phones; clear it.
   if (page.status === "triggered") {
     void sendClaimed(updated, userId, await userName(userId)).catch((error: unknown) => {
@@ -780,7 +1101,10 @@ export async function pageRecipientByToken(pageId: string, responseToken: string
     .where(
       and(
         eq(oncallPageRecipient.pageId, pageId),
-        eq(oncallPageRecipient.responseTokenHash, hashPageResponseToken(responseToken)),
+        or(
+          eq(oncallPageRecipient.responseTokenHash, hashPageResponseToken(responseToken)),
+          eq(oncallPageRecipient.previousResponseTokenHash, hashPageResponseToken(responseToken)),
+        ),
       ),
     )
     .limit(1);
@@ -905,9 +1229,26 @@ export function processDueEscalations(now = new Date()): Promise<void> {
   return running;
 }
 
+let ringing: Promise<void> | null = null;
+
+/** Escalations first (they hand ringing off), then repeat alerts. */
+function processOncallWork(): Promise<void> {
+  if (ringing) return ringing;
+  ringing = (async () => {
+    await processDueEscalations();
+    await processDueRings();
+  })()
+    .catch((error: unknown) => console.error("[oncall] Worker tick failed", error))
+    .finally(() => {
+      ringing = null;
+    });
+  return ringing;
+}
+
+/** Every 5 s, so a 30 s repeat interval stays close to on time. */
 export function startOncallEscalationWorker(): () => void {
-  void processDueEscalations();
-  const timer = setInterval(() => void processDueEscalations(), 15_000);
+  void processOncallWork();
+  const timer = setInterval(() => void processOncallWork(), 5_000);
   timer.unref();
   return () => clearInterval(timer);
 }

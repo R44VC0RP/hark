@@ -1,5 +1,7 @@
 import {
+  criticalAlertStateSchema,
   type DeviceDto,
+  deviceAlertSettingsSchema,
   deviceRegisterSchema,
   deviceUnregisterSchema,
   LIVE_ACTIVITY_SCHEMA_VERSION,
@@ -39,6 +41,7 @@ function toDto(row: typeof device.$inferSelect): DeviceDto {
         : null,
     liveActivityTokenUpdatedAt: row.liveActivityTokenUpdatedAt?.toISOString() ?? null,
     interactiveLiveActivitiesCapable: row.liveActivityInteractionVersion === 1,
+    criticalAlerts: criticalAlertStateSchema.safeParse(row.criticalAlerts).data ?? null,
     createdAt: row.createdAt.toISOString(),
     lastSeenAt: row.lastSeenAt.toISOString(),
   };
@@ -76,6 +79,26 @@ const wait = (milliseconds: number) =>
 export const devicesRoute = new Hono<AuthedEnv>()
   .use("*", requireAuth)
   .get("/", async (c) => c.json({ devices: await listDevices(c.get("user").id) }))
+  /** The app reports notification permission changes, e.g. after the Critical Alerts prompt. */
+  .post("/alert-settings", async (c) => {
+    const parsed = deviceAlertSettingsSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) {
+      return c.json({ error: "Invalid alert settings", issues: parsed.error.issues }, 400);
+    }
+    const [updated] = await db
+      .update(device)
+      .set({ criticalAlerts: parsed.data.criticalAlerts, lastSeenAt: new Date() })
+      .where(
+        and(
+          eq(device.id, parsed.data.deviceId),
+          eq(device.userId, c.get("user").id),
+          eq(device.active, true),
+        ),
+      )
+      .returning();
+    if (!updated) return c.json({ error: "Device not found" }, 404);
+    return c.json({ device: toDto(updated) });
+  })
   .post("/live-activity/push-to-start", async (c) => {
     const parsed = liveActivityPushToStartTokenSchema.safeParse(
       await c.req.json().catch(() => null),
@@ -297,6 +320,7 @@ export const devicesRoute = new Hono<AuthedEnv>()
           deviceName: parsed.data.deviceName ?? null,
           interactionSchemaVersion: parsed.data.interactionSchemaVersion ?? null,
           liveActivityInteractionVersion: parsed.data.liveActivityInteractionVersion ?? null,
+          criticalAlerts: parsed.data.criticalAlerts ?? null,
           active: true,
           createdAt: now,
           lastSeenAt: now,
@@ -309,6 +333,9 @@ export const devicesRoute = new Hono<AuthedEnv>()
             deviceName: parsed.data.deviceName ?? null,
             interactionSchemaVersion: parsed.data.interactionSchemaVersion ?? null,
             liveActivityInteractionVersion: parsed.data.liveActivityInteractionVersion ?? null,
+            // Older builds omit it; keep the last report rather than forgetting it.
+            ...(parsed.data.criticalAlerts ? { criticalAlerts: parsed.data.criticalAlerts } : {}),
+            ...(ownerChanged && !parsed.data.criticalAlerts ? { criticalAlerts: null } : {}),
             active: true,
             lastSeenAt: now,
             ...(ownerChanged

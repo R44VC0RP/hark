@@ -172,6 +172,13 @@ export const device = sqliteTable(
     liveActivityTokenUpdatedAt: integer("live_activity_token_updated_at", { mode: "timestamp_ms" }),
     interactionSchemaVersion: integer("interaction_schema_version"),
     liveActivityInteractionVersion: integer("live_activity_interaction_version"),
+    /**
+     * Critical Alerts permission as last reported by the app: `authorized`,
+     * `denied`, `notDetermined`, or `unavailable` (no entitlement in the build).
+     * Null until a build that reports it registers. Page pushes use the
+     * critical sound only for `authorized` devices.
+     */
+    criticalAlerts: text("critical_alerts"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" }).notNull(),
   },
@@ -440,6 +447,10 @@ export const oncallGroup = sqliteTable(
     escalation: text("escalation", { mode: "json" })
       .$type<Array<{ afterMinutes: number; target: "next" | "group" }>>()
       .notNull(),
+    /** Seconds between repeat alerts while a page is unacknowledged. */
+    ringIntervalSeconds: integer("ring_interval_seconds").notNull().default(60),
+    /** Repeat alerts per person after the first; 0 alerts once. */
+    ringMaxRepeats: integer("ring_max_repeats").notNull().default(10),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   },
@@ -528,15 +539,44 @@ export const oncallPageRecipient = sqliteTable(
     responseTokenHash: text("response_token_hash").notNull(),
     /** Set on the credential's first successful use; it is single-use. */
     responseTokenUsedAt: integer("response_token_used_at", { mode: "timestamp_ms" }),
+    /**
+     * The credential sent with the previous alert. Each repeat alert rotates
+     * the credential; the one before stays valid so a tap that races a repeat
+     * still works.
+     */
+    previousResponseTokenHash: text("previous_response_token_hash"),
     acceptedCount: integer("accepted_count").notNull().default(0),
     notifiedAt: integer("notified_at", { mode: "timestamp_ms" }).notNull(),
+    /** Repeat alerts sent so far. */
+    ringCount: integer("ring_count").notNull().default(0),
+    /**
+     * Next repeat alert, read by the worker so ringing survives restarts.
+     * Null once the person stops ringing (acknowledged, resolved, handed off,
+     * out of repeats, or ring-until-acknowledged turned off).
+     */
+    nextRingAt: integer("next_ring_at", { mode: "timestamp_ms" }),
   },
   (table) => [
     uniqueIndex("oncall_page_recipient_page_user_unique").on(table.pageId, table.userId),
     uniqueIndex("oncall_page_recipient_token_unique").on(table.responseTokenHash),
     index("oncall_page_recipient_user_idx").on(table.userId, table.notifiedAt),
+    index("oncall_page_recipient_ring_idx").on(table.nextRingAt),
   ],
 );
+
+/** A person's own paging preferences, shared by every group they are in. */
+export const oncallPreference = sqliteTable("oncall_preference", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  /** Repeat the alert until someone acknowledges; false alerts once per page. */
+  ringUntilAcknowledged: integer("ring_until_acknowledged", { mode: "boolean" })
+    .notNull()
+    .default(true),
+  /** Overrides the group's repeat interval for this person; null uses the group's. */
+  ringIntervalSeconds: integer("ring_interval_seconds"),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
 
 /** ES256 keys that sign Hark passes. Private keys are stored encrypted. */
 export const appSigningKey = sqliteTable("app_signing_key", {
