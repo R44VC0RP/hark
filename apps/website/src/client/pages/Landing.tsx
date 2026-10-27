@@ -35,17 +35,14 @@ function Cta() {
 
 /**
  * One screen, no scrolling, one thing to look at: the niche headline and a
- * phone that shows notifications, paging, mini apps and teams in turn.
+ * phone that shows one matching moment for each audience in turn.
  */
 export function Landing() {
   return (
     <div className="hark-landing flex h-dvh flex-col overflow-hidden">
       <SiteHeader className={LANDING_COLUMN} />
       <main className={`${LANDING_COLUMN} flex min-h-0 flex-1 flex-col`}>
-        <Focus
-          cta={<Cta />}
-          hint="Also: approvals from your agents · Live Activities · MCP & CLI"
-        />
+        <Focus cta={<Cta />} hint="Also: Live Activities · MCP & CLI · and more" />
       </main>
     </div>
   );

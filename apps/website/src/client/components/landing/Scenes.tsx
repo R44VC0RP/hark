@@ -4,7 +4,7 @@ import {
   type NoteCopy,
   PAGE_AVATAR,
   type PageCopy,
-  SLIDE_STEPS,
+  SCENE_STEPS,
   type TeamCopy,
 } from "./slides";
 
@@ -63,7 +63,7 @@ export function NotifyScene({ note, step }: { note: NoteCopy; step: number }) {
 
 /* Paging: one page repeats until someone acknowledges it. */
 
-const PAGE_CLAIMED = SLIDE_STEPS.page.length - 1;
+const PAGE_CLAIMED = SCENE_STEPS.page.length - 1;
 
 export function PageScene({ page, step }: { page: PageCopy; step: number }) {
   if (step < 1) return <LockScreen />;
@@ -112,9 +112,6 @@ const OTHER_APPS: AppTile[] = [
   { name: "Ops Log", glyph: "O", bg: "#fff", fg: "#035B49" },
 ];
 
-/** The last 24 hours, one bar each; the second row had a slow hour. */
-const HOURS = Array.from({ length: 24 }, (_, hour) => `h${hour}`);
-
 function WebApp({ app }: { app: AppCopy }) {
   return (
     <div className="hark-webapp">
@@ -133,18 +130,10 @@ function WebApp({ app }: { app: AppCopy }) {
         <div className="hark-webapp-kicker">{app.kicker}</div>
         <div className="hark-webapp-title">{app.headline}</div>
         <div className="hark-webapp-list">
-          {app.rows.map((row, index) => (
+          {app.rows.map((row) => (
             <div className="hark-webapp-row" key={row.label}>
               <span>{row.label}</span>
-              {row.value === "bars" ? (
-                <span className="hark-webapp-bars">
-                  {HOURS.map((hour) => (
-                    <i className={index === 1 && hour === "h17" ? "is-warn" : ""} key={hour} />
-                  ))}
-                </span>
-              ) : (
-                <span className="hark-webapp-muted">{row.value}</span>
-              )}
+              <span className="hark-webapp-muted">{row.value}</span>
             </div>
           ))}
         </div>

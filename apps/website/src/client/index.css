@@ -793,6 +793,33 @@ address {
   text-wrap: balance;
 }
 
+/* The part of the headline that changes: every phrase shares one grid cell,
+   so the longest one sets the size and nothing below moves on a swap. */
+.hark-focus-phrases {
+  display: grid;
+  justify-items: center;
+  color: var(--color-mint);
+}
+
+.hark-focus-phrase {
+  grid-area: 1 / 1;
+  visibility: hidden;
+  opacity: 0;
+  filter: blur(6px);
+  transform: translateY(0.35em);
+}
+
+.hark-focus-phrase.is-current {
+  visibility: visible;
+  opacity: 1;
+  filter: none;
+  transform: none;
+}
+
+.hark-focus-phrase.is-leaving {
+  transform: translateY(-0.35em);
+}
+
 .hark-focus-line {
   /* Two lines of room, so a longer line never moves the phone. */
   min-height: 2.7em;
@@ -812,14 +839,42 @@ address {
   margin-top: 14px;
 }
 
-.hark-focus-tabs {
+.hark-focus-nav {
   display: flex;
   grid-area: tabs;
-  gap: 10px;
+  gap: 14px;
+  align-items: flex-end;
   justify-self: center;
   width: 100%;
   max-width: 30rem;
   margin-top: 6px;
+}
+
+.hark-focus-tabs {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  min-width: 0;
+}
+
+.hark-focus-play {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin-bottom: 2px;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  color: var(--color-ink-faint);
+  transition:
+    color 160ms ease,
+    border-color 160ms ease;
+}
+
+.hark-focus-play:hover {
+  border-color: var(--color-line-strong);
+  color: #ffffff;
 }
 
 .hark-focus-tab {
@@ -830,7 +885,7 @@ address {
   min-width: 0;
   padding: 8px 0;
   color: var(--color-ink-faint);
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 500;
   text-align: left;
   transition: color 160ms ease;
@@ -922,14 +977,14 @@ address {
       ". stage"
       "hint stage";
     grid-template-rows: minmax(0, 1fr) auto auto auto minmax(0, 1fr) auto;
-    grid-template-columns: minmax(0, 33rem) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 36rem) minmax(0, 1fr);
     column-gap: 4rem;
     padding-top: 0;
     text-align: left;
   }
 
   .hark-focus-title {
-    font-size: clamp(44px, 4.2vw, 62px);
+    font-size: clamp(44px, 4vw, 58px);
     line-height: 1.04;
   }
 
@@ -944,13 +999,17 @@ address {
     margin-top: 34px;
   }
 
-  .hark-focus-tabs {
+  .hark-focus-phrases {
+    justify-items: start;
+  }
+
+  .hark-focus-nav {
     justify-self: start;
     margin-top: 64px;
   }
 
   .hark-focus-tab {
-    font-size: 13px;
+    font-size: 12.5px;
   }
 
   .hark-focus-hint {
@@ -1535,22 +1594,6 @@ address {
   border-bottom: 0;
 }
 
-.hark-webapp-bars {
-  display: flex;
-  gap: 2px;
-}
-
-.hark-webapp-bars i {
-  width: 4px;
-  height: 18px;
-  border-radius: 1.5px;
-  background: #2fbf8f;
-}
-
-.hark-webapp-bars i.is-warn {
-  background: #f3c53c;
-}
-
 /* Motion only for visitors who allow it; `--hark-play` pauses it with the slides. */
 .hark-focus {
   --hark-play: running;
@@ -1564,6 +1607,25 @@ address {
   .hark-focus-tab-track i {
     animation: hark-progress linear forwards;
     animation-play-state: var(--hark-play);
+  }
+
+  .hark-focus-phrase.is-current {
+    transition:
+      opacity 340ms ease 60ms,
+      filter 340ms ease 60ms,
+      transform 380ms cubic-bezier(0.2, 0.8, 0.2, 1) 60ms;
+  }
+
+  .hark-focus-phrase.is-leaving {
+    transition:
+      opacity 260ms ease,
+      filter 260ms ease,
+      transform 320ms cubic-bezier(0.4, 0, 0.6, 1),
+      visibility 0s linear 320ms;
+  }
+
+  .hark-focus-phrases.is-instant .hark-focus-phrase {
+    transition: none;
   }
 
   .hark-focus-line {

@@ -12,10 +12,10 @@ import {
 import { usePrefersReducedMotion } from "../../lib/motion";
 import { PHONE_H, PHONE_W, PhoneFrame } from "./Phone";
 import { AppScene, NotifyScene, PageScene, TeamScene } from "./Scenes";
-import { type Niche, nicheFor, SLIDE_STEPS, SLIDES, type SlideId } from "./slides";
+import { pinnedStep, SCENE_STEPS, type Scene, STEPS } from "./slides";
 
-/** A clicked slide stays this long before the rotation picks up again. */
-const HOLD_MS = 8000;
+/** A clicked step stays this long before the rotation picks up again. */
+const HOLD_MS = 5000;
 
 /** True while the tab is in the background, so the rotation stops. */
 function usePageHidden(): boolean {
@@ -30,8 +30,8 @@ function usePageHidden(): boolean {
 }
 
 /**
- * `?niche=` from the address bar. Prerendered markup is the default niche;
- * the server snapshot keeps hydration clean before the real value applies.
+ * `?niche=` from the address bar. Prerendered markup is the first step; the
+ * server snapshot keeps hydration clean before the real value applies.
  */
 function useNicheParam(): string | null {
   return useSyncExternalStore(
@@ -80,58 +80,118 @@ function usePhoneFit() {
   return { ref, fit };
 }
 
-function Scene({ id, niche, step }: { id: SlideId; niche: Niche; step: number }) {
-  switch (id) {
+function SceneView({ scene, step }: { scene: Scene; step: number }) {
+  switch (scene.kind) {
     case "notify":
-      return <NotifyScene note={niche.notify} step={step} />;
+    case "approve":
+      return <NotifyScene note={scene.note} step={step} />;
     case "page":
-      return <PageScene page={niche.page} step={step} />;
+      return <PageScene page={scene.page} step={step} />;
     case "app":
-      return <AppScene app={niche.app} step={step} />;
+      return <AppScene app={scene.app} step={step} />;
     case "team":
-      return <TeamScene step={step} team={niche.team} />;
+      return <TeamScene step={step} team={scene.team} />;
   }
 }
 
-const SCENE_LABELS: Record<SlideId, (niche: Niche) => string> = {
-  notify: (n) => `An iPhone Lock Screen gets a notification from ${n.notify.title}.`,
-  page: (n) => `A page from ${n.page.title} rings three times until ${n.page.claimedBy} claims it.`,
-  app: (n) => `The ${n.app.name} app opens inside Hark, already signed in.`,
-  team: (n) => `A notification shared with ${n.team.team}, ${n.team.people} people.`,
-};
+function sceneLabel(scene: Scene): string {
+  switch (scene.kind) {
+    case "notify":
+      return `An iPhone Lock Screen gets a notification from ${scene.note.title}.`;
+    case "page":
+      return `A page from ${scene.page.title} rings until ${scene.page.claimedBy} claims it.`;
+    case "app":
+      return `The ${scene.app.name} app opens inside Hark, already signed in.`;
+    case "approve":
+      return `${scene.note.title} asks for approval on the Lock Screen, and it is approved.`;
+    case "team":
+      return `A notification shared with ${scene.team.team}, ${scene.team.people} people.`;
+  }
+}
 
 const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
 
+function PlayIcon({ playing }: { playing: boolean }) {
+  return (
+    <svg aria-hidden="true" fill="currentColor" height="10" viewBox="0 0 10 10" width="10">
+      {playing ? (
+        <path d="M2 1h2v8H2zM6 1h2v8H6z" />
+      ) : (
+        <path d="M2.5 1.2v7.6a.5.5 0 0 0 .76.43l6.1-3.8a.5.5 0 0 0 0-.86l-6.1-3.8a.5.5 0 0 0-.76.43Z" />
+      )}
+    </svg>
+  );
+}
+
+interface Story {
+  index: number;
+  /** The step that is leaving, so its phrase can animate out. */
+  prev: number | null;
+  step: number;
+  /** Changes on every pick, so re-picking a step restarts it. */
+  epoch: number;
+  /** A picked step holds a while before the rotation goes on. */
+  hold: boolean;
+  /** Swap the headline without a transition (applying `?niche=`). */
+  instant: boolean;
+}
+
 /**
- * The landing page's one focal point: a fixed headline, one line that
- * matches the slide, and a phone that plays four short moments in turn.
- * Rotation pauses on hover, focus and in a hidden tab; a clicked slide
- * holds for a while. Reduced motion shows each slide's final state.
+ * The landing page's one focal point: "The everything app for" plus one
+ * audience, one matching line and one phone moment, every five seconds.
+ * The rotation pauses on hover, focus, in a hidden tab and with the pause
+ * button. `?niche=` and reduced motion don't rotate until play is pressed;
+ * reduced motion also shows each moment's final state, without transitions.
  */
 export function Focus({ cta, hint }: { cta: ReactNode; hint: ReactNode }) {
-  const niche = nicheFor(useNicheParam());
+  const pinned = pinnedStep(useNicheParam());
   const reduced = usePrefersReducedMotion();
   const hidden = usePageHidden();
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
-  // `epoch` changes on every click, so re-picking a slide restarts it.
-  const [story, setStory] = useState({ slide: 0, step: 0, epoch: 0, hold: false });
+  /** The pause button's choice; `null` until pressed. */
+  const [choice, setChoice] = useState<boolean | null>(null);
+  const [story, setStory] = useState<Story>({
+    index: 0,
+    prev: null,
+    step: 0,
+    epoch: 0,
+    hold: false,
+    instant: false,
+  });
   const remaining = useRef<{ key: string; ms: number } | null>(null);
   const tabs = useRef<(HTMLButtonElement | null)[]>([]);
   const baseId = useId();
   const { ref: stageRef, fit } = usePhoneFit();
 
-  const slide = SLIDES[story.slide] ?? SLIDES[0];
-  const id: SlideId = slide?.id ?? "notify";
-  const steps = SLIDE_STEPS[id];
+  // A pinned step applies after hydration, swapped in without a transition.
+  useLayoutEffect(() => {
+    if (pinned === null) return;
+    setStory((s) => ({
+      ...s,
+      index: pinned,
+      prev: null,
+      step: 0,
+      epoch: s.epoch + 1,
+      instant: true,
+    }));
+  }, [pinned]);
+
+  const current = STEPS[story.index] ?? STEPS[0];
+  if (!current) throw new Error("No landing steps");
+  const steps = SCENE_STEPS[current.scene.kind];
   const last = steps.length - 1;
-  const running = !hidden && !hovered && !focused;
+  /** Rotates through the steps (else the current moment plays and stays). */
+  const rotating = choice ?? !(reduced || pinned !== null);
+  /** Anything moves at all: the pause button stops everything. */
+  const moving = !hidden && !hovered && !focused && choice !== false;
   const step = reduced ? last : story.step;
   const total = sum(steps) + (story.hold ? HOLD_MS : 0);
 
   useEffect(() => {
-    if (!running) return;
-    const key = `${story.slide}:${story.step}:${story.epoch}`;
+    if (!moving) return;
+    if (story.step === last && !rotating) return;
+    const key = `${story.index}:${story.step}:${story.epoch}`;
     let duration = steps[story.step] ?? 0;
     if (story.step === last && story.hold) duration += HOLD_MS;
     if (remaining.current?.key === key) duration = remaining.current.ms;
@@ -143,7 +203,14 @@ export function Focus({ cta, hint }: { cta: ReactNode; hint: ReactNode }) {
       setStory((s) =>
         s.step < last
           ? { ...s, step: s.step + 1 }
-          : { slide: (s.slide + 1) % SLIDES.length, step: 0, epoch: s.epoch, hold: false },
+          : {
+              index: (s.index + 1) % STEPS.length,
+              prev: s.index,
+              step: 0,
+              epoch: s.epoch,
+              hold: false,
+              instant: false,
+            },
       );
     }, duration);
     return () => {
@@ -151,15 +218,34 @@ export function Focus({ cta, hint }: { cta: ReactNode; hint: ReactNode }) {
       // Paused mid-step: resume with what was left, so the progress bar stays in sync.
       if (!fired) remaining.current = { key, ms: duration - (performance.now() - start) };
     };
-  }, [running, story, steps, last]);
+  }, [moving, rotating, story, steps, last]);
 
   const select = useCallback((index: number, focus: boolean) => {
-    setStory((s) => ({ slide: index, step: 0, epoch: s.epoch + 1, hold: true }));
+    setStory((s) => ({
+      index,
+      prev: index === s.index ? s.prev : s.index,
+      step: 0,
+      epoch: s.epoch + 1,
+      hold: true,
+      instant: false,
+    }));
     if (focus) tabs.current[index]?.focus();
   }, []);
 
+  const togglePlay = () => {
+    if (rotating) {
+      setChoice(false);
+      return;
+    }
+    // From a pinned or reduced-motion start, play the current step from the top.
+    if (choice === null) {
+      setStory((s) => ({ ...s, step: 0, epoch: s.epoch + 1, hold: false }));
+    }
+    setChoice(true);
+  };
+
   const onTabKey = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
-    const end = SLIDES.length - 1;
+    const end = STEPS.length - 1;
     const target =
       event.key === "ArrowRight"
         ? index === end
@@ -180,71 +266,102 @@ export function Focus({ cta, hint }: { cta: ReactNode; hint: ReactNode }) {
   };
 
   const panelId = `${baseId}-panel`;
-  const tabId = (slideId: string) => `${baseId}-tab-${slideId}`;
+  const tabId = (id: string) => `${baseId}-tab-${id}`;
   const hover = {
     onMouseEnter: () => setHovered(true),
     onMouseLeave: () => setHovered(false),
   };
+  /** Pinned and reduced-motion starts don't count down: the bar is just full. */
+  const still = choice === null && !rotating;
 
   return (
-    <div className={`hark-focus ${running ? "" : "is-paused"}`}>
+    <div className={`hark-focus ${moving ? "" : "is-paused"}`}>
       <div className="hark-focus-copy">
-        <h1 className="hark-focus-title">{niche.headline}</h1>
-        <p className="hark-focus-line" key={`${id}-${niche.lines[id]}`}>
-          {niche.lines[id]}
+        <h1 className="hark-focus-title">
+          The everything app for{" "}
+          <span className={`hark-focus-phrases ${story.instant ? "is-instant" : ""}`}>
+            {STEPS.map((s, index) => {
+              const state =
+                index === story.index ? "is-current" : index === story.prev ? "is-leaving" : "";
+              return (
+                <span
+                  aria-hidden={index === story.index ? undefined : true}
+                  className={`hark-focus-phrase ${state}`}
+                  key={s.id}
+                >
+                  {s.phrase}
+                </span>
+              );
+            })}
+          </span>
+        </h1>
+        <p className="hark-focus-line" key={`${current.id}-${story.epoch}`}>
+          {current.line}
         </p>
       </div>
 
       <div className="hark-focus-cta">{cta}</div>
 
-      <div
-        aria-label="What Hark does"
-        className="hark-focus-tabs"
-        onBlur={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
-        }}
-        onFocus={(event) => {
-          // Keyboard focus pauses; a mouse click only holds the picked slide.
-          if (event.target.matches(":focus-visible")) setFocused(true);
-        }}
-        role="tablist"
-        {...hover}
-      >
-        {SLIDES.map((s, index) => {
-          const selected = index === story.slide;
-          return (
-            <button
-              aria-controls={panelId}
-              aria-selected={selected}
-              className={`hark-focus-tab ${selected ? "is-selected" : ""}`}
-              id={tabId(s.id)}
-              key={s.id}
-              onClick={() => select(index, false)}
-              onKeyDown={(event) => onTabKey(event, index)}
-              ref={(el) => {
-                tabs.current[index] = el;
-              }}
-              role="tab"
-              tabIndex={selected ? 0 : -1}
-              type="button"
-            >
-              <span className="hark-focus-tab-label">{s.label}</span>
-              <span aria-hidden="true" className="hark-focus-tab-track">
-                {selected ? (
-                  <i
-                    className={reduced ? "is-full" : ""}
-                    key={`${story.slide}-${story.epoch}`}
-                    style={{ animationDuration: `${total}ms` }}
-                  />
-                ) : null}
-              </span>
-            </button>
-          );
-        })}
+      <div className="hark-focus-nav" {...hover}>
+        <div
+          aria-label="Who Hark is for"
+          className="hark-focus-tabs"
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
+          }}
+          onFocus={(event) => {
+            // Keyboard focus pauses; a mouse click only holds the picked step.
+            if (event.target.matches(":focus-visible")) setFocused(true);
+          }}
+          role="tablist"
+        >
+          {STEPS.map((s, index) => {
+            const selected = index === story.index;
+            return (
+              <button
+                aria-controls={panelId}
+                aria-label={`For ${s.phrase.replace(/\.$/, "")}`}
+                aria-selected={selected}
+                className={`hark-focus-tab ${selected ? "is-selected" : ""}`}
+                id={tabId(s.id)}
+                key={s.id}
+                onClick={() => select(index, false)}
+                onKeyDown={(event) => onTabKey(event, index)}
+                ref={(el) => {
+                  tabs.current[index] = el;
+                }}
+                role="tab"
+                tabIndex={selected ? 0 : -1}
+                type="button"
+              >
+                <span aria-hidden="true" className="hark-focus-tab-label">
+                  {s.label}
+                </span>
+                <span aria-hidden="true" className="hark-focus-tab-track">
+                  {selected ? (
+                    <i
+                      className={still || reduced ? "is-full" : ""}
+                      key={`${story.index}-${story.epoch}`}
+                      style={{ animationDuration: `${total}ms` }}
+                    />
+                  ) : null}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <button
+          aria-label={rotating ? "Pause" : "Play"}
+          className="hark-focus-play"
+          onClick={togglePlay}
+          type="button"
+        >
+          <PlayIcon playing={rotating} />
+        </button>
       </div>
 
       <div
-        aria-labelledby={tabId(id)}
+        aria-labelledby={tabId(current.id)}
         className={`hark-focus-stage ${fit?.cropped ? "is-cropped" : ""}`}
         id={panelId}
         ref={stageRef}
@@ -253,10 +370,10 @@ export function Focus({ cta, hint }: { cta: ReactNode; hint: ReactNode }) {
       >
         {fit ? (
           <div className="hark-focus-stage-inner">
-            <div aria-label={SCENE_LABELS[id](niche)} role="img">
+            <div aria-label={sceneLabel(current.scene)} role="img">
               <PhoneFrame cropped={fit.cropped} scale={fit.scale}>
-                <div className="hark-focus-scene" key={`${id}-${story.epoch}`}>
-                  <Scene id={id} niche={niche} step={step} />
+                <div className="hark-focus-scene" key={`${current.id}-${story.epoch}`}>
+                  <SceneView scene={current.scene} step={step} />
                 </div>
               </PhoneFrame>
             </div>
