@@ -796,28 +796,28 @@ address {
 /* The part of the headline that changes: every phrase shares one grid cell,
    so the longest one sets the size and nothing below moves on a swap. */
 .hark-focus-phrases {
+  position: relative;
   display: grid;
   justify-items: center;
   color: var(--color-mint);
+  text-align: center;
 }
 
 .hark-focus-phrase {
   grid-area: 1 / 1;
   visibility: hidden;
-  opacity: 0;
-  filter: blur(6px);
-  transform: translateY(0.35em);
 }
 
-.hark-focus-phrase.is-current {
-  visibility: visible;
-  opacity: 1;
-  filter: none;
-  transform: none;
+/* The visible phrase shuffles through random letters into the next one. */
+/* Laid over the reserved cell, so random letters never resize the line. */
+.hark-shuffle {
+  position: absolute;
+  inset: 0;
+  white-space: pre;
 }
 
-.hark-focus-phrase.is-leaving {
-  transform: translateY(-0.35em);
+.hark-shuffle-glyph {
+  opacity: 0.55;
 }
 
 .hark-focus-line {
@@ -1001,6 +1001,7 @@ address {
 
   .hark-focus-phrases {
     justify-items: start;
+    text-align: left;
   }
 
   .hark-focus-nav {
@@ -1607,25 +1608,6 @@ address {
   .hark-focus-tab-track i {
     animation: hark-progress linear forwards;
     animation-play-state: var(--hark-play);
-  }
-
-  .hark-focus-phrase.is-current {
-    transition:
-      opacity 340ms ease 60ms,
-      filter 340ms ease 60ms,
-      transform 380ms cubic-bezier(0.2, 0.8, 0.2, 1) 60ms;
-  }
-
-  .hark-focus-phrase.is-leaving {
-    transition:
-      opacity 260ms ease,
-      filter 260ms ease,
-      transform 320ms cubic-bezier(0.4, 0, 0.6, 1),
-      visibility 0s linear 320ms;
-  }
-
-  .hark-focus-phrases.is-instant .hark-focus-phrase {
-    transition: none;
   }
 
   .hark-focus-line {

@@ -12,6 +12,7 @@ import {
 import { usePrefersReducedMotion } from "../../lib/motion";
 import { PHONE_H, PHONE_W, PhoneFrame } from "./Phone";
 import { AppScene, NotifyScene, PageScene, TeamScene } from "./Scenes";
+import { ShuffleText } from "./ShuffleText";
 import { pinnedStep, SCENE_STEPS, type Scene, STEPS } from "./slides";
 
 /** A clicked step stays this long before the rotation picks up again. */
@@ -125,8 +126,6 @@ function PlayIcon({ playing }: { playing: boolean }) {
 
 interface Story {
   index: number;
-  /** The step that is leaving, so its phrase can animate out. */
-  prev: number | null;
   step: number;
   /** Changes on every pick, so re-picking a step restarts it. */
   epoch: number;
@@ -153,7 +152,6 @@ export function Focus({ cta, hint }: { cta: ReactNode; hint: ReactNode }) {
   const [choice, setChoice] = useState<boolean | null>(null);
   const [story, setStory] = useState<Story>({
     index: 0,
-    prev: null,
     step: 0,
     epoch: 0,
     hold: false,
@@ -170,7 +168,6 @@ export function Focus({ cta, hint }: { cta: ReactNode; hint: ReactNode }) {
     setStory((s) => ({
       ...s,
       index: pinned,
-      prev: null,
       step: 0,
       epoch: s.epoch + 1,
       instant: true,
@@ -205,7 +202,6 @@ export function Focus({ cta, hint }: { cta: ReactNode; hint: ReactNode }) {
           ? { ...s, step: s.step + 1 }
           : {
               index: (s.index + 1) % STEPS.length,
-              prev: s.index,
               step: 0,
               epoch: s.epoch,
               hold: false,
@@ -223,7 +219,6 @@ export function Focus({ cta, hint }: { cta: ReactNode; hint: ReactNode }) {
   const select = useCallback((index: number, focus: boolean) => {
     setStory((s) => ({
       index,
-      prev: index === s.index ? s.prev : s.index,
       step: 0,
       epoch: s.epoch + 1,
       hold: true,
@@ -279,20 +274,15 @@ export function Focus({ cta, hint }: { cta: ReactNode; hint: ReactNode }) {
       <div className="hark-focus-copy">
         <h1 className="hark-focus-title">
           The everything app for{" "}
-          <span className={`hark-focus-phrases ${story.instant ? "is-instant" : ""}`}>
-            {STEPS.map((s, index) => {
-              const state =
-                index === story.index ? "is-current" : index === story.prev ? "is-leaving" : "";
-              return (
-                <span
-                  aria-hidden={index === story.index ? undefined : true}
-                  className={`hark-focus-phrase ${state}`}
-                  key={s.id}
-                >
-                  {s.phrase}
-                </span>
-              );
-            })}
+          <span className="hark-focus-phrases">
+            {/* Every phrase, invisible, in one grid cell: the longest sets the size. */}
+            {STEPS.map((s) => (
+              <span aria-hidden="true" className="hark-focus-phrase" key={s.id}>
+                {s.phrase}
+              </span>
+            ))}
+            <ShuffleText instant={story.instant || reduced} text={current.phrase} />
+            <span className="sr-only">{current.phrase}</span>
           </span>
         </h1>
         <p className="hark-focus-line" key={`${current.id}-${story.epoch}`}>
