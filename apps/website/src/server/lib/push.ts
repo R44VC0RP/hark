@@ -67,11 +67,11 @@ const WELCOME_MESSAGES = [
   },
   {
     body: "easily send notifications via a webhook",
-    url: "https://hark.ryan.ceo",
+    url: "https://hark.fyi",
   },
   {
     body: "get started here (click me)",
-    url: "https://hark.ryan.ceo",
+    url: "https://hark.fyi",
   },
 ] as const;
 

@@ -1,8 +1,8 @@
 import { type ClientAnalyticsEventName, clientAnalyticsEventSchema } from "@hark/contracts";
 import { Hono } from "hono";
 import { auth } from "../auth";
-import { env } from "../env";
 import { track, trackUserActive } from "../lib/analytics";
+import { isPublicOrigin } from "../lib/origins";
 import { requestKey } from "./device-authorization";
 
 const RATE_WINDOW_MS = 60_000;
@@ -45,13 +45,13 @@ function rateLimited(key: string, limit: number): boolean {
 /** A browser request from the app's own pages. */
 function sameOrigin(header: (name: string) => string | undefined): boolean {
   const origin = header("origin");
-  if (origin) return origin === new URL(env.APP_URL).origin;
+  if (origin) return isPublicOrigin(origin);
   return header("sec-fetch-site") === "same-origin";
 }
 
 export const analyticsRoute = new Hono().post("/events", async (c) => {
   const origin = c.req.header("origin");
-  if (origin && origin !== new URL(env.APP_URL).origin) {
+  if (origin && !isPublicOrigin(origin)) {
     return c.json({ error: "Cross-origin analytics are not accepted" }, 403);
   }
 

@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { auth } from "../auth";
 import { listOAuthGrants, protectedResourceMetadata, revokeOAuthGrant } from "../lib/oauth";
+import { requestOrigin } from "../lib/origins";
 import { type AuthedEnv, requireAuth } from "../middleware";
 
 const METADATA_CACHE_CONTROL =
@@ -35,11 +36,11 @@ export const oauthWellKnownRoute = new Hono()
   )
   .get("/.well-known/oauth-protected-resource", (c) => {
     c.header("Cache-Control", METADATA_CACHE_CONTROL);
-    return c.json(protectedResourceMetadata());
+    return c.json(protectedResourceMetadata(requestOrigin(c.req.url)));
   })
   .get(`/.well-known/oauth-protected-resource${MCP_PATH}`, (c) => {
     c.header("Cache-Control", METADATA_CACHE_CONTROL);
-    return c.json(protectedResourceMetadata());
+    return c.json(protectedResourceMetadata(requestOrigin(c.req.url)));
   })
   .get("/.well-known/oauth-authorization-server", (c) => authServerMetadata(c.req.raw))
   .get("/.well-known/oauth-authorization-server/api/auth", (c) => authServerMetadata(c.req.raw));

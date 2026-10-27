@@ -20,7 +20,7 @@ for (const path of ["/docs.md", "/agents.md"]) {
   docsTextRoute.get(path, (c) => {
     c.header("Content-Type", "text/markdown; charset=utf-8");
     c.header("Cache-Control", CACHE_CONTROL);
-    c.header("Link", '<https://hark.ryan.ceo/docs>; rel="canonical"');
+    c.header("Link", '<https://hark.fyi/docs>; rel="canonical"');
     c.header("X-Robots-Tag", "noindex, follow");
     return c.body(markdown);
   });

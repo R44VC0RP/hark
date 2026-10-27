@@ -9,6 +9,17 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1).default("./data/hark.sqlite"),
   /** Public origin the browser uses. In dev this is the Vite server, which proxies /api. */
   APP_URL: z.url().default("http://localhost:5173"),
+  /**
+   * Earlier public origins (comma-separated) that keep serving the API,
+   * webhooks, MCP and discovery documents. Browser page loads on them
+   * redirect to APP_URL. Production: https://hark.ryan.ceo.
+   */
+  LEGACY_APP_URLS: z.string().trim().optional(),
+  /**
+   * `iss` of Hark passes. Web apps verify it, so it stays fixed when APP_URL
+   * moves. Defaults to APP_URL's origin. Production: https://hark.ryan.ceo.
+   */
+  APP_PASS_ISSUER: z.url().optional(),
   BETTER_AUTH_SECRET: z.string().min(16).default(DEV_SECRET),
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),

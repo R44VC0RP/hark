@@ -5,9 +5,9 @@ import { fileURLToPath } from "node:url";
 
 const WAIT_DURATION = "5m";
 const PERMISSION_IMAGE_URLS = {
-  "Claude Code": "https://hark.ryan.ceo/agents/claude.png",
-  Codex: "https://hark.ryan.ceo/agents/codex.png",
-  OpenCode: "https://hark.ryan.ceo/agents/opencode.png",
+  "Claude Code": "https://hark.fyi/agents/claude.png",
+  Codex: "https://hark.fyi/agents/codex.png",
+  OpenCode: "https://hark.fyi/agents/opencode.png",
 };
 export const REQUIRED_PERMISSION_SCOPES = [
   "notifications:send",

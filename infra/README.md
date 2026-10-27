@@ -2,7 +2,8 @@
 
 Production runs on one `t4g.small` in us-east-1, defined by the CDK stack in
 `lib/hark-stack.ts`. There are no inbound ports: a Cloudflare Tunnel connector
-on the host carries `hark.ryan.ceo` to the app, and operators get a shell
+on the host carries `hark.fyi` (and the original `hark.ryan.ceo`, which still
+serves the API and redirects browser pages) to the app, and operators get a shell
 through SSM Session Manager.
 
 ```
@@ -52,7 +53,7 @@ Required, or the deploy fails:
 
 | Name | Value |
 | --- | --- |
-| `APP_URL` | `https://hark.ryan.ceo` |
+| `APP_URL` | `https://hark.fyi` |
 | `BETTER_AUTH_SECRET` | the existing production secret (sessions break if it changes) |
 | `CLOUDFLARE_TUNNEL_TOKEN` | the tunnel's connector token |
 
@@ -62,6 +63,8 @@ Required for correct production behaviour:
 | --- | --- |
 | `TRUSTED_CLIENT_IP_HEADER` | `cf-connecting-ip` (safe because the tunnel is the only way in) |
 | `APNS_ENVIRONMENT` | `production` |
+| `LEGACY_APP_URLS` | `https://hark.ryan.ceo,https://www.hark.fyi` (keep serving the API there; pages redirect to `APP_URL`) |
+| `APP_PASS_ISSUER` | `https://hark.ryan.ceo` (web apps pin the pass issuer; never change it) |
 
 Optional, as in the root `compose.yaml`: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
 `APPLE_SIGN_IN_SERVICE_ID`, `APPLE_SIGN_IN_BUNDLE_ID`, `APPLE_SIGN_IN_KEY_ID`,
@@ -103,7 +106,7 @@ them), or base64. Values may not contain a single quote.
    (the `InstanceId` output). The old `EXE_DEV_SSH_PRIVATE_KEY` and
    `EXE_DEV_KNOWN_HOSTS` secrets can be deleted after the cutover.
 7. Migrate the database (next section), then run the **Production Update**
-   workflow. Its last step checks `https://hark.ryan.ceo`, so it only passes
+   workflow. Its last step checks `https://hark.fyi` and `https://hark.ryan.ceo`, so it only passes
    after the cutover.
 
 The instance takes a few minutes after `cdk deploy` to finish `bootstrap.sh`;

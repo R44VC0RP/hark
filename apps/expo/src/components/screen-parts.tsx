@@ -172,13 +172,13 @@ export function SeatLimitNotice({
           : "Ask the team owner to add a seat from the Hark dashboard."}
       </Text>
       <Pressable
-        accessibilityHint="Opens hark.ryan.ceo in Safari"
+        accessibilityHint="Opens hark.fyi in Safari"
         accessibilityLabel="Open the Hark dashboard"
         accessibilityRole="link"
         hitSlop={8}
         onPress={() => void Linking.openURL(TEAM_BILLING_URL).catch(() => {})}
       >
-        <Text style={ui.link}>hark.ryan.ceo/dashboard ↗</Text>
+        <Text style={ui.link}>hark.fyi/dashboard ↗</Text>
       </Pressable>
     </View>
   );

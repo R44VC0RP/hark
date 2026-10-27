@@ -131,14 +131,18 @@ jobs:
       - name: Verify public deployment
         run: |
           curl --fail --show-error --silent --retry 12 --retry-all-errors \
-            https://hark.ryan.ceo/api/health >/dev/null
-          curl --fail --show-error --silent https://hark.ryan.ceo/ \
-            | grep --fixed-strings 'https://hark.ryan.ceo/ogimage.png' >/dev/null
-          curl --fail --show-error --silent https://hark.ryan.ceo/pricing \
+            https://hark.fyi/api/health >/dev/null
+          curl --fail --show-error --silent https://hark.fyi/ \
+            | grep --fixed-strings 'https://hark.fyi/ogimage.png' >/dev/null
+          curl --fail --show-error --silent https://hark.fyi/pricing \
             | grep --fixed-strings '100,000 notifications per month' >/dev/null
-          curl --fail --show-error --silent https://hark.ryan.ceo/robots.txt \
-            | grep --fixed-strings 'Sitemap: https://hark.ryan.ceo/sitemap.xml' >/dev/null
-          curl --fail --show-error --silent https://hark.ryan.ceo/sitemap.xml \
+          curl --fail --show-error --silent https://hark.fyi/robots.txt \
+            | grep --fixed-strings 'Sitemap: https://hark.fyi/sitemap.xml' >/dev/null
+          curl --fail --show-error --silent https://hark.fyi/sitemap.xml \
             | grep --fixed-strings '<urlset' >/dev/null
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
-            https://hark.ryan.ceo/seo-smoke-test-missing)" = "404"
+            https://hark.fyi/seo-smoke-test-missing)" = "404"
+          # The original domain keeps serving the API and redirects pages.
+          curl --fail --show-error --silent https://hark.ryan.ceo/api/health >/dev/null
+          test "$(curl --silent --output /dev/null --write-out '%{http_code} %{redirect_url}' \
+            https://hark.ryan.ceo/pricing)" = "301 https://hark.fyi/pricing"

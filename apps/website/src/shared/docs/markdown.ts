@@ -113,14 +113,14 @@ export function llmsTxt(): string {
 
 - [Documentation](${DOCS_URL}): ${DOCS_TITLE} — quickstart, Notification API, Activity API, CLI, and coding-agent permissions.
 - [Documentation as markdown](${DOCS_MARKDOWN_URL}): the same content as plain markdown.
-- [Agent documentation](https://hark.ryan.ceo/agents.md): agent-oriented alias of the complete Markdown docs.
-- [Coding-agent permission setup](https://hark.ryan.ceo/docs#cli-permissions): Claude Code, Codex, OpenCode V1, and OpenCode V2.
-- [Agent API OpenAPI document](https://hark.ryan.ceo/api/agent/openapi.json): every token-authenticated route with its scopes and schemas.
+- [Agent documentation](https://hark.fyi/agents.md): agent-oriented alias of the complete Markdown docs.
+- [Coding-agent permission setup](https://hark.fyi/docs#cli-permissions): Claude Code, Codex, OpenCode V1, and OpenCode V2.
+- [Agent API OpenAPI document](https://hark.fyi/api/agent/openapi.json): every token-authenticated route with its scopes and schemas.
 
 ## Product
 
-- [Home](https://hark.ryan.ceo/): product overview and webhook example.
-- [Pricing](https://hark.ryan.ceo/pricing): current Free and Pro capabilities.
+- [Home](https://hark.fyi/): product overview and webhook example.
+- [Pricing](https://hark.fyi/pricing): current Free and Pro capabilities.
 - [Hark for iPhone](https://apps.apple.com/us/app/hark-developer-notifications/id6794121509): required iOS app.
 - [Source](https://github.com/R44VC0RP/hark): Hark website, iOS app, CLI, and agent skill.
 

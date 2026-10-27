@@ -9,7 +9,7 @@ const STEPS: [number, string, string][] = [
   [0.55, "Building", "Bundling apps/website (vite)"],
   [0.72, "Testing", "230 tests in apps/website"],
   [0.88, "Deploying", "Restarting hark on raven-cobra"],
-  [1, "Deployed", "hark.ryan.ceo is healthy"],
+  [1, "Deployed", "hark.fyi is healthy"],
 ];
 const STEP_MS = 1700;
 const FADE_MS = 180;

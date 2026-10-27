@@ -19,7 +19,7 @@
 import type { DocItemId, DocSectionId } from "./nav";
 
 /** Placeholder webhook URL used throughout the docs samples. */
-export const EXAMPLE_ENDPOINT = "https://hark.ryan.ceo/hooks/whk_your_token";
+export const EXAMPLE_ENDPOINT = "https://hark.fyi/hooks/whk_your_token";
 
 export interface DocFieldRow {
   name: string;
@@ -83,12 +83,12 @@ export interface DocSection {
 
 /** Page title, reused by the HTML `<h1>`, the prerendered `<title>`, and the markdown. */
 export const DOCS_TITLE = "Webhooks to iPhone notifications";
-export const DOCS_URL = "https://hark.ryan.ceo/docs";
-export const DOCS_MARKDOWN_URL = "https://hark.ryan.ceo/docs.md";
-export const AGENT_OPENAPI_URL = "https://hark.ryan.ceo/api/agent/openapi.json";
+export const DOCS_URL = "https://hark.fyi/docs";
+export const DOCS_MARKDOWN_URL = "https://hark.fyi/docs.md";
+export const AGENT_OPENAPI_URL = "https://hark.fyi/api/agent/openapi.json";
 
 /** The remote MCP server. */
-export const MCP_SERVER_URL = "https://hark.ryan.ceo/mcp";
+export const MCP_SERVER_URL = "https://hark.fyi/mcp";
 
 export const DOC_CONTENT: DocSection[] = [
   {
@@ -114,7 +114,7 @@ export const DOC_CONTENT: DocSection[] = [
           {
             kind: "steps",
             items: [
-              "Sign in at [hark.ryan.ceo](https://hark.ryan.ceo).",
+              "Sign in at [hark.fyi](https://hark.fyi).",
               "Register your iPhone with [Hark for iPhone](https://apps.apple.com/us/app/hark-developer-notifications/id6794121509).",
               "Create a service in the dashboard and give it a title, avatar, and tap URL.",
               "Copy the secret webhook URL it returns.",
@@ -282,7 +282,7 @@ export const DOC_CONTENT: DocSection[] = [
                 name: "appId",
                 type: "string",
                 detail:
-                  "A [web app](https://hark.ryan.ceo/docs#web-apps) ID (`app_…`) on your account. Tapping opens that app in Hark, at `url` when given; `url` must then share the app's origin. Not combinable with `response`.",
+                  "A [web app](https://hark.fyi/docs#web-apps) ID (`app_…`) on your account. Tapping opens that app in Hark, at `url` when given; `url` must then share the app's origin. Not combinable with `response`.",
               },
             ],
           },
@@ -939,7 +939,7 @@ curl -X POST ${EXAMPLE_ENDPOINT}/events/evt_Cxns2IdbF4H0TJYq/cancel`,
           {
             kind: "steps",
             items: [
-              "The CLI prints a short code and opens [hark.ryan.ceo](https://hark.ryan.ceo) in your browser.",
+              "The CLI prints a short code and opens [hark.fyi](https://hark.fyi) in your browser.",
               "Sign in and approve the requested scopes; every scope is shown before you approve.",
               "Credentials are written to an OS config file with mode `0600`, and the CLI polls until the approval lands.",
             ],
@@ -1005,7 +1005,7 @@ harkctl permissions doctor`,
     "title": "Release bot",
     "imageUrl": "https://example.com/bot.png"
   },
-  "webhookUrl": "https://hark.ryan.ceo/hooks/hook_..."
+  "webhookUrl": "https://hark.fyi/hooks/hook_..."
 }`,
           },
           {
@@ -1075,7 +1075,7 @@ harkctl permissions doctor`,
                 name: "--app",
                 type: "app id",
                 detail:
-                  "Open this [web app](https://hark.ryan.ceo/docs#web-apps) in Hark when tapped; `--url` must stay on its origin.",
+                  "Open this [web app](https://hark.fyi/docs#web-apps) in Hark when tapped; `--url` must stay on its origin.",
               },
               {
                 name: "--idempotency-key",
@@ -1232,8 +1232,8 @@ harkctl apps remove app_...`,
             kind: "steps",
             items: [
               "Inside the Hark app, your page calls `await window.hark.getToken()`, which resolves to a pass string. `window.hark` exists only in Hark; `window.hark.close()` returns to the app.",
-              "The page sends the pass to your server, which verifies it as an ES256 JWT against [the Hark JWKS](https://hark.ryan.ceo/.well-known/jwks.json) — for example with `jwtVerify` from `jose`.",
-              "Require issuer `https://hark.ryan.ceo`, audience equal to your app's origin, `typ` `hark-pass+jwt`, and algorithm `ES256`, then start your own session.",
+              "The page sends the pass to your server, which verifies it as an ES256 JWT against [the Hark JWKS](https://hark.fyi/.well-known/jwks.json) — for example with `jwtVerify` from `jose`.",
+              "Require issuer `https://hark.ryan.ceo` (passes keep this issuer after the move to hark.fyi), audience equal to your app's origin, `typ` `hark-pass+jwt`, and algorithm `ES256`, then start your own session.",
             ],
           },
           {
@@ -1377,7 +1377,7 @@ harkctl apps remove app_...`,
             kind: "code",
             language: "bash",
             code: `harkctl teams invite team_... --email teammate@example.com --role member
-# { "invite": { ... }, "code": "…", "url": "https://hark.ryan.ceo/join/…" }`,
+# { "invite": { ... }, "code": "…", "url": "https://hark.fyi/join/…" }`,
           },
           {
             kind: "p",

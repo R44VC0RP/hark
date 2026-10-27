@@ -6,6 +6,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 process.env.NODE_ENV = "test";
 process.env.DATABASE_URL = ":memory:";
+process.env.LEGACY_APP_URLS = "https://hark.ryan.ceo";
 
 const authState = vi.hoisted(() => ({ userId: "user_a" as string | null }));
 
@@ -218,6 +219,39 @@ describe("MCP discovery and authentication", () => {
         resource_documentation: "http://localhost:5173/docs#mcp",
       });
     }
+  });
+});
+
+describe("earlier domains", () => {
+  it("keep MCP clients on the URL they were set up with, with the canonical issuer", async () => {
+    const challenge = await app.request("https://hark.ryan.ceo/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(challenge.status).toBe(401);
+    expect(challenge.headers.get("www-authenticate")).toContain(
+      'resource_metadata="https://hark.ryan.ceo/.well-known/oauth-protected-resource/mcp"',
+    );
+    const metadata = await app.request(
+      "https://hark.ryan.ceo/.well-known/oauth-protected-resource/mcp",
+    );
+    expect(await metadata.json()).toMatchObject({
+      resource: "https://hark.ryan.ceo/mcp",
+      authorization_servers: ["http://localhost:5173/api/auth"],
+    });
+  });
+
+  it("redirect browser page loads to APP_URL but keep serving the API and files", async () => {
+    const page = await app.request("https://hark.ryan.ceo/pricing?ref=x");
+    expect(page.status).toBe(301);
+    expect(page.headers.get("location")).toBe("http://localhost:5173/pricing?ref=x");
+    expect((await app.request("https://hark.ryan.ceo/api/health")).status).toBe(200);
+    expect((await app.request("https://hark.ryan.ceo/agents/claude.png")).status).not.toBe(301);
+    expect(
+      (await app.request("https://hark.ryan.ceo/hooks/whk_unknown", { method: "POST" })).status,
+    ).not.toBe(301);
+    expect((await app.request("http://localhost:5173/pricing")).status).not.toBe(301);
   });
 });
 

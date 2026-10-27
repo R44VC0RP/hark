@@ -1,6 +1,6 @@
 import { PRO_PRICE_MONTHLY } from "./pricing";
 
-export const SITE_URL = "https://hark.ryan.ceo";
+export const SITE_URL = "https://hark.fyi";
 export const SOCIAL_IMAGE_URL = `${SITE_URL}/ogimage.png`;
 export const DEMO_POSTER_URL = `${SITE_URL}/notifications-demo-poster.jpg`;
 export const DEMO_VIDEO_URL = `${SITE_URL}/notifications-demo.mp4`;

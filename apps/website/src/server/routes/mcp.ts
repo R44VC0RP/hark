@@ -19,6 +19,7 @@ import {
   resolveTool,
 } from "../lib/mcp-tools";
 import { type ApiTokenRow, authenticateOAuthBearer, mcpAuthChallenge } from "../lib/oauth";
+import { requestOrigin } from "../lib/origins";
 import { AGENT_API_PREFIX } from "./agent-openapi";
 
 /** Sends a request through the agent routes as the given (already authenticated) token. */
@@ -201,7 +202,7 @@ async function runTool(
 /** One stateless MCP server per request, bound to the caller's grant. */
 export function createHarkMcpServer(token: ApiTokenRow, dispatch: AgentDispatch): McpServer {
   const server = new McpServer(
-    { name: "hark", title: "Hark", version: "1.0.0", websiteUrl: "https://hark.ryan.ceo" },
+    { name: "hark", title: "Hark", version: "1.0.0", websiteUrl: "https://hark.fyi" },
     { instructions: MCP_SERVER_INSTRUCTIONS, capabilities: { tools: {} } },
   );
   for (const tool of harkMcpTools()) {
@@ -220,7 +221,7 @@ export function createHarkMcpServer(token: ApiTokenRow, dispatch: AgentDispatch)
   return server;
 }
 
-function unauthorized(reason: "missing" | "invalid"): Response {
+function unauthorized(reason: "missing" | "invalid", origin: string): Response {
   return new Response(
     JSON.stringify({
       error: reason === "missing" ? "Unauthorized" : "Invalid or expired access token",
@@ -233,6 +234,7 @@ function unauthorized(reason: "missing" | "invalid"): Response {
           reason === "invalid"
             ? { code: "invalid_token", description: "The access token is invalid or expired" }
             : undefined,
+          origin,
         ),
       },
     },
@@ -263,7 +265,9 @@ export function createMcpRoute(dispatch: AgentDispatch) {
     )
     .all(MCP_PATH, async (c) => {
       const authenticated = await authenticateOAuthBearer(c.req.header("authorization"));
-      if (!authenticated.ok) return unauthorized(authenticated.reason);
+      if (!authenticated.ok) {
+        return unauthorized(authenticated.reason, requestOrigin(c.req.url));
+      }
       if (c.req.method !== "POST") {
         // Stateless: no standalone SSE stream and no session to delete.
         return c.json(

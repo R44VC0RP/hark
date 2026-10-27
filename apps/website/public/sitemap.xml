@@ -2,27 +2,27 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
   xmlns:video="http://www.google.com/schemas/sitemap-video/1.1">
   <url>
-    <loc>https://hark.ryan.ceo/</loc>
+    <loc>https://hark.fyi/</loc>
     <video:video>
-      <video:thumbnail_loc>https://hark.ryan.ceo/notifications-demo-poster.jpg</video:thumbnail_loc>
+      <video:thumbnail_loc>https://hark.fyi/notifications-demo-poster.jpg</video:thumbnail_loc>
       <video:title>Hark iPhone notification demo</video:title>
       <video:description>A demonstration of Hark delivering project notifications to an iPhone.</video:description>
-      <video:content_loc>https://hark.ryan.ceo/notifications-demo.mp4</video:content_loc>
+      <video:content_loc>https://hark.fyi/notifications-demo.mp4</video:content_loc>
     </video:video>
   </url>
   <url>
-    <loc>https://hark.ryan.ceo/docs</loc>
+    <loc>https://hark.fyi/docs</loc>
   </url>
   <url>
-    <loc>https://hark.ryan.ceo/pricing</loc>
+    <loc>https://hark.fyi/pricing</loc>
   </url>
   <url>
-    <loc>https://hark.ryan.ceo/a/launched</loc>
+    <loc>https://hark.fyi/a/launched</loc>
   </url>
   <url>
-    <loc>https://hark.ryan.ceo/privacy</loc>
+    <loc>https://hark.fyi/privacy</loc>
   </url>
   <url>
-    <loc>https://hark.ryan.ceo/terms</loc>
+    <loc>https://hark.fyi/terms</loc>
   </url>
 </urlset>

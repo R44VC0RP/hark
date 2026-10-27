@@ -280,7 +280,7 @@ export function claimedPageId(candidate: unknown): string | null {
 export const PENDING_JOIN_CODE_KEY = "hark.team.pendingJoinCode";
 
 /** Pricing copy shown when a team runs out of seats. */
-export const TEAM_BILLING_URL = "https://hark.ryan.ceo/dashboard";
+export const TEAM_BILLING_URL = "https://hark.fyi/dashboard";
 
 type PageClaimedListener = (pageId: string) => void;
 const pageClaimedListeners = new Set<PageClaimedListener>();

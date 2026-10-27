@@ -37,11 +37,11 @@ describe("buildWelcomePushMessages", () => {
     });
     expect(messages[1]).toMatchObject({
       body: "easily send notifications via a webhook",
-      data: { url: "https://hark.ryan.ceo" },
+      data: { url: "https://hark.fyi" },
     });
     expect(messages[2]).toMatchObject({
       body: "get started here (click me)",
-      data: { url: "https://hark.ryan.ceo" },
+      data: { url: "https://hark.fyi" },
     });
   });
 });

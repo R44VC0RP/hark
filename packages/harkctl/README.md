@@ -27,8 +27,8 @@ harkctl
 ```
 
 Prefer MCP? The same operations are available as tools from Hark's remote MCP server at
-`https://hark.ryan.ceo/mcp`, which signs in with OAuth instead of a token
-([setup](https://hark.ryan.ceo/docs#mcp)).
+`https://hark.fyi/mcp`, which signs in with OAuth instead of a token
+([setup](https://hark.fyi/docs#mcp)).
 
 Start a browser authorization flow and approve the requested scopes with your signed-in Hark account:
 
@@ -186,7 +186,7 @@ human (`harkctl auth login`).
 
 `apps create --name <name> --url <url> [--icon <url>] [--project <name>]` registers a web app that
 opens full-screen in the Hark iPhone app with a signed Hark pass (see the
-[Web Apps docs](https://hark.ryan.ceo/docs#web-apps)). Creating an app with an existing URL updates
+[Web Apps docs](https://hark.fyi/docs#web-apps)). Creating an app with an existing URL updates
 it and prints `(updated existing)`. `apps list`, `apps get <app_id>`, and `apps remove <app_id>`
 manage registered apps. `apps update <app_id>` changes `--name`, `--url`, `--icon` (or
 `--no-icon`), and `--project` (or `--no-project`); moving the URL to a different origin clears
@@ -307,7 +307,7 @@ harkctl permissions uninstall all
 
 The default login includes the required `notifications:send`, `interactions:create`, and
 `interactions:read` scopes. A narrowed login must retain all three; setup and `doctor` identify any
-missing scopes. See the [agent permission setup guide](https://hark.ryan.ceo/docs#cli-permissions)
+missing scopes. See the [agent permission setup guide](https://hark.fyi/docs#cli-permissions)
 for privacy, trust, and platform details.
 
 Claude Code and Codex use synchronous `PermissionRequest` hooks. After Codex setup, open `/hooks`

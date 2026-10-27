@@ -23,7 +23,7 @@ describe("SEO metadata", () => {
 
     for (const page of pages) {
       expect(page.index).toBe(true);
-      expect(absoluteUrl(page.path)).toMatch(/^https:\/\/hark\.ryan\.ceo\//);
+      expect(absoluteUrl(page.path)).toMatch(/^https:\/\/hark\.fyi\//);
     }
   });
 
@@ -42,7 +42,7 @@ describe("SEO metadata", () => {
     expect(json).toContain('"SoftwareApplication"');
     expect(json).toContain('"VideoObject"');
     expect(json).toContain(`"price":"${PRO_PRICE_MONTHLY}"`);
-    expect(SOCIAL_IMAGE_URL).toBe("https://hark.ryan.ceo/ogimage.png");
+    expect(SOCIAL_IMAGE_URL).toBe("https://hark.fyi/ogimage.png");
   });
 
   it("adds breadcrumbs to indexable child pages without marking private pages up", () => {
@@ -56,7 +56,7 @@ describe("SEO metadata", () => {
     expect(json).toContain('"@type":"Article"');
     expect(json).toContain('"datePublished":"2026-08-01T12:00:00-04:00"');
     expect(json).toContain('"mainEntityOfPage"');
-    expect(json).toContain('"author":{"@id":"https://hark.ryan.ceo/#provider"}');
+    expect(json).toContain('"author":{"@id":"https://hark.fyi/#provider"}');
   });
 
   it("uses the same public pricing facts in the fallback catalog", () => {
@@ -79,7 +79,7 @@ describe("crawler files", () => {
   it("points crawlers to the sitemap without hiding pages that carry noindex", async () => {
     const robots = await readFile(resolve(publicDir, "robots.txt"), "utf8");
     expect(robots).toContain("User-agent: *");
-    expect(robots).toContain("Sitemap: https://hark.ryan.ceo/sitemap.xml");
+    expect(robots).toContain("Sitemap: https://hark.fyi/sitemap.xml");
     expect(robots).not.toContain("Disallow: /dashboard");
     expect(robots).not.toContain("Disallow: /cli/authorize");
   });

@@ -16,13 +16,14 @@ import {
 import {
   clientDefaultScopes,
   hashOAuthToken,
-  mcpResourceUrl,
+  mcpResourceUrls,
   OAUTH_ACCESS_TOKEN_PREFIX,
   OAUTH_ACCESS_TOKEN_TTL_SECONDS,
   OAUTH_CONSENT_PAGE,
   OAUTH_REFRESH_TOKEN_PREFIX,
   OAUTH_REFRESH_TOKEN_TTL_SECONDS,
 } from "./lib/oauth";
+import { publicOrigins } from "./lib/origins";
 import { releaseTeamsOf } from "./lib/teams";
 
 /**
@@ -138,7 +139,7 @@ const userProfileLimits = {
 } satisfies BetterAuthPlugin;
 
 const APPLE_ORIGIN = "https://appleid.apple.com";
-const STATIC_TRUSTED_ORIGINS = [env.APP_URL, "hark://", "hark://*"];
+const STATIC_TRUSTED_ORIGINS = [...publicOrigins(), "hark://", "hark://*"];
 
 /** Apple's cross-site form POST is trusted only on its own OAuth callback. */
 function trustedOrigins(request?: Request): string[] {
@@ -222,7 +223,9 @@ export const auth = betterAuth({
       consentPage: OAUTH_CONSENT_PAGE,
       scopes: [...OAUTH_SCOPES],
       // Tokens are only ever issued for the MCP server.
-      validAudiences: [mcpResourceUrl()],
+      // The MCP URL on every public origin, so clients set up on an earlier
+      // domain keep refreshing their tokens.
+      validAudiences: mcpResourceUrls(),
       grantTypes: ["authorization_code", "refresh_token"],
       // MCP clients (Claude, OpenCode, Cursor, …) register themselves as public
       // PKCE clients; registration never grants anything without consent.

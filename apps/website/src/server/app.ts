@@ -4,6 +4,7 @@ import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
 import { secureHeaders } from "hono/secure-headers";
 import { auth } from "./auth";
+import { canonicalOrigin, isLegacyRequest } from "./lib/origins";
 import { INTERNAL_AGENT_TOKEN } from "./middleware";
 import { activitiesAgentRoute, activitiesSessionRoute } from "./routes/activities";
 import { activityFeedAgentRoute, activityFeedRoute } from "./routes/activity-feed";
@@ -104,6 +105,26 @@ app.use(
     },
   }),
 );
+
+/**
+ * Earlier domains (LEGACY_APP_URLS) keep answering everything machines use:
+ * the API, webhooks, MCP, discovery documents and files such as push avatars
+ * (the iPhone fetches those without following redirects). Browser page loads
+ * move to APP_URL with the same path, so old links land on the new domain.
+ */
+const LEGACY_PASSTHROUGH = ["/api/", "/hooks/", "/mcp", "/.well-known/", "/oss"];
+app.use("*", async (c, next) => {
+  if (
+    (c.req.method === "GET" || c.req.method === "HEAD") &&
+    isLegacyRequest(c.req.url) &&
+    !LEGACY_PASSTHROUGH.some((prefix) => c.req.path.startsWith(prefix)) &&
+    !/\.[a-z0-9]+$/i.test(c.req.path)
+  ) {
+    const url = new URL(c.req.url);
+    return c.redirect(`${canonicalOrigin()}${url.pathname}${url.search}`, 301);
+  }
+  return next();
+});
 
 // Bounds memory use for unauthenticated POST bodies; accepted payloads are far smaller.
 // MCP tool calls wrap agent payloads in JSON-RPC, so /mcp gets more headroom.

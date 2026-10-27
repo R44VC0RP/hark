@@ -120,11 +120,11 @@ describe("POST /api/devices onboarding", () => {
     });
     expect(sent[1]).toMatchObject({
       body: "easily send notifications via a webhook",
-      data: { url: "https://hark.ryan.ceo" },
+      data: { url: "https://hark.fyi" },
     });
     expect(sent[2]).toMatchObject({
       body: "get started here (click me)",
-      data: { url: "https://hark.ryan.ceo" },
+      data: { url: "https://hark.fyi" },
     });
 
     const refresh = await register("ExponentPushToken[welcome-a]");

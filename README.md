@@ -5,7 +5,7 @@ https://github.com/user-attachments/assets/74fd0670-2106-4af5-93c8-d31f99b33908
 Hark turns webhooks into clean, source-branded iPhone notifications. Connect CI jobs, agents,
 scripts, monitoring tools, or anything else that can send an HTTP request.
 
-[Website](https://hark.ryan.ceo) | [Documentation](https://hark.ryan.ceo/docs)
+[Website](https://hark.fyi) | [Documentation](https://hark.fyi/docs)
 
 ## Quick Start
 
@@ -49,7 +49,7 @@ Live Activities, and create webhook services for external systems.
 
 ## Webhook Setup
 
-1. Sign in at [hark.ryan.ceo](https://hark.ryan.ceo).
+1. Sign in at [hark.fyi](https://hark.fyi).
 2. Register your iPhone with [Hark for iPhone](https://apps.apple.com/us/app/hark-developer-notifications/id6794121509).
 3. Create a service and copy its secret webhook URL.
 4. Send it a JSON request.
@@ -57,7 +57,7 @@ Live Activities, and create webhook services for external systems.
 ## Send a Notification
 
 ```sh
-curl -X POST 'https://hark.ryan.ceo/hooks/whk_your_token' \
+curl -X POST 'https://hark.fyi/hooks/whk_your_token' \
   -H 'Content-Type: application/json' \
   -d '{
     "title": "GitHub",
@@ -97,7 +97,7 @@ Use the returned event ID to request removal of a notification from registered i
 
 ```sh
 curl -X POST \
-  'https://hark.ryan.ceo/hooks/whk_your_token/events/evt_your_event/withdraw'
+  'https://hark.fyi/hooks/whk_your_token/events/evt_your_event/withdraw'
 ```
 
 Hark sends a silent background command to each active device and cancels any pending interactive
@@ -119,7 +119,7 @@ notification; delivery alone does not launch an app or run a shortcut.
 Start a stateful Live Activity using the same service webhook token:
 
 ```sh
-curl -X POST 'https://hark.ryan.ceo/hooks/whk_your_token/live-activities' \
+curl -X POST 'https://hark.fyi/hooks/whk_your_token/live-activities' \
   -H 'Content-Type: application/json' \
   -d '{
     "title": "Deploy #184",
@@ -168,9 +168,9 @@ in the Hark app; `window.hark.close()` returns to Hark), sends it to its server,
 ```js
 import { createRemoteJWKSet, jwtVerify } from "jose";
 
-const jwks = createRemoteJWKSet(new URL("https://hark.ryan.ceo/.well-known/jwks.json"));
+const jwks = createRemoteJWKSet(new URL("https://hark.fyi/.well-known/jwks.json"));
 const { payload } = await jwtVerify(token, jwks, {
-  issuer: "https://hark.ryan.ceo",
+  issuer: "https://hark.ryan.ceo", // the pass issuer stays on the original domain
   audience: "https://app.example.com",
   typ: "hark-pass+jwt",
   algorithms: ["ES256"],
@@ -202,8 +202,8 @@ person and the whole group until someone acknowledges from the lock screen or th
 page by adding `"oncall": "ocg_..."` to the payload; add `"urgency": "low"` for a single quiet alert
 with no ringing or escalation (the default, `high`, rings until acknowledged). Acknowledging is
 human-only; agents can raise
-and resolve pages. See the [Teams](https://hark.ryan.ceo/docs#teams) and
-[On-call](https://hark.ryan.ceo/docs#oncall) docs.
+and resolve pages. See the [Teams](https://hark.fyi/docs#teams) and
+[On-call](https://hark.fyi/docs#oncall) docs.
 
 ## Agent Workflows
 
@@ -232,7 +232,7 @@ harkctl auth login --client-name "Coding agent permissions"
 harkctl permissions setup all
 ```
 
-See the [coding-agent permission setup guide](https://hark.ryan.ceo/docs#cli-permissions) for
+See the [coding-agent permission setup guide](https://hark.fyi/docs#cli-permissions) for
 Claude Code, Codex, OpenCode V1, and OpenCode V2 details.
 
 Only an explicit phone approval allows a request. Other outcomes deny it, and raw commands, patches,
@@ -240,7 +240,7 @@ prompts, file contents, and absolute paths are not sent to Hark.
 
 ## MCP
 
-Hark runs a remote [MCP](https://modelcontextprotocol.io) server at `https://hark.ryan.ceo/mcp`
+Hark runs a remote [MCP](https://modelcontextprotocol.io) server at `https://hark.fyi/mcp`
 (Streamable HTTP). Add the URL to your client; it signs in with OAuth, so there is no token to
 paste.
 
@@ -250,7 +250,7 @@ OpenCode (`opencode.json`):
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "hark": { "type": "remote", "url": "https://hark.ryan.ceo/mcp" }
+    "hark": { "type": "remote", "url": "https://hark.fyi/mcp" }
   }
 }
 ```
@@ -258,7 +258,7 @@ OpenCode (`opencode.json`):
 Claude Code:
 
 ```sh
-claude mcp add --transport http hark https://hark.ryan.ceo/mcp
+claude mcp add --transport http hark https://hark.fyi/mcp
 ```
 
 Cursor (`~/.cursor/mcp.json`):
@@ -266,7 +266,7 @@ Cursor (`~/.cursor/mcp.json`):
 ```json
 {
   "mcpServers": {
-    "hark": { "url": "https://hark.ryan.ceo/mcp" }
+    "hark": { "url": "https://hark.fyi/mcp" }
   }
 }
 ```
@@ -313,8 +313,8 @@ A few actions stay human-only on purpose: answering prompts, creating API tokens
 sign-in or changing what an app may see, registering devices, billing checkout, accepting team
 invites, and acknowledging or escalating pages. Every route,
 its scopes, and its request and response schemas are described by the public OpenAPI document at
-[`/api/agent/openapi.json`](https://hark.ryan.ceo/api/agent/openapi.json); see the
-[Agent API docs](https://hark.ryan.ceo/docs#agent-api).
+[`/api/agent/openapi.json`](https://hark.fyi/api/agent/openapi.json); see the
+[Agent API docs](https://hark.fyi/docs#agent-api).
 
 ## License
 

@@ -17,9 +17,9 @@ import {
   oauthConsent,
   oauthRefreshToken,
 } from "../db/schema";
-import { env } from "../env";
 import { track, trackUserActive } from "./analytics";
 import { newId } from "./id";
+import { canonicalOrigin, publicOrigins } from "./origins";
 
 /**
  * Hark is its own OAuth 2.1 authorization server (Better Auth's
@@ -42,12 +42,21 @@ export const OAUTH_CONSENT_PAGE = "/oauth/consent";
 const API_SCOPE_SET = new Set<string>(API_TOKEN_SCOPES);
 
 export function appOrigin(): string {
-  return new URL(env.APP_URL).origin;
+  return canonicalOrigin();
 }
 
-/** The MCP server's canonical URL: the OAuth resource indicator and audience. */
-export function mcpResourceUrl(): string {
-  return `${appOrigin()}${MCP_PATH}`;
+/**
+ * The MCP server's URL on `origin` (default: the canonical one): the OAuth
+ * resource indicator and audience. Clients use whichever origin they were
+ * set up with, so metadata answers with the origin the request came in on.
+ */
+export function mcpResourceUrl(origin = appOrigin()): string {
+  return `${origin}${MCP_PATH}`;
+}
+
+/** Every accepted token audience: the MCP URL on each public origin. */
+export function mcpResourceUrls(): string[] {
+  return publicOrigins().map((origin) => mcpResourceUrl(origin));
 }
 
 /** Better Auth's issuer: its base URL including the `/api/auth` base path. */
@@ -55,14 +64,17 @@ export function oauthIssuerUrl(): string {
   return `${appOrigin()}/api/auth`;
 }
 
-export function protectedResourceMetadataUrl(): string {
-  return `${appOrigin()}/.well-known/oauth-protected-resource${MCP_PATH}`;
+export function protectedResourceMetadataUrl(origin = appOrigin()): string {
+  return `${origin}/.well-known/oauth-protected-resource${MCP_PATH}`;
 }
 
-/** RFC 9728 protected resource metadata for `/mcp`. */
-export function protectedResourceMetadata() {
+/**
+ * RFC 9728 protected resource metadata for `/mcp` as reached on `origin`.
+ * The authorization server is always the canonical issuer.
+ */
+export function protectedResourceMetadata(origin = appOrigin()) {
   return {
-    resource: mcpResourceUrl(),
+    resource: mcpResourceUrl(origin),
     authorization_servers: [oauthIssuerUrl()],
     scopes_supported: [...OAUTH_SCOPES],
     bearer_methods_supported: ["header"],
@@ -75,9 +87,12 @@ export function protectedResourceMetadata() {
  * The `WWW-Authenticate` challenge `/mcp` sends with a 401. The `scope`
  * parameter tells MCP clients which scopes to request by default.
  */
-export function mcpAuthChallenge(error?: { code: string; description: string }): string {
+export function mcpAuthChallenge(
+  error?: { code: string; description: string },
+  origin = appOrigin(),
+): string {
   const parts = [
-    `resource_metadata="${protectedResourceMetadataUrl()}"`,
+    `resource_metadata="${protectedResourceMetadataUrl(origin)}"`,
     `scope="${OAUTH_DEFAULT_SCOPES.join(" ")}"`,
   ];
   if (error) {

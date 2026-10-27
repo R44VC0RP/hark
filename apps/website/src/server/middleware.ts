@@ -4,8 +4,8 @@ import { createMiddleware } from "hono/factory";
 import { auth } from "./auth";
 import { db } from "./db";
 import { apiToken } from "./db/schema";
-import { env } from "./env";
 import { trackUserActive } from "./lib/analytics";
+import { isPublicOrigin } from "./lib/origins";
 import { hashApiToken } from "./lib/token";
 
 export interface AuthedUser {
@@ -27,13 +27,13 @@ export type AgentEnv = {
   };
 };
 
-/** True when a browser says the request comes from a page outside APP_URL's origin. */
+/** True when a browser says the request comes from a page outside Hark's own origins. */
 export function hasForeignOrigin(c: {
   req: { header(name: string): string | undefined };
 }): boolean {
   const origin = c.req.header("origin");
   return Boolean(
-    (origin && origin !== new URL(env.APP_URL).origin) ||
+    (origin && !isPublicOrigin(origin)) ||
       c.req.header("sec-fetch-site")?.toLowerCase() === "cross-site",
   );
 }

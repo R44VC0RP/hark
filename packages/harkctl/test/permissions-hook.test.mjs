@@ -16,14 +16,14 @@ test("summaries exclude raw commands and absolute paths", () => {
   assert.equal(summary.title, "Claude Code permission");
   assert.match(summary.body, /Bash permission in hark for 2 resources/);
   assert.doesNotMatch(summary.body, /Users|private/);
-  assert.equal(summary.imageUrl, "https://hark.ryan.ceo/agents/claude.png");
+  assert.equal(summary.imageUrl, "https://hark.fyi/agents/claude.png");
   assert.equal(
     permissionSummary({ agent: "Codex", cwd: "/tmp/hark", toolName: "Bash" }).imageUrl,
-    "https://hark.ryan.ceo/agents/codex.png",
+    "https://hark.fyi/agents/codex.png",
   );
   assert.equal(
     permissionSummary({ agent: "OpenCode", cwd: "/tmp/hark", toolName: "shell" }).imageUrl,
-    "https://hark.ryan.ceo/agents/opencode.png",
+    "https://hark.fyi/agents/opencode.png",
   );
 });
 
@@ -41,7 +41,7 @@ test("Claude and Codex hooks map only explicit approval to allow", async () => {
   });
   assert.deepEqual(approved, hookDecision("claude", true));
   assert.doesNotMatch(JSON.stringify(sent), /secret-value/);
-  assert.equal(sent.imageUrl, "https://hark.ryan.ceo/agents/claude.png");
+  assert.equal(sent.imageUrl, "https://hark.fyi/agents/claude.png");
 
   const denied = await handlePermissionHook("codex", input, async () => "denied");
   assert.deepEqual(denied, hookDecision("codex", false));

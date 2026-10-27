@@ -5,7 +5,7 @@ import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
 import { main as permissionsMain } from "./permissions/cli.mjs";
 
-const DEFAULT_API_URL = "https://hark.ryan.ceo";
+const DEFAULT_API_URL = "https://hark.fyi";
 const DEFAULT_SCOPES = [
   "notifications:send",
   "interactions:create",

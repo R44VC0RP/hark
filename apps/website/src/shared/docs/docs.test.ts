@@ -108,9 +108,9 @@ describe("parseInline", () => {
       { kind: "code", text: "body" },
       { kind: "text", text: " is required." },
     ]);
-    expect(parseInline("Sign in at [hark.ryan.ceo](https://hark.ryan.ceo).")).toEqual([
+    expect(parseInline("Sign in at [hark.fyi](https://hark.fyi).")).toEqual([
       { kind: "text", text: "Sign in at " },
-      { kind: "link", text: "hark.ryan.ceo", href: "https://hark.ryan.ceo" },
+      { kind: "link", text: "hark.fyi", href: "https://hark.fyi" },
       { kind: "text", text: "." },
     ]);
   });
@@ -131,7 +131,7 @@ describe("docsMarkdown", () => {
   });
 
   it("emits fenced code with a language and pipe tables", () => {
-    expect(markdown).toContain("```bash\ncurl -X POST https://hark.ryan.ceo/hooks/whk_your_token");
+    expect(markdown).toContain("```bash\ncurl -X POST https://hark.fyi/hooks/whk_your_token");
     expect(markdown).toContain('```json\n{\n  "ok": true,');
     expect(markdown).toContain("| Field | Type | Description |");
     expect(markdown).toContain("| Route | Purpose |");
@@ -170,11 +170,11 @@ describe("llmsTxt", () => {
   it("describes Hark and links its canonical machine-readable resources", () => {
     const text = llmsTxt();
     expect(text.startsWith("# Hark")).toBe(true);
-    expect(text).toContain("https://hark.ryan.ceo/docs");
-    expect(text).toContain("https://hark.ryan.ceo/docs.md");
-    expect(text).toContain("https://hark.ryan.ceo/agents.md");
-    expect(text).toContain("https://hark.ryan.ceo/docs#cli-permissions");
-    expect(text).toContain("https://hark.ryan.ceo/pricing");
+    expect(text).toContain("https://hark.fyi/docs");
+    expect(text).toContain("https://hark.fyi/docs.md");
+    expect(text).toContain("https://hark.fyi/agents.md");
+    expect(text).toContain("https://hark.fyi/docs#cli-permissions");
+    expect(text).toContain("https://hark.fyi/pricing");
     expect(text).toContain("https://skills.sh/r44vc0rp/hark/hark");
     expect(text).toContain("https://www.npmjs.com/package/harkctl");
   });

@@ -124,7 +124,7 @@ export default function TeamDetailScreen() {
       try {
         const result = simulatorPreview
           ? {
-              url: "https://hark.ryan.ceo/join/preview-invite-code",
+              url: "https://hark.fyi/join/preview-invite-code",
               invite: {
                 ...(previewTeamInvites[0] as TeamInviteDto),
                 id: `inv_preview${Date.now().toString(36)}`,

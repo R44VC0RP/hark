@@ -29,9 +29,12 @@ interface ActiveSigningKey {
   privateKey: CryptoKey | Uint8Array;
 }
 
-/** Pass issuer: the public Hark origin, without a trailing slash. */
+/**
+ * Pass issuer, without a trailing slash. Web apps pin it, so production
+ * keeps the original origin (APP_PASS_ISSUER) even after APP_URL moved.
+ */
 export function appPassIssuer(): string {
-  return new URL(env.APP_URL).origin;
+  return new URL(env.APP_PASS_ISSUER ?? env.APP_URL).origin;
 }
 
 function toPublicJwk(kid: string, jwk: JWK): AppPassPublicJwk {
