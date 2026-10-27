@@ -406,8 +406,11 @@ harkctl oncall create --team team_XXXX --name Primary --members user_A,user_B \
 harkctl oncall list --team team_XXXX
 harkctl oncall me
 harkctl oncall settings
+harkctl oncall update ocg_XXXX --escalation 5:next,10:people=user_A+user_B,15:oncall=ocg_YYYY \
+  --escalation-mode fan_out --escalation-loops 1 --escalation-final team
 harkctl page ocg_XXXX "API error rate above 20%" --body "5xx since 14:02" --dedup-key api-5xx
 harkctl pages list --team team_XXXX
+harkctl pages get page_XXXX --timeline
 harkctl pages resolve page_XXXX --note "Rolled back"
 ```
 
@@ -424,6 +427,17 @@ harkctl pages resolve page_XXXX --note "Rolled back"
   read, and resolve pages. Use a stable `--dedup-key` for repeating alerts so they merge into the
   open page instead of paging again. `notify "<body>" --oncall ocg_XXXX` pages too, using
   `--idempotency-key` as the dedup key. Page bodies are at most 2,000 characters.
+- Escalation policy (per group): level 0 is whoever is on call; `escalation` adds up to 5 levels
+  of `{ afterMinutes, target, userIds?, groupId? }`, where `afterMinutes` (1–1440) is the previous
+  level's acknowledgement timeout and `target` is `next`, `oncall` (optional `groupId` of another
+  group in the team), `people` (`userIds`, up to 20 team members), `group`, or `team`. Group
+  fields `escalationMode` (`fan_out` default keeps earlier levels ringing; `hand_off` silences
+  them), `escalationLoops` (0–3 reruns from level 0), and `escalationFinal` (`none`, `group`,
+  `team`, paged once at the end) go on `oncall create|update` (`--escalation 5:next,10:people=a+b`,
+  `--escalation-mode`, `--escalation-loops`, `--escalation-final`, or `--stdin` JSON). Acknowledging
+  claims the page: the first wins, and everyone else's alert becomes a quiet "Claimed by" notice.
+  Escalate (human-only too) jumps to the next level now. A page's `timeline` lists who was paged at
+  each level and loop, who escalated, and who claimed and resolved it (`pages get --timeline`).
 - Pages ring until acknowledged: the person being paged is re-alerted every
   `ringIntervalSeconds` (30–300, default 60) up to `ringMaxRepeats` times (0–30, default 10; 0
   alerts once), set per group with `--ring-interval` / `--ring-repeats` on `oncall create|update`.

@@ -12,6 +12,8 @@ import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { ApiRequestError, api } from "../../lib/api";
 import {
   canManage,
+  MAX_ESCALATION_LOOPS,
+  MAX_ESCALATION_PEOPLE,
   MAX_ESCALATION_STEPS,
   ONCALL_RING_INTERVAL_DEFAULT_SECONDS,
   ONCALL_RING_INTERVAL_MAX_SECONDS,
@@ -40,16 +42,93 @@ import {
 } from "../DashboardKit";
 import { primaryButtonSmall, rowButton, rowDangerButton, secondaryButton, textLink } from "../ui";
 
-export function escalationSummary(steps: OncallEscalationStep[]): string {
-  if (steps.length === 0) return "No escalation: only the person on call is paged.";
-  const parts = steps.map((step, index) => {
-    const target = step.target === "next" ? "the next person" : "the whole group";
-    return index === 0
-      ? `${target} after ${step.afterMinutes} min`
-      : `${target} ${step.afterMinutes} min later`;
-  });
-  const text = parts.join(", then ");
-  return `If nobody acknowledges: ${text}.`;
+type EscalationTarget = OncallEscalationStep["target"];
+type EscalationMode = NonNullable<OncallGroupDto["escalationMode"]>;
+type EscalationFinal = NonNullable<OncallGroupDto["escalationFinal"]>;
+
+/** Waited before the final fan-out when a group has no levels (the server's default). */
+const DEFAULT_FINAL_DELAY_MINUTES = 5;
+
+const TARGET_LABELS: Record<EscalationTarget, string> = {
+  next: "the next person in the rotation",
+  oncall: "whoever is on call",
+  people: "specific people",
+  group: "the whole group",
+  team: "the whole team",
+};
+
+const FINAL_LABELS: Record<EscalationFinal, string> = {
+  none: "Nobody",
+  group: "Everyone in the group",
+  team: "Everyone in the team",
+};
+
+/** "Ana, Ben, Cal" or "Ana, Ben and 3 more". */
+function peopleLabel(userIds: string[], members: TeamMemberDto[]): string {
+  const names = userIds.map(
+    (id) => members.find((member) => member.userId === id)?.name ?? "a former member",
+  );
+  if (names.length === 0) return "nobody yet";
+  if (names.length <= 3) return names.join(", ");
+  return `${names.slice(0, 2).join(", ")} and ${names.length - 2} more`;
+}
+
+/** Short label for one level in a group's summary, e.g. "next person" or "on call in Ops". */
+function levelLabel(
+  step: OncallEscalationStep,
+  groupId: string,
+  members: TeamMemberDto[],
+  groups: OncallGroupDto[],
+): string {
+  switch (step.target) {
+    case "next":
+      return "next person";
+    case "oncall": {
+      if (!step.groupId || step.groupId === groupId) return "on call";
+      const other = groups.find((item) => item.id === step.groupId);
+      return other ? `on call in ${other.name}` : "on call in another group";
+    }
+    case "people":
+      return peopleLabel(step.userIds ?? [], members);
+    case "group":
+      return "whole group";
+    case "team":
+      return "whole team";
+  }
+}
+
+/** "Escalation: On call → 5 min → Ben → 10 min → on call in Ops; fan out; loops 1×; then …". */
+export function escalationSummary(
+  group: Pick<
+    OncallGroupDto,
+    "id" | "escalation" | "escalationMode" | "escalationLoops" | "escalationFinal"
+  >,
+  members: TeamMemberDto[],
+  groups: OncallGroupDto[],
+): string {
+  const steps = group.escalation;
+  const final = group.escalationFinal ?? "none";
+  if (steps.length === 0 && final === "none") {
+    return "No escalation: only the person on call is paged.";
+  }
+  const chain = [
+    "On call",
+    ...steps.flatMap((step) => [
+      `${step.afterMinutes} min`,
+      levelLabel(step, group.id, members, groups),
+    ]),
+  ].join(" → ");
+  const extras: string[] = [];
+  if (steps.length > 0 && group.escalationMode) {
+    extras.push(group.escalationMode === "hand_off" ? "hand off" : "fan out");
+  }
+  const loops = group.escalationLoops ?? 0;
+  if (steps.length > 0 && loops > 0) extras.push(`loops ${loops}×`);
+  if (final !== "none") {
+    const wait = steps[0]?.afterMinutes ?? DEFAULT_FINAL_DELAY_MINUTES;
+    extras.push(`then the whole ${final} after ${wait} min`);
+  }
+  return `Escalation: ${chain}${extras.length > 0 ? `; ${extras.join("; ")}` : ""}.`;
 }
 
 /** "30 s", "1 min", "90 s", "5 min". */
@@ -135,6 +214,7 @@ export function OncallSection({
           {groups.map((group) => (
             <GroupCard
               group={group}
+              groups={groups}
               key={group.id}
               manage={manage}
               members={members}
@@ -157,6 +237,7 @@ export function OncallSection({
       {editing ? (
         <GroupModal
           group={editing === "new" ? null : editing}
+          groups={groups ?? []}
           members={members}
           onClose={() => setEditing(null)}
           onSaved={(group) => {
@@ -172,6 +253,7 @@ export function OncallSection({
 
 function GroupCard({
   group,
+  groups,
   members,
   manage,
   viewerName,
@@ -181,6 +263,7 @@ function GroupCard({
   onPaged,
 }: {
   group: OncallGroupDto;
+  groups: OncallGroupDto[];
   members: TeamMemberDto[];
   manage: boolean;
   viewerName: string;
@@ -319,7 +402,7 @@ function GroupCard({
       </div>
 
       <p className="mt-3 text-[13px] leading-relaxed text-ink-muted">
-        {escalationSummary(group.escalation)}
+        {escalationSummary(group, members, groups)}
         {ring ? ` ${ring}` : null}
       </p>
 
@@ -566,12 +649,14 @@ function timeZones(current: string): string[] {
 function GroupModal({
   teamId,
   group,
+  groups,
   members,
   onClose,
   onSaved,
 }: {
   teamId: string;
   group: OncallGroupDto | null;
+  groups: OncallGroupDto[];
   members: TeamMemberDto[];
   onClose: () => void;
   onSaved: (group: OncallGroupDto) => void;
@@ -590,6 +675,9 @@ function GroupModal({
   const [steps, setSteps] = useState<OncallEscalationStep[]>(
     group?.escalation ?? DEFAULT_ESCALATION,
   );
+  const [mode, setMode] = useState<EscalationMode>(group?.escalationMode ?? "fan_out");
+  const [loops, setLoops] = useState(group?.escalationLoops ?? 0);
+  const [final, setFinal] = useState<EscalationFinal>(group?.escalationFinal ?? "none");
   // Strings so a half-typed number isn't clamped; the inputs' min/max validate on submit.
   const [ringInterval, setRingInterval] = useState(
     String(group?.ringIntervalSeconds ?? ONCALL_RING_INTERVAL_DEFAULT_SECONDS),
@@ -615,15 +703,15 @@ function GroupModal({
       return next;
     });
 
-  const updateStep = (index: number, patch: Partial<OncallEscalationStep>) =>
-    setSteps((current) =>
-      current.map((step, position) => (position === index ? { ...step, ...patch } : step)),
-    );
-
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (rotation.length === 0) {
       setError("Add at least one person to the rotation.");
+      return;
+    }
+    const empty = steps.findIndex((step) => step.target === "people" && !step.userIds?.length);
+    if (empty !== -1) {
+      setError(`Choose at least one person for level ${empty + 1}.`);
       return;
     }
     setBusy(true);
@@ -632,6 +720,9 @@ function GroupModal({
       name: name.trim(),
       rotation: { memberIds: rotation, period, handoffAt, timezone },
       escalation: steps,
+      escalationMode: mode,
+      escalationLoops: loops,
+      escalationFinal: final,
       ringIntervalSeconds: Number(ringInterval),
       ringMaxRepeats: Number(ringRepeats),
     };
@@ -773,82 +864,19 @@ function GroupModal({
           </Field>
         </div>
 
-        <fieldset>
-          <legend className="mb-1.5 text-sm text-ink-muted">Escalation</legend>
-          <p className="mb-2 text-[13px] text-ink-faint">
-            The person on call is paged first. Each step waits for an acknowledgement before it
-            runs.
-          </p>
-          {steps.length > 0 ? (
-            <ol className="space-y-2">
-              {steps.map((step, index) => (
-                <li
-                  className="flex flex-wrap items-center gap-2 rounded-2xl bg-panel px-3 py-2 text-[15px] text-ink"
-                  // biome-ignore lint/suspicious/noArrayIndexKey: steps are positional and have no identity
-                  key={index}
-                >
-                  <span className="text-ink-muted">{index === 0 ? "After" : "Then after"}</span>
-                  <input
-                    aria-label={`Minutes before step ${index + 1}`}
-                    className="hark-field h-8 w-16 rounded-full px-3 text-center text-[15px] tabular-nums"
-                    max={1440}
-                    min={1}
-                    onChange={(event) =>
-                      updateStep(index, {
-                        afterMinutes: Math.max(1, Math.min(1440, Number(event.target.value) || 1)),
-                      })
-                    }
-                    required
-                    type="number"
-                    value={step.afterMinutes}
-                  />
-                  <span className="text-ink-muted">min, page</span>
-                  <Select
-                    aria-label={`Who step ${index + 1} pages`}
-                    className="w-40"
-                    compact
-                    onChange={(event) =>
-                      updateStep(index, { target: event.target.value as "next" | "group" })
-                    }
-                    value={step.target}
-                  >
-                    <option value="next">the next person</option>
-                    <option value="group">the whole group</option>
-                  </Select>
-                  <span className="flex-1" />
-                  <IconButton
-                    label={`Remove step ${index + 1}`}
-                    onClick={() =>
-                      setSteps((current) => current.filter((_, position) => position !== index))
-                    }
-                  >
-                    <path d="m4.5 4.5 7 7m0-7-7 7" />
-                  </IconButton>
-                </li>
-              ))}
-            </ol>
-          ) : (
-            <p className="rounded-2xl border border-dashed border-line-strong px-4 py-3 text-sm text-ink-muted">
-              No escalation. Only the person on call is paged.
-            </p>
-          )}
-          {steps.length < MAX_ESCALATION_STEPS ? (
-            <button
-              className={`${rowButton} mt-2`}
-              onClick={() =>
-                setSteps((current) => [
-                  ...current,
-                  { afterMinutes: 10, target: current.length === 0 ? "next" : "group" },
-                ])
-              }
-              type="button"
-            >
-              Add step
-            </button>
-          ) : (
-            <p className="mt-2 text-[13px] text-ink-faint">Up to {MAX_ESCALATION_STEPS} steps.</p>
-          )}
-        </fieldset>
+        <EscalationEditor
+          final={final}
+          groupId={group?.id ?? null}
+          groups={groups}
+          loops={loops}
+          members={members}
+          mode={mode}
+          onFinal={setFinal}
+          onLoops={setLoops}
+          onMode={setMode}
+          onSteps={setSteps}
+          steps={steps}
+        />
 
         <fieldset>
           <legend className="mb-1.5 text-sm text-ink-muted">Repeat alerts</legend>
@@ -904,6 +932,291 @@ function GroupModal({
         </button>
       </div>
     </Modal>
+  );
+}
+
+const LOOP_LABELS = ["Don't repeat", "Repeat once", "Repeat twice", "Repeat 3 times"] as const;
+
+/**
+ * The escalation policy: level 0 (whoever is on call), then up to
+ * MAX_ESCALATION_STEPS levels with their timeouts, how levels combine,
+ * loops, and the final fan-out.
+ */
+function EscalationEditor({
+  groupId,
+  groups,
+  members,
+  steps,
+  mode,
+  loops,
+  final,
+  onSteps,
+  onMode,
+  onLoops,
+  onFinal,
+}: {
+  groupId: string | null;
+  groups: OncallGroupDto[];
+  members: TeamMemberDto[];
+  steps: OncallEscalationStep[];
+  mode: EscalationMode;
+  loops: number;
+  final: EscalationFinal;
+  onSteps: React.Dispatch<React.SetStateAction<OncallEscalationStep[]>>;
+  onMode: (mode: EscalationMode) => void;
+  onLoops: (loops: number) => void;
+  onFinal: (final: EscalationFinal) => void;
+}) {
+  const otherGroups = groups.filter((item) => item.id !== groupId);
+  const firstWait = steps[0]?.afterMinutes ?? DEFAULT_FINAL_DELAY_MINUTES;
+
+  const replaceStep = (index: number, next: (step: OncallEscalationStep) => OncallEscalationStep) =>
+    onSteps((current) => current.map((step, position) => (position === index ? next(step) : step)));
+
+  // A fresh step per target, so fields that belong to another target never linger.
+  const setTarget = (index: number, target: EscalationTarget) =>
+    replaceStep(index, (step) => ({
+      afterMinutes: step.afterMinutes,
+      target,
+      ...(target === "people" ? { userIds: step.userIds ?? [] } : {}),
+      ...(target === "oncall" && step.groupId ? { groupId: step.groupId } : {}),
+    }));
+
+  const setGroup = (index: number, value: string) =>
+    replaceStep(index, ({ groupId: _previous, ...step }) =>
+      value ? { ...step, groupId: value } : step,
+    );
+
+  const setPeople = (index: number, userIds: string[]) =>
+    replaceStep(index, (step) => ({ ...step, userIds }));
+
+  return (
+    <fieldset>
+      <legend className="mb-1.5 text-sm text-ink-muted">Escalation</legend>
+      <p className="mb-2 text-[13px] text-ink-faint">
+        Each level starts when the one before it isn't acknowledged in time. The first person to
+        acknowledge claims the page; everyone else's alert turns into a quiet "Claimed by" notice.
+      </p>
+      <ol className="space-y-2">
+        <li className="flex flex-wrap items-center gap-2 rounded-2xl bg-panel px-3 py-2 text-[15px] text-ink">
+          <span className="w-14 text-[13px] text-ink-faint tabular-nums">Level 0</span>
+          <span className="text-white">Whoever is on call</span>
+          <span className="text-[13px] text-ink-faint">(the whole group if nobody is)</span>
+        </li>
+        {steps.map((step, index) => {
+          const level = index + 1;
+          return (
+            <li
+              className="rounded-2xl bg-panel px-3 py-2 text-[15px] text-ink"
+              // biome-ignore lint/suspicious/noArrayIndexKey: steps are positional and have no identity
+              key={index}
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="w-14 text-[13px] text-ink-faint tabular-nums">Level {level}</span>
+                <span className="text-ink-muted">If not acknowledged in</span>
+                <input
+                  aria-label={`Minutes before level ${level}`}
+                  className="hark-field h-8 w-16 rounded-full px-3 text-center text-[15px] tabular-nums"
+                  max={1440}
+                  min={1}
+                  onChange={(event) => {
+                    const afterMinutes = Math.max(
+                      1,
+                      Math.min(1440, Number(event.target.value) || 1),
+                    );
+                    replaceStep(index, (current) => ({ ...current, afterMinutes }));
+                  }}
+                  required
+                  type="number"
+                  value={step.afterMinutes}
+                />
+                <span className="text-ink-muted">min, page</span>
+                <Select
+                  aria-label={`Who level ${level} pages`}
+                  className="w-56"
+                  compact
+                  onChange={(event) => setTarget(index, event.target.value as EscalationTarget)}
+                  value={step.target}
+                >
+                  {(Object.keys(TARGET_LABELS) as EscalationTarget[]).map((target) => (
+                    <option key={target} value={target}>
+                      {TARGET_LABELS[target]}
+                    </option>
+                  ))}
+                </Select>
+                {step.target === "oncall" && (otherGroups.length > 0 || step.groupId) ? (
+                  <Select
+                    aria-label={`Group level ${level} pages`}
+                    className="w-44"
+                    compact
+                    onChange={(event) => setGroup(index, event.target.value)}
+                    value={step.groupId ?? ""}
+                  >
+                    <option value="">in this group</option>
+                    {step.groupId && !otherGroups.some((item) => item.id === step.groupId) ? (
+                      <option value={step.groupId}>in another group</option>
+                    ) : null}
+                    {otherGroups.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        in {item.name}
+                      </option>
+                    ))}
+                  </Select>
+                ) : null}
+                <span className="flex-1" />
+                <IconButton
+                  label={`Remove level ${level}`}
+                  onClick={() =>
+                    onSteps((current) => current.filter((_, position) => position !== index))
+                  }
+                >
+                  <path d="m4.5 4.5 7 7m0-7-7 7" />
+                </IconButton>
+              </div>
+              {step.target === "people" ? (
+                <PeoplePicker
+                  label={`level ${level}`}
+                  members={members}
+                  onChange={(userIds) => setPeople(index, userIds)}
+                  userIds={step.userIds ?? []}
+                />
+              ) : null}
+            </li>
+          );
+        })}
+      </ol>
+      {steps.length < MAX_ESCALATION_STEPS ? (
+        <button
+          className={`${rowButton} mt-2`}
+          onClick={() =>
+            onSteps((current) => [
+              ...current,
+              { afterMinutes: 10, target: current.length === 0 ? "next" : "group" },
+            ])
+          }
+          type="button"
+        >
+          Add level
+        </button>
+      ) : (
+        <p className="mt-2 text-[13px] text-ink-faint">Up to {MAX_ESCALATION_STEPS} levels.</p>
+      )}
+
+      <div className="mt-4 grid gap-4 sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)]">
+        <div>
+          <span className="mb-1.5 block text-sm text-ink-muted">When a level starts</span>
+          <div className="flex h-[46px] items-center">
+            <Segmented
+              label="When a level starts"
+              onChange={onMode}
+              options={[
+                { value: "fan_out", label: "Fan out" },
+                { value: "hand_off", label: "Hand off" },
+              ]}
+              value={mode}
+            />
+          </div>
+        </div>
+        <Field label="After the last level">
+          <Select
+            disabled={steps.length === 0}
+            onChange={(event) => onLoops(Number(event.target.value))}
+            value={steps.length === 0 ? 0 : loops}
+          >
+            {LOOP_LABELS.slice(0, MAX_ESCALATION_LOOPS + 1).map((label, value) => (
+              <option key={label} value={value}>
+                {label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Finally page">
+          <Select
+            onChange={(event) => onFinal(event.target.value as EscalationFinal)}
+            value={final}
+          >
+            {(Object.keys(FINAL_LABELS) as EscalationFinal[]).map((value) => (
+              <option key={value} value={value}>
+                {FINAL_LABELS[value]}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      </div>
+      <p className="mt-2 text-[13px] text-ink-faint">
+        {mode === "fan_out"
+          ? "Fan out: earlier levels keep ringing as new ones join."
+          : "Hand off: a new level silences the levels before it."}{" "}
+        {steps.length > 0 && loops > 0
+          ? `The policy runs again from level 0 ${loops === 1 ? "once" : `${loops} times`}, waiting ${firstWait} min after the last level.`
+          : null}
+        {final !== "none"
+          ? ` If still nobody acknowledges, ${FINAL_LABELS[final].toLowerCase()} is paged once.`
+          : null}
+      </p>
+    </fieldset>
+  );
+}
+
+/** Chips for the people a level pages, plus a picker for more team members. */
+function PeoplePicker({
+  label,
+  members,
+  userIds,
+  onChange,
+}: {
+  label: string;
+  members: TeamMemberDto[];
+  userIds: string[];
+  onChange: (userIds: string[]) => void;
+}) {
+  const byId = new Map(members.map((member) => [member.userId, member]));
+  const available = members.filter((member) => !userIds.includes(member.userId));
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1.5 sm:pl-16">
+      {userIds.map((userId) => {
+        const member = byId.get(userId);
+        const name = member?.name ?? "Former member";
+        return (
+          <span
+            className="inline-flex h-8 items-center gap-1.5 rounded-full bg-white/8 pr-0.5 pl-1"
+            key={userId}
+          >
+            {member ? <PersonAvatar person={member} size="sm" /> : null}
+            <span className="max-w-40 truncate text-[13px] text-white">{name}</span>
+            <IconButton
+              label={`Remove ${name} from ${label}`}
+              onClick={() => onChange(userIds.filter((id) => id !== userId))}
+            >
+              <path d="m4.5 4.5 7 7m0-7-7 7" />
+            </IconButton>
+          </span>
+        );
+      })}
+      {available.length > 0 && userIds.length < MAX_ESCALATION_PEOPLE ? (
+        <div className="w-full sm:w-48">
+          <Select
+            aria-label={`Add a person to ${label}`}
+            compact
+            onChange={(event) => {
+              const value = event.target.value;
+              if (value) onChange([...userIds, value]);
+            }}
+            value=""
+          >
+            <option value="">Add a person…</option>
+            {available.map((member) => (
+              <option key={member.userId} value={member.userId}>
+                {member.name}
+              </option>
+            ))}
+          </Select>
+        </div>
+      ) : null}
+      {userIds.length === 0 ? (
+        <span className="text-[13px] text-ink-faint">Choose who this level pages.</span>
+      ) : null}
+    </div>
   );
 }
 

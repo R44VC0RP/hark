@@ -7,6 +7,8 @@ export { TEAM_FREE_SEATS, TEAM_SEAT_PRICE_MONTHLY } from "../../shared/pricing";
 // bundle zod into the client.
 export const TEAM_NAME_MAX_CHARS: typeof Contracts.TEAM_NAME_MAX_CHARS = 60;
 export const MAX_ESCALATION_STEPS: typeof Contracts.MAX_ESCALATION_STEPS = 5;
+export const MAX_ESCALATION_LOOPS: typeof Contracts.MAX_ESCALATION_LOOPS = 3;
+export const MAX_ESCALATION_PEOPLE: typeof Contracts.MAX_ESCALATION_PEOPLE = 20;
 export const ONCALL_RING_INTERVAL_MIN_SECONDS: typeof Contracts.ONCALL_RING_INTERVAL_MIN_SECONDS = 30;
 export const ONCALL_RING_INTERVAL_MAX_SECONDS: typeof Contracts.ONCALL_RING_INTERVAL_MAX_SECONDS = 300;
 export const ONCALL_RING_INTERVAL_DEFAULT_SECONDS: typeof Contracts.ONCALL_RING_INTERVAL_DEFAULT_SECONDS = 60;

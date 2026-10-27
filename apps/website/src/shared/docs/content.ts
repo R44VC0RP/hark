@@ -1433,29 +1433,11 @@ harkctl apps remove app_...`,
         blocks: [
           {
             kind: "p",
-            text: "A page goes first to the person on call. If nobody is on call, the whole group is paged. Escalation steps then run until someone acknowledges:",
-          },
-          {
-            kind: "table",
-            variant: "field",
-            caption: "Escalation steps",
-            rows: [
-              {
-                name: "afterMinutes",
-                type: "integer",
-                detail: "Minutes after the previous step (or the page) without an acknowledgement.",
-              },
-              {
-                name: "target",
-                type: "next | group",
-                detail:
-                  "`next` pages the next person in the rotation; `group` pages everyone in it who has not been paged yet.",
-              },
-            ],
+            text: "A page goes first to the person on call. If nobody is on call, the whole group is paged. The group's escalation policy then pages more people, level by level, until someone acknowledges.",
           },
           {
             kind: "p",
-            text: "The default is the next person after 5 minutes, then the whole group 10 minutes later. Pages with the same `dedupKey` merge into the open page (its `repeatCount` grows) instead of paging again.",
+            text: "The default policy pages the next person in the rotation after 5 minutes, then the whole group 10 minutes later. Pages with the same `dedupKey` merge into the open page (its `repeatCount` grows) instead of paging again.",
           },
           {
             kind: "code",
@@ -1466,11 +1448,106 @@ harkctl apps remove app_...`,
         ],
       },
       {
+        id: "oncall-escalation",
+        blocks: [
+          {
+            kind: "p",
+            text: "An escalation policy is a list of levels. Level 0 is always whoever is on call (or the whole group when nobody is). Each entry in `escalation` adds the next level, up to 5, and says how long the level before it has to acknowledge:",
+          },
+          {
+            kind: "table",
+            variant: "field",
+            caption: "Escalation levels",
+            rows: [
+              {
+                name: "afterMinutes",
+                type: "integer",
+                detail:
+                  "The previous level's acknowledgement timeout, 1 to 1440: how long it rings before this level starts.",
+              },
+              {
+                name: "target",
+                type: "next | oncall | people | group | team",
+                detail:
+                  "`next`: the next person in the rotation. `oncall`: whoever is on call in this group, or in `groupId`. `people`: everyone in `userIds` at once. `group`: every member of the group. `team`: every member of the team.",
+              },
+              {
+                name: "userIds",
+                type: "string[]",
+                detail: "Required for `people`: 1 to 20 team members.",
+              },
+              {
+                name: "groupId",
+                type: "string",
+                detail: "Optional for `oncall`: another on-call group in the same team.",
+              },
+            ],
+          },
+          {
+            kind: "table",
+            variant: "field",
+            caption: "Policy fields",
+            rows: [
+              {
+                name: "escalationMode",
+                type: "fan_out | hand_off",
+                detail:
+                  "`fan_out` (default): earlier levels keep ringing as new ones join. `hand_off`: a new level silences the levels before it.",
+              },
+              {
+                name: "escalationLoops",
+                type: "integer",
+                detail:
+                  "Run the policy again from level 0 this many times, 0 to 3 (default 0). The last level waits as long as the first before a loop starts.",
+              },
+              {
+                name: "escalationFinal",
+                type: "none | group | team",
+                detail:
+                  "Paged once after the last level and any loops (default `none`), again after the first level's timeout.",
+              },
+            ],
+          },
+          {
+            kind: "p",
+            text: "Ringing at every level follows the group's ring-until-acknowledged settings. Levels can only name members and groups of the same team. This policy pages whoever is on call, then Ben and Cal 5 minutes later, then whoever is on call in the Ops group, runs once more, and finally pages the whole team:",
+          },
+          {
+            kind: "code",
+            language: "json",
+            code: `{
+  "escalation": [
+    { "afterMinutes": 5, "target": "people", "userIds": ["user_ben", "user_cal"] },
+    { "afterMinutes": 10, "target": "oncall", "groupId": "ocg_ops" }
+  ],
+  "escalationMode": "fan_out",
+  "escalationLoops": 1,
+  "escalationFinal": "team"
+}`,
+          },
+          {
+            kind: "code",
+            language: "bash",
+            code: `harkctl oncall update ocg_... \\
+  --escalation 5:people=user_ben+user_cal,10:oncall=ocg_ops \\
+  --escalation-mode fan_out --escalation-loops 1 --escalation-final team`,
+          },
+          {
+            kind: "p",
+            text: "Send these fields to `POST /api/agent/teams/:id/oncall` or `PATCH /api/agent/oncall/:groupId`, or edit the policy on the team page in the dashboard. A group's summary reads like `On call → 5 min → Ben, Cal → 10 min → on call in Ops; fan out; loops 1×; then the whole team after 5 min`.",
+          },
+          {
+            kind: "p",
+            text: "Each page carries a `timeline`: who was paged at which `level` and `loop`, who escalated by hand (`escalatedBy`), and who acknowledged and resolved it. The dashboard shows it under each page, and `harkctl pages get page_... --timeline` prints it.",
+          },
+        ],
+      },
+      {
         id: "oncall-ringing",
         blocks: [
           {
             kind: "p",
-            text: "A page keeps ringing until someone acknowledges it. Whoever is being paged gets the alert again on the group's interval, up to its repeat limit. When an escalation step pages the next person, ringing moves to them; a `group` step makes everyone it pages ring. Acknowledging or resolving the page stops all ringing at once.",
+            text: "A page keeps ringing until someone acknowledges it. Whoever is being paged gets the alert again on the group's interval, up to its repeat limit. Each escalation level rings the people it pages; with `fan_out` earlier levels keep ringing too, with `hand_off` they stop. Acknowledging or resolving the page stops all ringing at once.",
           },
           {
             kind: "table",
@@ -1572,7 +1649,7 @@ harkctl oncall settings set --ring-until-ack on --ring-interval group`,
         blocks: [
           {
             kind: "p",
-            text: "Anyone on the team can acknowledge a page from the Lock Screen, the app, or the website. The first acknowledgement wins: escalation stops, the page clears from everyone else's phone, and later acknowledgements are refused. Escalate pages the next step right away.",
+            text: "Anyone on the team can acknowledge a page from the Lock Screen, the app, or the website. Acknowledging claims the page, and the first acknowledgement wins: escalation stops, everyone else's ringing stops, their alert is replaced by a quiet \"Claimed by\" notice with the claimer's name, and later acknowledgements are refused. Escalate jumps to the next level right away and records who escalated; past the last level it pages the whole group (or the team when that is the final step).",
           },
           {
             kind: "note",

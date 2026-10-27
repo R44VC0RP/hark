@@ -1370,6 +1370,47 @@ test("team and on-call commands call the matching agent routes", async () => {
       { ringIntervalSeconds: 120, ringMaxRepeats: 0 },
     ],
     [
+      [
+        "oncall",
+        "update",
+        "ocg_1",
+        "--escalation",
+        "5:next,10:people=usr_a+usr_b,10:oncall=ocg_x,15:oncall,20:group",
+        "--escalation-mode",
+        "hand_off",
+        "--escalation-loops",
+        "2",
+        "--escalation-final",
+        "team",
+      ],
+      "PATCH",
+      "/api/agent/oncall/ocg_1",
+      {
+        escalation: [
+          { afterMinutes: 5, target: "next" },
+          { afterMinutes: 10, target: "people", userIds: ["usr_a", "usr_b"] },
+          { afterMinutes: 10, target: "oncall", groupId: "ocg_x" },
+          { afterMinutes: 15, target: "oncall" },
+          { afterMinutes: 20, target: "group" },
+        ],
+        escalationMode: "hand_off",
+        escalationLoops: 2,
+        escalationFinal: "team",
+      },
+    ],
+    [
+      ["oncall", "update", "ocg_1", "--escalation=10:people=usr_a"],
+      "PATCH",
+      "/api/agent/oncall/ocg_1",
+      { escalation: [{ afterMinutes: 10, target: "people", userIds: ["usr_a"] }] },
+    ],
+    [
+      ["oncall", "update", "ocg_1", "--escalation", "none"],
+      "PATCH",
+      "/api/agent/oncall/ocg_1",
+      { escalation: [] },
+    ],
+    [
       ["oncall", "remove-override", "ocg_1", "ovr_1"],
       "DELETE",
       "/api/agent/oncall/ocg_1/overrides/ovr_1",
@@ -1409,6 +1450,71 @@ test("team and on-call commands call the matching agent routes", async () => {
     /from 30 to 300/,
   );
   await assert.rejects(execute(["oncall", "settings", "set"], AGENT_ENV), /requires/);
+  for (const [flags, message] of [
+    [["--escalation", "5:people"], /people needs/],
+    [["--escalation", "0:next"], /1 to 1440/],
+    [["--escalation", "5:boss"], /target must be/],
+    [["--escalation", "5:group=ocg_x"], /takes no/],
+    [["--escalation", "1:next,1:next,1:next,1:next,1:next,1:next"], /up to 5/],
+    [["--escalation-mode", "both"], /fan_out or hand_off/],
+    [["--escalation-loops", "4"], /from 0 to 3/],
+    [["--escalation-final", "everyone"], /none, group, or team/],
+  ]) {
+    await assert.rejects(execute(["oncall", "update", "ocg_1", ...flags], AGENT_ENV), message);
+  }
+});
+
+test("pages get --timeline prints who was paged, escalated, and claimed", async () => {
+  const person = (name) => ({ userId: `u_${name}`, name, image: null });
+  const page = {
+    id: "page_1",
+    timeline: [
+      { at: "t0", kind: "paged", level: 0, loop: 0, people: [person("Ana")], escalatedBy: null },
+      {
+        at: "t1",
+        kind: "paged",
+        level: 1,
+        loop: 0,
+        people: [person("Dee"), person("Eve")],
+        escalatedBy: person("Cal"),
+      },
+      { at: "t2", kind: "paged", level: 0, loop: 1, people: [person("Ana")], escalatedBy: null },
+      {
+        at: "t3",
+        kind: "acknowledged",
+        level: null,
+        loop: null,
+        people: [person("Ben")],
+        escalatedBy: null,
+      },
+      {
+        at: "t4",
+        kind: "resolved",
+        level: null,
+        loop: null,
+        people: [person("Ben")],
+        escalatedBy: null,
+      },
+    ],
+  };
+  await withMockServer(
+    () => Response.json({ page }),
+    async () => {
+      const result = await execute(["pages", "get", "page_1", "--timeline"], AGENT_ENV);
+      assert.equal(
+        result.output,
+        [
+          "t0  Paged Ana (level 0)",
+          "t1  Cal escalated → paged Dee, Eve (level 1)",
+          "t2  Paged Ana (level 0, loop 1)",
+          "t3  Claimed by Ben",
+          "t4  Resolved by Ben",
+        ].join("\n"),
+      );
+      const json = await execute(["pages", "get", "page_1", "--timeline", "--json"], AGENT_ENV);
+      assert.equal(json.output, undefined);
+    },
+  );
 });
 
 test("page raises an on-call page and exits 7 when nobody was reached", async () => {

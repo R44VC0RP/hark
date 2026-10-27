@@ -18,8 +18,8 @@ Hark does that, the flags involved, and why it doesn't use AlarmKit.
    `ringMaxRepeats` times (0–30, default 10). Each repeat plays the sound again.
 3. Ringing stops at once on acknowledge or resolve. If a repeat was already in flight, the server
    sends another silent `page.claimed` to clear it.
-4. Escalation hands ringing off: a `next` step stops the previous person and rings the new one. A
-   `group` step rings everyone who was notified again.
+4. Each escalation level rings the people it pages. With `escalationMode: "fan_out"` (default)
+   earlier levels keep ringing; with `"hand_off"` a new level silences them. See below.
 
 The state lives in `oncall_page_recipient.next_ring_at` / `ring_count`. Each repeat is claimed by
 ring count and due time, so repeats are idempotent and survive restarts. Repeats are not billed as
@@ -29,6 +29,39 @@ page-creation rate limits still apply.
 Each person can turn off "Ring until acknowledged" (pages then alert once) or set their own
 interval (`GET/PATCH /api/oncall/settings`, MCP `oncall_settings_get` / `oncall_settings_update`,
 the app's On call screen, and the dashboard).
+
+## Escalation policy
+
+A group's policy is level 0 plus up to 5 levels in `escalation` (contracts:
+`oncallEscalationStepSchema`; runtime: `plannedStep` and `escalatePage` in `lib/oncall.ts`).
+
+- **Level 0** is whoever is on call, or the whole group when nobody is.
+- **Levels 1..n** are `{ afterMinutes, target, userIds?, groupId? }`. `afterMinutes` (1–1440) is
+  the previous level's acknowledgement timeout. `target` is `next` (next in the rotation),
+  `oncall` (whoever is on call here, or in `groupId`, another group in the same team), `people`
+  (`userIds`, 1–20 team members, all at once), `group`, or `team`. Create and update reject IDs
+  outside the team.
+- **`escalationMode`**: `fan_out` (default) keeps earlier levels ringing; `hand_off` silences them
+  when a new level starts. Older groups that only had `next` steps used to hand off; they now fan
+  out unless set to `hand_off`.
+- **`escalationLoops`** (0–3): after the last level, run the policy again from level 0. The last
+  level waits as long as the first (`escalation[0].afterMinutes`) before a loop starts.
+- **`escalationFinal`** (`none` / `group` / `team`): paged once after the last level and loops,
+  after the same wait.
+- **Claim = acknowledge.** The status compare-and-set lets only the first acknowledgement win.
+  Everyone else's ringing stops and their alert is replaced (same collapse ID) by a passive,
+  silent "Claimed by <name>" notice carrying `page.claimed`.
+- **Manual Escalate** jumps to the next level now and records who escalated; past the end it pages
+  the group (or the team when `escalationFinal` is `team`). Acknowledge and escalate stay
+  human-only: no agent route or MCP tool.
+- **Timeline.** `oncall_page_event` rows become `OncallPageDto.timeline`: `paged` (with `level`,
+  `loop`, the people, and `escalatedBy` for manual escalation), `acknowledged`, and `resolved`.
+  Pages from before the table fall back to their recipients.
+
+Escalation runs off `oncall_page.escalationStep` and `nextEscalationAt`, claimed by
+compare-and-set on the step number, so timers are idempotent and survive restarts. Re-paging
+someone already notified (a loop, or a later level naming them) sends a fresh alert and restarts
+their repeats. Each escalation step that pushes counts once against rate limits and billing.
 
 ## Critical Alerts (waiting on Apple)
 

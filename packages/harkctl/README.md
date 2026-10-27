@@ -221,9 +221,8 @@ On-call groups belong to a team (scopes `oncall:read` and `oncall:write`; creati
 needs a team admin). `oncall create --team <team_id> --name <name> --members <user_id,...>
 [--period daily|weekly] [--handoff HH:MM] [--timezone <zone>] [--starts-at <iso>]` sets up a
 rotation (defaults: daily, 09:00, your local zone; the first member is on call now) with the
-default escalation (next person after 5 minutes, the whole group 10 minutes later); pass
-`--stdin` JSON for a custom `escalation`. `oncall update <group_id>` changes any of those fields,
-keeping the rest. `oncall override <group_id> --user <user_id> --starts-at <iso> --ends-at <iso>`
+default escalation (next person after 5 minutes, the whole group 10 minutes later).
+`oncall update <group_id>` changes any of those fields, keeping the rest. `oncall override <group_id> --user <user_id> --starts-at <iso> --ends-at <iso>`
 puts someone on call for a window and `oncall remove-override <group_id> <override_id>` removes it.
 `oncall list --team <team_id>`, `oncall get <group_id>`, and `oncall me` show current and upcoming
 shifts.
@@ -237,14 +236,32 @@ each iPhone's Critical Alerts status; `oncall settings set [--ring-until-ack on|
 [--ring-interval <seconds|group>]` turns ringing off for you or sets a personal interval
 (`group` goes back to each group's interval). These apply to you in every group.
 
+Escalation policy: level 0 is whoever is on call (the whole group when nobody is).
+`--escalation <levels>` on `oncall create` and `oncall update` sets up to 5 more levels, each
+`<minutes>:<target>[=<arg>]`, comma-separated. Minutes (1–1440) is how long the level before it
+has to acknowledge. Targets are `next` (next person in the rotation), `oncall[=<group_id>]`
+(whoever is on call here, or in another group of the team), `people=<user_id>+<user_id>` (up to
+20, all at once), `group`, and `team`; `--escalation none` removes every level.
+`--escalation-mode fan_out|hand_off` keeps earlier levels ringing (default) or silences them,
+`--escalation-loops <0-3>` reruns the policy from level 0, and `--escalation-final
+none|group|team` pages the group or team once at the end. The same fields work in `--stdin` JSON
+(`escalation`, `escalationMode`, `escalationLoops`, `escalationFinal`).
+
+```sh
+harkctl oncall update ocg_... --escalation 5:next,10:people=user_a+user_b,10:oncall=ocg_ops,15:group \
+  --escalation-mode fan_out --escalation-loops 1 --escalation-final team
+```
+
 `page <group_id> <title> [--body <text>] [--url <url>] [--app <app_id>] [--dedup-key <key>]`
 pages whoever is on call (or the whole group when nobody is) and escalates until someone
 acknowledges. A repeat with the same `--dedup-key` merges into the open page. `notify <body>
 --oncall <group_id>` does the same from `notify`, using `--idempotency-key` as the dedup key. Both
 exit `7` when the page reached no device. `pages list --team <team_id> [--all] [--limit <n>]
-[--cursor <c>]`, `pages get <page_id>`, and `pages resolve <page_id> [--note <text>]` follow up.
-Acknowledging and escalating are deliberately human-only: an acknowledgement tells the team a
-person is on it.
+[--cursor <c>]`, `pages get <page_id> [--timeline]`, and `pages resolve <page_id> [--note <text>]` follow up;
+`--timeline` prints who was paged at each level and loop, who escalated by hand, and who claimed
+and resolved the page. Acknowledging claims the page: the first one wins and everyone else's
+alert turns into a quiet "Claimed by" notice. Acknowledging and escalating are deliberately
+human-only: an acknowledgement tells the team a person is on it.
 
 ## activity
 

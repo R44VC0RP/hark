@@ -1,5 +1,10 @@
-import type { OncallPageDto, OncallPageStatus } from "@hark/contracts";
-import { useCallback, useEffect, useState } from "react";
+import type {
+  OncallPageDto,
+  OncallPageEventDto,
+  OncallPageStatus,
+  OncallPersonDto,
+} from "@hark/contracts";
+import { useCallback, useEffect, useId, useState } from "react";
 import { api } from "../../lib/api";
 import {
   Badge,
@@ -14,7 +19,7 @@ import {
   SectionHeading,
   Segmented,
 } from "../DashboardKit";
-import { primaryButtonSmall, rowButton, secondaryButton } from "../ui";
+import { primaryButtonSmall, rowButton, secondaryButton, textLink } from "../ui";
 
 const STATUS: Record<OncallPageStatus, { label: string; tone: "danger" | "warn" | "ok" }> = {
   triggered: { label: "Triggered", tone: "danger" },
@@ -185,6 +190,55 @@ function ringingSummary(page: OncallPageDto): string | null {
   return `Ringing ${people.join("; ")}`;
 }
 
+/** "Ana", "Ana, Ben, Cal", "Ana, Ben and 4 more". */
+function names(people: OncallPersonDto[]): string {
+  if (people.length <= 3) return people.map((person) => person.name).join(", ");
+  return `${people
+    .slice(0, 2)
+    .map((person) => person.name)
+    .join(", ")} and ${people.length - 2} more`;
+}
+
+/** "Paged Ben (level 1)", "Cal escalated → paged Ops (level 2, loop 1)", "Claimed by Ben". */
+function timelineText(event: OncallPageEventDto): string {
+  const who = names(event.people);
+  if (event.kind === "acknowledged") return who ? `Claimed by ${who}` : "Claimed";
+  if (event.kind === "resolved") return who ? `Resolved by ${who}` : "Resolved";
+  const where = [
+    event.level !== null ? `level ${event.level}` : null,
+    event.loop ? `loop ${event.loop}` : null,
+  ].filter(Boolean);
+  const paged = who ? `paged ${who}` : "paged nobody";
+  const text = event.escalatedBy ? `${event.escalatedBy.name} escalated → ${paged}` : paged;
+  const sentence = `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+  return where.length > 0 ? `${sentence} (${where.join(", ")})` : sentence;
+}
+
+function Timeline({ events, id }: { events: OncallPageEventDto[]; id: string }) {
+  return (
+    <ol className="mt-2 space-y-1 border-l border-line pl-3" id={id}>
+      {events.map((event, index) => (
+        <li
+          className="flex gap-2.5 text-[13px]"
+          // biome-ignore lint/suspicious/noArrayIndexKey: events are append-only and can share a timestamp
+          key={`${event.at}-${index}`}
+        >
+          <time
+            className="shrink-0 whitespace-nowrap text-ink-faint tabular-nums"
+            dateTime={event.at}
+            title={new Date(event.at).toLocaleString()}
+          >
+            {formatTimeOrDate(event.at)}
+          </time>
+          <span className={event.kind === "paged" ? "text-ink-muted" : "text-white"}>
+            {timelineText(event)}
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 function PageRow({
   page,
   busy,
@@ -197,6 +251,9 @@ function PageRow({
   const status = STATUS[page.status];
   const open = page.status !== "resolved";
   const ringing = ringingSummary(page);
+  const [showTimeline, setShowTimeline] = useState(false);
+  const timelineId = useId();
+  const timeline = page.timeline ?? [];
   return (
     <li className="py-4">
       <div className="flex items-start gap-3">
@@ -220,6 +277,20 @@ function PageRow({
           </p>
           <p className="mt-0.5 text-[13px] text-ink-muted">{pageProgress(page)}</p>
           {ringing ? <p className="mt-0.5 text-[13px] text-warn tabular-nums">{ringing}</p> : null}
+          {timeline.length > 0 ? (
+            <>
+              <button
+                aria-controls={timelineId}
+                aria-expanded={showTimeline}
+                className={`${textLink} mt-1.5 text-[13px]`}
+                onClick={() => setShowTimeline((value) => !value)}
+                type="button"
+              >
+                {showTimeline ? "Hide timeline" : "Timeline"}
+              </button>
+              {showTimeline ? <Timeline events={timeline} id={timelineId} /> : null}
+            </>
+          ) : null}
         </div>
         <time
           className="shrink-0 text-[13px] text-ink-faint"

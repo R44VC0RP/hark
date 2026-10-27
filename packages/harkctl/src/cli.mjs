@@ -169,6 +169,10 @@ export function parseArgs(argv) {
     "ring-interval",
     "ring-repeats",
     "ring-until-ack",
+    "escalation",
+    "escalation-mode",
+    "escalation-loops",
+    "escalation-final",
   ]);
   const booleanFlags = new Set([
     "approval",
@@ -191,6 +195,7 @@ export function parseArgs(argv) {
     "all",
     "no-notify",
     "allow-custom-scheme",
+    "timeline",
   ]);
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -202,7 +207,11 @@ export function parseArgs(argv) {
       positionals.push(argument);
       continue;
     }
-    const [rawName, inline] = argument.slice(2).split("=", 2);
+    // Split at the first "=" only, so values like 5:people=usr_a keep theirs.
+    const flag = argument.slice(2);
+    const equals = flag.indexOf("=");
+    const rawName = equals === -1 ? flag : flag.slice(0, equals);
+    const inline = equals === -1 ? undefined : flag.slice(equals + 1);
     if (valueFlags.has(rawName)) {
       const value = inline ?? argv[++index];
       if (!value || value.startsWith("--")) throw new UsageError(`--${rawName} requires a value`);
@@ -541,8 +550,26 @@ const STDIN_KEYS = {
     "dismissAfterSeconds",
     "ifSequence",
   ],
-  "oncall create": ["name", "rotation", "escalation", "ringIntervalSeconds", "ringMaxRepeats"],
-  "oncall update": ["name", "rotation", "escalation", "ringIntervalSeconds", "ringMaxRepeats"],
+  "oncall create": [
+    "name",
+    "rotation",
+    "escalation",
+    "ringIntervalSeconds",
+    "ringMaxRepeats",
+    "escalationMode",
+    "escalationLoops",
+    "escalationFinal",
+  ],
+  "oncall update": [
+    "name",
+    "rotation",
+    "escalation",
+    "ringIntervalSeconds",
+    "ringMaxRepeats",
+    "escalationMode",
+    "escalationLoops",
+    "escalationFinal",
+  ],
 };
 
 async function readStdinFor(options, command) {
@@ -673,10 +700,14 @@ function help() {
   harkctl oncall create --team <team_id> --name <name> --members <user_id,...>
                         [--period <daily|weekly>] [--handoff <HH:MM>] [--timezone <zone>]
                         [--starts-at <iso>] [--ring-interval <seconds>] [--ring-repeats <n>]
+                        [--escalation <levels>] [--escalation-mode <fan_out|hand_off>]
+                        [--escalation-loops <0-3>] [--escalation-final <none|group|team>]
                         [--stdin]
   harkctl oncall update <group_id> [--name <name>] [--members <user_id,...>] [--period <p>]
                         [--handoff <HH:MM>] [--timezone <zone>] [--starts-at <iso>]
-                        [--ring-interval <seconds>] [--ring-repeats <n>] [--stdin]
+                        [--ring-interval <seconds>] [--ring-repeats <n>]
+                        [--escalation <levels>] [--escalation-mode <m>]
+                        [--escalation-loops <n>] [--escalation-final <f>] [--stdin]
   harkctl oncall settings
   harkctl oncall settings set [--ring-until-ack <on|off>] [--ring-interval <seconds|group>]
   harkctl oncall override <group_id> --user <user_id> --starts-at <iso> --ends-at <iso>
@@ -684,7 +715,7 @@ function help() {
   harkctl page <group_id> <title> [--body <text>] [--url <url>] [--app <app_id>]
                 [--dedup-key <key>]
   harkctl pages list --team <team_id> [--all] [--limit <n>] [--cursor <c>]
-  harkctl pages get <page_id>
+  harkctl pages get <page_id> [--timeline]
   harkctl pages resolve <page_id> [--note <text>]
   harkctl billing
   harkctl tokens list
@@ -731,6 +762,16 @@ Pages ring until acknowledged: whoever is being paged is re-alerted every
 oncall settings shows your own paging preferences and each iPhone's Critical Alerts
 status; oncall settings set turns ringing off for you or sets a personal interval
 (--ring-interval group goes back to each group's interval).
+
+Escalation policy: level 0 is whoever is on call; --escalation adds up to 5 levels as
+<minutes>:<target>[=<arg>], comma-separated, where minutes is how long the level before
+has to acknowledge. Targets: next (next in the rotation), oncall[=<group_id>] (whoever is
+on call here or in another group of the team), people=<user_id>+<user_id> (all at once),
+group, team. --escalation none removes every level. --escalation-mode fan_out (default)
+keeps earlier levels ringing, hand_off silences them; --escalation-loops reruns the policy
+from level 0; --escalation-final pages the group or team once at the end. The first
+acknowledgement claims the page and quiets everyone else's alert. pages get --timeline
+prints who was paged at each level, who escalated, and who claimed and resolved it.
 
 Default logins exclude events:read (activity feed) and tokens:manage (tokens list/revoke);
 request them with --scope. No command creates tokens: new tokens always need a signed-in
@@ -895,6 +936,106 @@ function ringFromOptions(options) {
   };
 }
 
+const ESCALATION_TARGETS = ["next", "oncall", "people", "group", "team"];
+const ESCALATION_MODES = ["fan_out", "hand_off"];
+const ESCALATION_FINALS = ["none", "group", "team"];
+
+/**
+ * `5:next,10:people=usr_a+usr_b,10:oncall=ocg_x,15:group` (or `none`) as
+ * escalation steps. The server validates IDs against the team.
+ */
+function parseEscalation(value) {
+  const text = String(value).trim();
+  if (text === "none") return [];
+  const steps = text.split(",").map((entry) => {
+    const match = /^(\d+):([a-z]+)(?:=(.+))?$/.exec(entry.trim());
+    if (!match) {
+      throw new UsageError(
+        `--escalation entry "${entry.trim()}" must look like <minutes>:<target>[=<arg>]`,
+      );
+    }
+    const [, minutes, target, argument] = match;
+    const afterMinutes = Number.parseInt(minutes, 10);
+    if (!(afterMinutes >= 1 && afterMinutes <= 1440)) {
+      throw new UsageError("--escalation minutes must be from 1 to 1440");
+    }
+    if (!ESCALATION_TARGETS.includes(target)) {
+      throw new UsageError(`--escalation target must be one of ${ESCALATION_TARGETS.join(", ")}`);
+    }
+    if (target === "people") {
+      const userIds = (argument ?? "")
+        .split("+")
+        .map((id) => id.trim())
+        .filter(Boolean);
+      if (userIds.length === 0) throw new UsageError("--escalation people needs =<user_id>+...");
+      if (userIds.length > 20) throw new UsageError("--escalation people takes up to 20 people");
+      return { afterMinutes, target, userIds };
+    }
+    if (target === "oncall")
+      return { afterMinutes, target, ...(argument ? { groupId: argument } : {}) };
+    if (argument !== undefined) {
+      throw new UsageError(`--escalation ${target} takes no =<arg>`);
+    }
+    return { afterMinutes, target };
+  });
+  if (steps.length > 5) throw new UsageError("--escalation takes up to 5 levels");
+  return steps;
+}
+
+/** Escalation policy fields from --escalation / --escalation-mode / -loops / -final. */
+function escalationFromOptions(options) {
+  const mode = options["escalation-mode"];
+  if (mode !== undefined && !ESCALATION_MODES.includes(mode)) {
+    throw new UsageError("--escalation-mode must be fan_out or hand_off");
+  }
+  const final = options["escalation-final"];
+  if (final !== undefined && !ESCALATION_FINALS.includes(final)) {
+    throw new UsageError("--escalation-final must be none, group, or team");
+  }
+  return {
+    ...(options.escalation !== undefined
+      ? { escalation: parseEscalation(options.escalation) }
+      : {}),
+    ...(mode !== undefined ? { escalationMode: mode } : {}),
+    ...(options["escalation-loops"] !== undefined
+      ? {
+          escalationLoops: parseIntegerFlag(options["escalation-loops"], "escalation-loops", 0, 3),
+        }
+      : {}),
+    ...(final !== undefined ? { escalationFinal: final } : {}),
+  };
+}
+
+/** "Ana, Ben" or "Ana, Ben and 3 more". */
+function peopleNames(people) {
+  const names = (people ?? []).map((person) => person.name);
+  if (names.length <= 3) return names.join(", ");
+  return `${names.slice(0, 2).join(", ")} and ${names.length - 2} more`;
+}
+
+/** One line per page event: "<at>  Paged Ben (level 1, loop 1)". */
+function formatTimeline(page) {
+  const events = page?.timeline ?? [];
+  if (events.length === 0) return "No timeline";
+  return events
+    .map((event) => {
+      const who = peopleNames(event.people);
+      let text;
+      if (event.kind === "acknowledged") text = who ? `Claimed by ${who}` : "Claimed";
+      else if (event.kind === "resolved") text = who ? `Resolved by ${who}` : "Resolved";
+      else {
+        const paged = `${event.escalatedBy ? `${event.escalatedBy.name} escalated → paged` : "Paged"} ${who || "nobody"}`;
+        const where = [
+          event.level !== null && event.level !== undefined ? `level ${event.level}` : null,
+          event.loop ? `loop ${event.loop}` : null,
+        ].filter(Boolean);
+        text = where.length > 0 ? `${paged} (${where.join(", ")})` : paged;
+      }
+      return `${event.at}  ${text}`;
+    })
+    .join("\n");
+}
+
 function settingsFromOptions(options) {
   const ring = options["ring-until-ack"];
   if (ring !== undefined && ring !== "on" && ring !== "off") {
@@ -959,6 +1100,7 @@ async function oncallCommand(config, args, options) {
       const payload = {
         ...stdin,
         ...ringFromOptions(options),
+        ...escalationFromOptions(options),
         name,
         rotation: {
           period: "daily",
@@ -993,6 +1135,7 @@ async function oncallCommand(config, args, options) {
         ...(options.name ? { name: options.name } : {}),
         ...(rotation ? { rotation } : {}),
         ...ringFromOptions(options),
+        ...escalationFromOptions(options),
       };
       if (Object.keys(payload).length === 0) {
         throw new UsageError("oncall update requires a field to change (or --stdin)");
@@ -1472,7 +1615,14 @@ export async function execute(argv, env = process.env, overrides = {}) {
     }
     if (action === "get" || action === "resolve") {
       const path = `/api/agent/pages/${requireId(id, `pages ${action}`)}`;
-      if (action === "get") return { body: await scopedRequest(config, path), exitCode: 0 };
+      if (action === "get") {
+        const body = await scopedRequest(config, path);
+        return {
+          body,
+          exitCode: 0,
+          ...(options.timeline && !options.json ? { output: formatTimeline(body.page) } : {}),
+        };
+      }
       return {
         body: await scopedRequest(config, `${path}/resolve`, {
           method: "POST",
