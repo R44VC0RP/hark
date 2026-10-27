@@ -172,6 +172,19 @@ function pageProgress(page: OncallPageDto): string {
     : notified;
 }
 
+/** "Ringing Ben · 3 repeats, next 10:42" for people still being re-alerted. */
+function ringingSummary(page: OncallPageDto): string | null {
+  if (page.status !== "triggered" || !page.ringing || page.ringing.length === 0) return null;
+  const people = page.ringing.map((ring) => {
+    const repeats =
+      ring.ringCount > 0
+        ? `${ring.ringCount} ${ring.ringCount === 1 ? "repeat" : "repeats"}, `
+        : "";
+    return `${ring.person.name} · ${repeats}next ${formatTimeOrDate(ring.nextRingAt)}`;
+  });
+  return `Ringing ${people.join("; ")}`;
+}
+
 function PageRow({
   page,
   busy,
@@ -183,6 +196,7 @@ function PageRow({
 }) {
   const status = STATUS[page.status];
   const open = page.status !== "resolved";
+  const ringing = ringingSummary(page);
   return (
     <li className="py-4">
       <div className="flex items-start gap-3">
@@ -205,6 +219,7 @@ function PageRow({
             {page.groupName} · from {page.source} · {relativeTime(page.createdAt)}
           </p>
           <p className="mt-0.5 text-[13px] text-ink-muted">{pageProgress(page)}</p>
+          {ringing ? <p className="mt-0.5 text-[13px] text-warn tabular-nums">{ringing}</p> : null}
         </div>
         <time
           className="shrink-0 text-[13px] text-ink-faint"

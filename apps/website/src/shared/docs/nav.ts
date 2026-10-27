@@ -86,6 +86,7 @@ export const DOC_NAV = [
     items: [
       { id: "oncall-rotations", label: "Groups and rotations" },
       { id: "oncall-paging", label: "Paging and escalation" },
+      { id: "oncall-ringing", label: "Ring until acknowledged" },
       { id: "oncall-webhook", label: "Page from a webhook" },
       { id: "oncall-acknowledge", label: "Acknowledge and resolve" },
     ],

@@ -1,13 +1,25 @@
 import type {
+  CriticalAlertState,
   OncallEscalationStep,
   OncallGroupDto,
   OncallOverrideDto,
+  OncallSettingsDto,
+  OncallSettingsUpdateInput,
   TeamDto,
   TeamMemberDto,
 } from "@hark/contracts";
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
-import { api } from "../../lib/api";
-import { canManage, MAX_ESCALATION_STEPS, TEAM_NAME_MAX_CHARS } from "../../lib/teams";
+import { ApiRequestError, api } from "../../lib/api";
+import {
+  canManage,
+  MAX_ESCALATION_STEPS,
+  ONCALL_RING_INTERVAL_DEFAULT_SECONDS,
+  ONCALL_RING_INTERVAL_MAX_SECONDS,
+  ONCALL_RING_INTERVAL_MIN_SECONDS,
+  ONCALL_RING_MAX_REPEATS_DEFAULT,
+  ONCALL_RING_MAX_REPEATS_LIMIT,
+  TEAM_NAME_MAX_CHARS,
+} from "../../lib/teams";
 import { useConfirm } from "../ConfirmDialog";
 import {
   Badge,
@@ -24,6 +36,7 @@ import {
   SectionHeading,
   Segmented,
   Select,
+  Switch,
 } from "../DashboardKit";
 import { primaryButtonSmall, rowButton, rowDangerButton, secondaryButton, textLink } from "../ui";
 
@@ -37,6 +50,19 @@ export function escalationSummary(steps: OncallEscalationStep[]): string {
   });
   const text = parts.join(", then ");
   return `If nobody acknowledges: ${text}.`;
+}
+
+/** "30 s", "1 min", "90 s", "5 min". */
+function intervalLabel(seconds: number): string {
+  return seconds % 60 === 0 ? `${seconds / 60} min` : `${seconds} s`;
+}
+
+function ringSummary(group: OncallGroupDto): string | null {
+  if (group.ringIntervalSeconds === undefined || group.ringMaxRepeats === undefined) return null;
+  if (group.ringMaxRepeats === 0) return "Each person paged gets one alert; it doesn't repeat.";
+  return `Until someone acknowledges, alerts repeat every ${intervalLabel(
+    group.ringIntervalSeconds,
+  )}, up to ${group.ringMaxRepeats} ${group.ringMaxRepeats === 1 ? "time" : "times"}.`;
 }
 
 function rotationSummary(group: OncallGroupDto): string {
@@ -127,6 +153,7 @@ export function OncallSection({
         </div>
       ) : null}
       <ErrorText>{error}</ErrorText>
+      <PagingSettings />
       {editing ? (
         <GroupModal
           group={editing === "new" ? null : editing}
@@ -170,6 +197,7 @@ function GroupCard({
   const detailId = useId();
   const current = group.current;
   const next = group.upcoming.find((shift) => shift.startsAt !== current?.startsAt);
+  const ring = ringSummary(group);
 
   const sendTest = async () => {
     const target = current?.person.name ?? "the first person in the rotation";
@@ -292,6 +320,7 @@ function GroupCard({
 
       <p className="mt-3 text-[13px] leading-relaxed text-ink-muted">
         {escalationSummary(group.escalation)}
+        {ring ? ` ${ring}` : null}
       </p>
 
       {status ? (
@@ -561,6 +590,13 @@ function GroupModal({
   const [steps, setSteps] = useState<OncallEscalationStep[]>(
     group?.escalation ?? DEFAULT_ESCALATION,
   );
+  // Strings so a half-typed number isn't clamped; the inputs' min/max validate on submit.
+  const [ringInterval, setRingInterval] = useState(
+    String(group?.ringIntervalSeconds ?? ONCALL_RING_INTERVAL_DEFAULT_SECONDS),
+  );
+  const [ringRepeats, setRingRepeats] = useState(
+    String(group?.ringMaxRepeats ?? ONCALL_RING_MAX_REPEATS_DEFAULT),
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const zones = useMemo(() => timeZones(timezone), [timezone]);
@@ -596,6 +632,8 @@ function GroupModal({
       name: name.trim(),
       rotation: { memberIds: rotation, period, handoffAt, timezone },
       escalation: steps,
+      ringIntervalSeconds: Number(ringInterval),
+      ringMaxRepeats: Number(ringRepeats),
     };
     try {
       const response = group
@@ -811,6 +849,46 @@ function GroupModal({
             <p className="mt-2 text-[13px] text-ink-faint">Up to {MAX_ESCALATION_STEPS} steps.</p>
           )}
         </fieldset>
+
+        <fieldset>
+          <legend className="mb-1.5 text-sm text-ink-muted">Repeat alerts</legend>
+          <p className="mb-2 text-[13px] text-ink-faint">
+            Whoever is being paged gets the alert again until someone acknowledges. Repeats replace
+            the alert instead of stacking. 0 alerts once.
+          </p>
+          <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-panel px-3 py-2 text-[15px] text-ink">
+            <span className="text-ink-muted">Repeat every</span>
+            <input
+              aria-label="Seconds between repeat alerts"
+              className="hark-field h-8 w-20 rounded-full px-3 text-center text-[15px] tabular-nums"
+              max={ONCALL_RING_INTERVAL_MAX_SECONDS}
+              min={ONCALL_RING_INTERVAL_MIN_SECONDS}
+              onChange={(event) => setRingInterval(event.target.value)}
+              required
+              step={1}
+              type="number"
+              value={ringInterval}
+            />
+            <span className="text-ink-muted">seconds, up to</span>
+            <input
+              aria-label="Repeat alerts per person"
+              className="hark-field h-8 w-16 rounded-full px-3 text-center text-[15px] tabular-nums"
+              max={ONCALL_RING_MAX_REPEATS_LIMIT}
+              min={0}
+              onChange={(event) => setRingRepeats(event.target.value)}
+              required
+              step={1}
+              type="number"
+              value={ringRepeats}
+            />
+            <span className="text-ink-muted">times</span>
+          </div>
+          <p className="mt-2 text-[13px] text-ink-faint">
+            {ONCALL_RING_INTERVAL_MIN_SECONDS}–{ONCALL_RING_INTERVAL_MAX_SECONDS} seconds, up to{" "}
+            {ONCALL_RING_MAX_REPEATS_LIMIT} repeats. Each person can turn ringing off or pick their
+            own interval.
+          </p>
+        </fieldset>
       </div>
       <ErrorText>{error}</ErrorText>
       <div className="mt-6 flex justify-end gap-2">
@@ -826,6 +904,165 @@ function GroupModal({
         </button>
       </div>
     </Modal>
+  );
+}
+
+const PERSONAL_INTERVALS = [30, 60, 120, 300] as const;
+
+const CRITICAL_ALERTS: Record<
+  CriticalAlertState | "unknown",
+  { label: string; tone: "ok" | "outline"; detail: string }
+> = {
+  authorized: {
+    label: "Critical Alerts on",
+    tone: "ok",
+    detail: "Pages ring through silent mode and Focus.",
+  },
+  denied: {
+    label: "Critical Alerts off",
+    tone: "outline",
+    detail:
+      "Turned off in iOS Settings. Pages are time-sensitive with the alarm sound, so keep the ringer on.",
+  },
+  notDetermined: {
+    label: "Not set up",
+    tone: "outline",
+    detail: "Hark hasn't asked yet. Pages are time-sensitive with the alarm sound.",
+  },
+  unavailable: {
+    label: "Not available",
+    tone: "outline",
+    detail:
+      "This build doesn't have Critical Alerts yet. Pages are time-sensitive with the alarm sound.",
+  },
+  unknown: {
+    label: "Unknown",
+    tone: "outline",
+    detail:
+      "Update Hark on this iPhone to report it. Pages are time-sensitive with the alarm sound.",
+  },
+};
+
+/** The viewer's own ringing preferences and each iPhone's Critical Alerts status. */
+function PagingSettings() {
+  const [settings, setSettings] = useState<OncallSettingsDto | null>(null);
+  const [hidden, setHidden] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const headingId = useId();
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getOncallSettings()
+      .then((response) => {
+        if (!cancelled) setSettings(response.settings);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        // Servers without ringing have no settings route.
+        if (err instanceof ApiRequestError && err.status === 404) setHidden(true);
+        else setError(errorMessage(err, "Could not load your paging settings"));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const update = async (input: OncallSettingsUpdateInput) => {
+    setBusy(true);
+    setError(null);
+    try {
+      setSettings((await api.updateOncallSettings(input)).settings);
+    } catch (err) {
+      setError(errorMessage(err, "Could not save your paging settings"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (hidden) return null;
+  const interval = settings?.ringIntervalSeconds ?? null;
+  const intervals =
+    interval !== null && !PERSONAL_INTERVALS.some((value) => value === interval)
+      ? [...PERSONAL_INTERVALS, interval].sort((a, b) => a - b)
+      : PERSONAL_INTERVALS;
+
+  return (
+    <article aria-labelledby={headingId} className="hark-glass mt-4 rounded-3xl p-4 sm:p-5">
+      <h3 className="text-[17px] font-medium text-white" id={headingId}>
+        Your paging
+      </h3>
+      <p className="mt-0.5 text-[13px] text-ink-faint">
+        How pages reach you, in every on-call group.
+      </p>
+      {settings === null ? (
+        error ? null : (
+          <p className="mt-3 text-sm text-ink-faint">Loading your paging settings…</p>
+        )
+      ) : (
+        <>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-x-5 gap-y-3">
+            <Switch
+              checked={settings.ringUntilAcknowledged}
+              disabled={busy}
+              label="Ring until acknowledged"
+              onChange={(value) => void update({ ringUntilAcknowledged: value })}
+            />
+            <div className="w-full sm:w-48">
+              <Select
+                aria-label="Repeat interval"
+                compact
+                disabled={busy || !settings.ringUntilAcknowledged}
+                onChange={(event) =>
+                  void update({
+                    ringIntervalSeconds: event.target.value ? Number(event.target.value) : null,
+                  })
+                }
+                value={interval === null ? "" : String(interval)}
+              >
+                <option value="">Group default</option>
+                {intervals.map((value) => (
+                  <option key={value} value={value}>
+                    Every {intervalLabel(value)}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+          <p className="mt-2 text-[13px] text-ink-faint">
+            {settings.ringUntilAcknowledged
+              ? "Pages repeat until someone acknowledges, up to each group's limit."
+              : "You get one alert per page. Escalation still moves on if nobody acknowledges."}
+          </p>
+
+          <h4 className="mt-5 text-[15px] font-medium text-white">Critical Alerts</h4>
+          {settings.devices.length === 0 ? (
+            <p className="mt-2 text-sm text-ink-muted">
+              No iPhone yet. Install Hark and sign in to get pages.
+            </p>
+          ) : (
+            <ul className="mt-2 divide-y divide-line">
+              {settings.devices.map((device) => {
+                const state = CRITICAL_ALERTS[device.criticalAlerts ?? "unknown"];
+                return (
+                  <li className="py-2" key={device.id}>
+                    <div className="flex items-center gap-2.5">
+                      <span className="min-w-0 flex-1 truncate text-[15px] text-white">
+                        {device.deviceName ?? "iPhone"}
+                      </span>
+                      <Badge tone={state.tone}>{state.label}</Badge>
+                    </div>
+                    <p className="mt-0.5 text-[13px] text-ink-faint">{state.detail}</p>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </>
+      )}
+      <ErrorText>{error}</ErrorText>
+    </article>
   );
 }
 

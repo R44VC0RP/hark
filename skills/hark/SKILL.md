@@ -88,7 +88,7 @@ scopes and take the API's JSON field names (`iconUrl`, `teamId`), not CLI flags:
 | Live Activities | `activities_start`, `activities_update`, `activities_end`, `activities_get`, `activities_list` |
 | Web apps | `apps_create`, `apps_list`, `apps_get`, `apps_update`, `apps_share`, `apps_revoke`, `apps_remove` |
 | Teams | `teams_list`, `teams_create`, `teams_get`, `teams_rename`, `teams_invite`, `teams_invites`, `teams_revoke_invite`, `teams_set_role`, `teams_remove_member`, `teams_apps`, `teams_leave`, `teams_delete` |
-| On-call | `oncall_list`, `oncall_me`, `oncall_get`, `oncall_create`, `oncall_update`, `oncall_override_add`, `oncall_override_remove`, `oncall_delete`, `pages_create`, `pages_list`, `pages_get`, `pages_resolve` |
+| On-call | `oncall_list`, `oncall_me`, `oncall_get`, `oncall_create`, `oncall_update`, `oncall_override_add`, `oncall_override_remove`, `oncall_delete`, `oncall_settings_get`, `oncall_settings_update`, `pages_create`, `pages_list`, `pages_get`, `pages_resolve` |
 | Services and inbox | `services_*`, `inbox_*` |
 
 To connect it, the user adds that URL to their MCP client (for OpenCode: `opencode mcp add hark
@@ -405,6 +405,7 @@ harkctl oncall create --team team_XXXX --name Primary --members user_A,user_B \
   --period weekly --handoff 09:00 --timezone America/New_York
 harkctl oncall list --team team_XXXX
 harkctl oncall me
+harkctl oncall settings
 harkctl page ocg_XXXX "API error rate above 20%" --body "5xx since 14:02" --dedup-key api-5xx
 harkctl pages list --team team_XXXX
 harkctl pages resolve page_XXXX --note "Rolled back"
@@ -423,6 +424,16 @@ harkctl pages resolve page_XXXX --note "Rolled back"
   read, and resolve pages. Use a stable `--dedup-key` for repeating alerts so they merge into the
   open page instead of paging again. `notify "<body>" --oncall ocg_XXXX` pages too, using
   `--idempotency-key` as the dedup key. Page bodies are at most 2,000 characters.
+- Pages ring until acknowledged: the person being paged is re-alerted every
+  `ringIntervalSeconds` (30–300, default 60) up to `ringMaxRepeats` times (0–30, default 10; 0
+  alerts once), set per group with `--ring-interval` / `--ring-repeats` on `oncall create|update`.
+  Repeats replace the alert instead of stacking and stop on acknowledge or resolve. Each person's
+  own preferences (`oncall settings`, `oncall settings set --ring-until-ack on|off --ring-interval
+  <seconds|group>`; MCP `oncall_settings_get` / `oncall_settings_update`) apply in every group;
+  change them only for the signed-in user when they ask. The settings also report each iPhone's
+  Critical Alerts status: `authorized` rings through silent mode; otherwise pages are
+  time-sensitive with an alarm sound. Ringing never acknowledges anything; acknowledging stays
+  human-only.
 - Page only when the user asked for paging or configured an alert that should wake someone; a page
   is an interruption, not a log line.
 - `teams delete`, `teams remove-member`, `teams role ... owner`, and `oncall` changes affect other

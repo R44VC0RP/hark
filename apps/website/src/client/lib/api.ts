@@ -19,6 +19,8 @@ import type {
   OncallPageCreateInput,
   OncallPageCreateResponse,
   OncallPageDto,
+  OncallSettingsDto,
+  OncallSettingsUpdateInput,
   PricingPlansDto,
   ServiceCreatedResponse,
   ServiceCreateInput,
@@ -179,6 +181,10 @@ export const api = {
   updateOncallGroup: (groupId: string, input: OncallGroupUpdateInput) =>
     send<{ group: OncallGroupDto }>(`/api/oncall/${id(groupId)}`, "PATCH", input),
   deleteOncallGroup: (groupId: string) => send<unknown>(`/api/oncall/${id(groupId)}`, "DELETE"),
+  /** The signed-in person's paging preferences; they apply in every group. */
+  getOncallSettings: () => request<{ settings: OncallSettingsDto }>("/api/oncall/settings"),
+  updateOncallSettings: (input: OncallSettingsUpdateInput) =>
+    send<{ settings: OncallSettingsDto }>("/api/oncall/settings", "PATCH", input),
   addOncallOverride: (groupId: string, input: OncallOverrideCreateInput) =>
     send<{ group: OncallGroupDto }>(`/api/oncall/${id(groupId)}/overrides`, "POST", input),
   removeOncallOverride: (groupId: string, overrideId: string) =>

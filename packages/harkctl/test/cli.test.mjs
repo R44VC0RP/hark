@@ -1356,6 +1356,19 @@ test("team and on-call commands call the matching agent routes", async () => {
       "/api/agent/oncall/ocg_1/overrides",
       { userId: "u", startsAt: "s", endsAt: "e" },
     ],
+    [["oncall", "settings"], "GET", "/api/agent/oncall/settings", undefined],
+    [
+      ["oncall", "settings", "set", "--ring-until-ack", "off", "--ring-interval", "group"],
+      "PATCH",
+      "/api/agent/oncall/settings",
+      { ringUntilAcknowledged: false, ringIntervalSeconds: null },
+    ],
+    [
+      ["oncall", "update", "ocg_1", "--ring-interval", "120", "--ring-repeats", "0"],
+      "PATCH",
+      "/api/agent/oncall/ocg_1",
+      { ringIntervalSeconds: 120, ringMaxRepeats: 0 },
+    ],
     [
       ["oncall", "remove-override", "ocg_1", "ovr_1"],
       "DELETE",
@@ -1391,6 +1404,11 @@ test("team and on-call commands call the matching agent routes", async () => {
     /owner\|admin/,
   );
   await assert.rejects(execute(["pages", "list"], AGENT_ENV), /requires --team/);
+  await assert.rejects(
+    execute(["oncall", "update", "ocg_1", "--ring-interval", "10"], AGENT_ENV),
+    /from 30 to 300/,
+  );
+  await assert.rejects(execute(["oncall", "settings", "set"], AGENT_ENV), /requires/);
 });
 
 test("page raises an on-call page and exits 7 when nobody was reached", async () => {

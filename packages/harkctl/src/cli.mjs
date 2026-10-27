@@ -166,6 +166,9 @@ export function parseArgs(argv) {
     "dedup-key",
     "note",
     "oncall",
+    "ring-interval",
+    "ring-repeats",
+    "ring-until-ack",
   ]);
   const booleanFlags = new Set([
     "approval",
@@ -538,8 +541,8 @@ const STDIN_KEYS = {
     "dismissAfterSeconds",
     "ifSequence",
   ],
-  "oncall create": ["name", "rotation", "escalation"],
-  "oncall update": ["name", "rotation", "escalation"],
+  "oncall create": ["name", "rotation", "escalation", "ringIntervalSeconds", "ringMaxRepeats"],
+  "oncall update": ["name", "rotation", "escalation", "ringIntervalSeconds", "ringMaxRepeats"],
 };
 
 async function readStdinFor(options, command) {
@@ -669,9 +672,13 @@ function help() {
   harkctl oncall get <group_id>
   harkctl oncall create --team <team_id> --name <name> --members <user_id,...>
                         [--period <daily|weekly>] [--handoff <HH:MM>] [--timezone <zone>]
-                        [--starts-at <iso>] [--stdin]
+                        [--starts-at <iso>] [--ring-interval <seconds>] [--ring-repeats <n>]
+                        [--stdin]
   harkctl oncall update <group_id> [--name <name>] [--members <user_id,...>] [--period <p>]
-                        [--handoff <HH:MM>] [--timezone <zone>] [--starts-at <iso>] [--stdin]
+                        [--handoff <HH:MM>] [--timezone <zone>] [--starts-at <iso>]
+                        [--ring-interval <seconds>] [--ring-repeats <n>] [--stdin]
+  harkctl oncall settings
+  harkctl oncall settings set [--ring-until-ack <on|off>] [--ring-interval <seconds|group>]
   harkctl oncall override <group_id> --user <user_id> --starts-at <iso> --ends-at <iso>
   harkctl oncall remove-override <group_id> <override_id>
   harkctl page <group_id> <title> [--body <text>] [--url <url>] [--app <app_id>]
@@ -717,6 +724,13 @@ page alerts whoever is on call in an on-call group, then escalates until someone
 acknowledges. Acknowledging and escalating are deliberately human-only (on the phone or
 the website); agents can raise, read, and resolve pages. --dedup-key (or, with
 notify --oncall, --idempotency-key) merges repeats into the open page.
+
+Pages ring until acknowledged: whoever is being paged is re-alerted every
+--ring-interval seconds (30-300, default 60) up to --ring-repeats times (0-30, default
+10; 0 alerts once). Repeats replace the alert on the phone instead of stacking.
+oncall settings shows your own paging preferences and each iPhone's Critical Alerts
+status; oncall settings set turns ringing off for you or sets a personal interval
+(--ring-interval group goes back to each group's interval).
 
 Default logins exclude events:read (activity feed) and tokens:manage (tokens list/revoke);
 request them with --scope. No command creates tokens: new tokens always need a signed-in
@@ -859,6 +873,45 @@ async function teamsCommand(config, args, options) {
   }
 }
 
+function parseIntegerFlag(value, flag, min, max) {
+  const number = /^\d+$/.test(String(value)) ? Number.parseInt(value, 10) : Number.NaN;
+  if (!(number >= min && number <= max)) {
+    throw new UsageError(`--${flag} must be an integer from ${min} to ${max}`);
+  }
+  return number;
+}
+
+/** Group ringing fields from --ring-interval / --ring-repeats. */
+function ringFromOptions(options) {
+  return {
+    ...(options["ring-interval"] !== undefined
+      ? {
+          ringIntervalSeconds: parseIntegerFlag(options["ring-interval"], "ring-interval", 30, 300),
+        }
+      : {}),
+    ...(options["ring-repeats"] !== undefined
+      ? { ringMaxRepeats: parseIntegerFlag(options["ring-repeats"], "ring-repeats", 0, 30) }
+      : {}),
+  };
+}
+
+function settingsFromOptions(options) {
+  const ring = options["ring-until-ack"];
+  if (ring !== undefined && ring !== "on" && ring !== "off") {
+    throw new UsageError("--ring-until-ack must be on or off");
+  }
+  const interval = options["ring-interval"];
+  return {
+    ...(ring !== undefined ? { ringUntilAcknowledged: ring === "on" } : {}),
+    ...(interval !== undefined
+      ? {
+          ringIntervalSeconds:
+            interval === "group" ? null : parseIntegerFlag(interval, "ring-interval", 30, 300),
+        }
+      : {}),
+  };
+}
+
 function rotationFromOptions(options, stdinRotation) {
   const rotation = {
     ...(stdinRotation ?? {}),
@@ -880,6 +933,19 @@ async function oncallCommand(config, args, options) {
       return scopedRequest(config, `/api/agent/teams/${encodeURIComponent(options.team)}/oncall`);
     case "me":
       return scopedRequest(config, "/api/agent/oncall/me");
+    case "settings": {
+      if (groupId === undefined) return scopedRequest(config, "/api/agent/oncall/settings");
+      if (groupId !== "set")
+        throw new UsageError("Unknown oncall settings command. Run harkctl --help.");
+      const payload = settingsFromOptions(options);
+      if (Object.keys(payload).length === 0) {
+        throw new UsageError("oncall settings set requires --ring-until-ack or --ring-interval");
+      }
+      return scopedRequest(config, "/api/agent/oncall/settings", {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      });
+    }
     case "get":
       return scopedRequest(config, groupPath());
     case "create": {
@@ -892,6 +958,7 @@ async function oncallCommand(config, args, options) {
       }
       const payload = {
         ...stdin,
+        ...ringFromOptions(options),
         name,
         rotation: {
           period: "daily",
@@ -925,6 +992,7 @@ async function oncallCommand(config, args, options) {
         ...stdin,
         ...(options.name ? { name: options.name } : {}),
         ...(rotation ? { rotation } : {}),
+        ...ringFromOptions(options),
       };
       if (Object.keys(payload).length === 0) {
         throw new UsageError("oncall update requires a field to change (or --stdin)");

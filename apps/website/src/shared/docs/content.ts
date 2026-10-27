@@ -1406,7 +1406,7 @@ harkctl apps remove app_...`,
   },
   {
     id: "oncall",
-    lead: "On-call groups page whoever is on call right now, then escalate until someone takes it. Pages arrive as time-sensitive notifications with Acknowledge and Escalate actions on the Lock Screen.",
+    lead: "On-call groups page whoever is on call right now, then escalate until someone takes it. Pages arrive with an alarm sound and Acknowledge and Escalate actions on the Lock Screen, and keep ringing until someone acknowledges.",
     subsections: [
       {
         id: "oncall-rotations",
@@ -1462,6 +1462,86 @@ harkctl apps remove app_...`,
             language: "bash",
             code: `harkctl page ocg_... "API error rate above 20%" \\
   --body "5xx since 14:02" --dedup-key api-5xx`,
+          },
+        ],
+      },
+      {
+        id: "oncall-ringing",
+        blocks: [
+          {
+            kind: "p",
+            text: "A page keeps ringing until someone acknowledges it. Whoever is being paged gets the alert again on the group's interval, up to its repeat limit. When an escalation step pages the next person, ringing moves to them; a `group` step makes everyone it pages ring. Acknowledging or resolving the page stops all ringing at once.",
+          },
+          {
+            kind: "table",
+            variant: "field",
+            caption: "Group ringing fields",
+            rows: [
+              {
+                name: "ringIntervalSeconds",
+                type: "integer",
+                detail: "Seconds between repeat alerts, 30 to 300. Default 60.",
+              },
+              {
+                name: "ringMaxRepeats",
+                type: "integer",
+                detail:
+                  "Repeat alerts per person after the first, 0 to 30. Default 10; `0` alerts once.",
+              },
+            ],
+          },
+          {
+            kind: "code",
+            language: "bash",
+            code: `harkctl oncall update ocg_... --ring-interval 120 --ring-repeats 5`,
+          },
+          {
+            kind: "p",
+            text: "Every page uses Hark's alarm sound and one notification per page: a repeat replaces the alert on the phone instead of stacking, and still plays the sound. Repeats are not billed as extra notifications. A page's `ringing` list shows who is still being re-alerted, with `ringCount` and `nextRingAt`.",
+          },
+          {
+            kind: "p",
+            text: "Each person sets their own paging preferences, which apply in every group: `ringUntilAcknowledged` (default on; off alerts once per page) and `ringIntervalSeconds` (a personal interval, or `null` for each group's). Change them on the team page in the dashboard, in the app, or with `GET` and `PATCH /api/oncall/settings`. Agents use `/api/agent/oncall/settings` (`oncall:read` / `oncall:write`), `harkctl oncall settings`, or the `oncall_settings_get` and `oncall_settings_update` tools. `/api/oncall/me` includes the same `settings`.",
+          },
+          {
+            kind: "code",
+            language: "bash",
+            code: `harkctl oncall settings
+harkctl oncall settings set --ring-until-ack on --ring-interval group`,
+          },
+          {
+            kind: "table",
+            variant: "field",
+            caption: "Critical Alerts status (per iPhone)",
+            rows: [
+              {
+                name: "authorized",
+                type: "state",
+                detail:
+                  "Pages arrive as critical alerts that ring through the silent switch and Focus.",
+              },
+              {
+                name: "denied",
+                type: "state",
+                detail:
+                  "Critical Alerts are off in Settings. Pages are time-sensitive with the alarm sound.",
+              },
+              {
+                name: "notDetermined",
+                type: "state",
+                detail: "The app has not asked yet. Pages are time-sensitive with the alarm sound.",
+              },
+              {
+                name: "unavailable",
+                type: "state",
+                detail:
+                  "This build of the app does not have Critical Alerts yet. Pages are time-sensitive with the alarm sound.",
+              },
+            ],
+          },
+          {
+            kind: "note",
+            text: "Critical Alerts need an Apple entitlement that is still pending, so for now pages are time-sensitive: they break through Focus but not the silent switch. Keep the ringer on while you are on call.",
           },
         ],
       },
@@ -1694,6 +1774,12 @@ harkctl apps remove app_...`,
                 method: "PATCH",
                 path: "/api/agent/oncall/:groupId",
                 detail: "Edit a group, its `/overrides`, or raise `/pages`. `oncall:write`.",
+              },
+              {
+                method: "GET",
+                path: "/api/agent/oncall/settings",
+                detail:
+                  "Your paging preferences and each iPhone's Critical Alerts status; `PATCH` changes them. `oncall:read` / `oncall:write`.",
               },
               {
                 method: "GET",

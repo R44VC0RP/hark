@@ -19,6 +19,7 @@ harkctl
 ├─ teams        list · create · get · rename · delete · leave · members · role
 │               remove-member · invite · invites · revoke-invite
 ├─ oncall       list · me · get · create · update · override · remove-override
+│               settings · settings set
 ├─ page         <group_id> <title>                page whoever is on call
 ├─ pages        list · get · resolve
 ├─ billing
@@ -226,6 +227,15 @@ keeping the rest. `oncall override <group_id> --user <user_id> --starts-at <iso>
 puts someone on call for a window and `oncall remove-override <group_id> <override_id>` removes it.
 `oncall list --team <team_id>`, `oncall get <group_id>`, and `oncall me` show current and upcoming
 shifts.
+
+Pages ring until someone acknowledges: whoever is being paged gets the alert again every
+`--ring-interval <seconds>` (30–300, default 60) up to `--ring-repeats <n>` times (0–30, default
+10; `0` alerts once). Both work on `oncall create` and `oncall update` (or `ringIntervalSeconds`
+and `ringMaxRepeats` in `--stdin` JSON). Repeats replace the alert on the phone instead of stacking
+and are not billed as extra notifications. `oncall settings` shows your own paging preferences and
+each iPhone's Critical Alerts status; `oncall settings set [--ring-until-ack on|off]
+[--ring-interval <seconds|group>]` turns ringing off for you or sets a personal interval
+(`group` goes back to each group's interval). These apply to you in every group.
 
 `page <group_id> <title> [--body <text>] [--url <url>] [--app <app_id>] [--dedup-key <key>]`
 pages whoever is on call (or the whole group when nobody is) and escalates until someone
