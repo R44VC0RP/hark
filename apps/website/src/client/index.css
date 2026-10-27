@@ -1141,10 +1141,6 @@ address {
   padding: 3px 24px 0 46px;
 }
 
-.hark-phone-status.is-dark {
-  color: #101412;
-}
-
 .hark-phone-status-time {
   font-size: 17px;
   font-weight: 600;
@@ -1497,8 +1493,8 @@ address {
   position: absolute;
   inset: 0;
   z-index: 1;
-  padding-top: 54px;
-  background: linear-gradient(180deg, #034a3c 0%, #01271f 55%, #011c16 100%);
+  overflow: hidden;
+  background: #000000;
 }
 
 .hark-app-title {
@@ -1558,26 +1554,40 @@ address {
   color: var(--color-mint);
 }
 
+/* The Hark app slides back a little as the web app pushes in, as in a stack. */
+.hark-app-under {
+  position: absolute;
+  inset: 0;
+  padding-top: 54px;
+  background: linear-gradient(180deg, #034a3c 0%, #01271f 55%, #011c16 100%);
+}
+
 .hark-webapp-sheet {
   position: absolute;
   inset: 0;
   z-index: 15;
   background: #f4f6f5;
-  transform: translateY(100%);
+  box-shadow: -10px 0 30px rgb(0 0 0 / 0.25);
+  transform: translateX(100%);
 }
 
 .hark-webapp-sheet.is-open {
   transform: none;
 }
 
+.hark-app-screen:has(.hark-webapp-sheet.is-open) .hark-app-under {
+  filter: brightness(0.7);
+  transform: translateX(-30%);
+}
+
 .hark-phone-screen:has(.hark-webapp-sheet.is-open) .hark-phone-home {
   background: rgb(0 0 0 / 0.8);
 }
 
+/* Full screen, no browser bar: Hark only paints the status bar strip in the
+   page's theme color, so the page's own header runs under it. */
 .hark-webapp {
   position: relative;
-  display: flex;
-  flex-direction: column;
   height: 100%;
   color: #101412;
 }
@@ -1587,57 +1597,37 @@ address {
   font-weight: 400;
 }
 
-.hark-webapp-bar {
+.hark-webapp-head {
+  padding: 62px 20px 22px;
+  background: var(--app-theme);
+  color: #ffffff;
+}
+
+.hark-webapp-head-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 60px 18px 12px;
-  border-bottom: 1px solid rgb(0 0 0 / 0.08);
-  background: #ffffff;
-  font-size: 16px;
 }
 
-.hark-webapp-done {
-  color: var(--color-green);
+.hark-webapp-name {
+  font-size: 17px;
   font-weight: 600;
 }
 
-.hark-webapp-url {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  color: #4d5652;
-  font-size: 14px;
-}
-
-.hark-webapp-url svg {
-  color: #6b7671;
-}
-
-.hark-webapp-more {
-  color: var(--color-green);
-  letter-spacing: 0.08em;
-}
-
-.hark-webapp-pass {
-  display: flex;
-  gap: 7px;
-  align-items: center;
-  margin: 14px 16px 0;
-  padding: 10px 12px;
-  border-radius: 14px;
-  background: #e1f3ec;
-  color: var(--color-green);
+.hark-webapp-me {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.22);
   font-size: 14px;
   font-weight: 600;
-}
-
-.hark-webapp-body {
-  padding: 18px 16px;
 }
 
 .hark-webapp-kicker {
-  color: #6b7671;
+  margin-top: 22px;
+  color: rgb(255 255 255 / 0.72);
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.06em;
@@ -1646,14 +1636,68 @@ address {
 
 .hark-webapp-title {
   margin-top: 2px;
-  color: #08362b;
-  font-size: 25px;
+  font-size: 30px;
   font-weight: 700;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
+}
+
+.hark-webapp-pass {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 12px;
+  padding: 6px 11px 6px 9px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.18);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.hark-webapp-body {
+  padding: 16px;
+}
+
+/* Hark's first-open tip: how to reach Hark and get back from a full-screen page. */
+.hark-webapp-hint {
+  position: absolute;
+  top: 62px;
+  left: 50%;
+  display: none;
+  gap: 7px;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 16px;
+  background: rgb(23 23 19 / 0.88);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  translate: -50% 0;
+}
+
+.hark-webapp-hint i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-mint);
+}
+
+@keyframes hark-hint {
+  0% {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  10%,
+  88% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+  }
 }
 
 .hark-webapp-list {
-  margin-top: 14px;
   padding: 2px 14px;
   border-radius: 16px;
   background: #ffffff;
@@ -1674,7 +1718,17 @@ address {
   border-bottom: 0;
 }
 
-.hark-webapp-chart {
+.hark-webapp-list-head {
+  padding: 12px 0 2px;
+  color: #6b7671;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.hark-webapp-chart,
+.hark-webapp-chart + .hark-webapp-list {
   margin-top: 12px;
   padding: 14px 14px 12px;
   border-radius: 16px;
@@ -1717,7 +1771,7 @@ address {
 
 .hark-webapp-bars i {
   border-radius: 5px;
-  background: #cfe9df;
+  background: color-mix(in oklab, var(--app-theme) 20%, #ffffff);
   transform-origin: 50% 100%;
 }
 
@@ -1726,7 +1780,7 @@ address {
 }
 
 .hark-webapp-bars .is-today i {
-  background: #635bff;
+  background: var(--app-theme);
 }
 
 @keyframes hark-grow {
@@ -1777,13 +1831,24 @@ address {
     animation-play-state: var(--hark-play);
   }
 
-  .hark-webapp-sheet {
-    transition: transform 420ms cubic-bezier(0.32, 0.72, 0, 1);
+  .hark-webapp-sheet,
+  .hark-app-under {
+    transition:
+      transform 480ms cubic-bezier(0.32, 0.72, 0, 1),
+      filter 480ms cubic-bezier(0.32, 0.72, 0, 1);
   }
 
-  .hark-webapp-bars i {
+  /* The page's content plays once it's on screen, not while it's waiting off it. */
+  .hark-webapp-sheet.is-open .hark-webapp-bars i {
     animation: hark-grow 520ms cubic-bezier(0.23, 1, 0.32, 1) both;
     animation-delay: 380ms;
+    animation-play-state: var(--hark-play);
+  }
+
+  .hark-webapp-sheet.is-open .hark-webapp-hint {
+    display: flex;
+    animation: hark-hint 2600ms ease 700ms both;
+    animation-play-state: var(--hark-play);
   }
 
   .hark-lock {
@@ -1826,7 +1891,7 @@ address {
     animation-play-state: var(--hark-play);
   }
 
-  .hark-webapp-pass {
+  .hark-webapp-sheet.is-open .hark-webapp-pass {
     animation: hark-fade-up 360ms ease 300ms both;
     animation-play-state: var(--hark-play);
   }

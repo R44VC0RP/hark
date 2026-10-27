@@ -49,12 +49,12 @@ export function Wallpaper() {
 }
 
 /**
- * The status bar stays put while screens change under it: the time fades in
- * once the phone is unlocked, and it turns dark over light content.
+ * The status bar stays put while screens change under it; the time fades in
+ * once the phone is unlocked.
  */
-export function StatusBar({ time = false, dark = false }: { time?: boolean; dark?: boolean }) {
+export function StatusBar({ time = false }: { time?: boolean }) {
   return (
-    <div className={`hark-phone-status ${dark ? "is-dark" : ""}`}>
+    <div className="hark-phone-status">
       <span className={`hark-phone-status-time ${time ? "" : "is-hidden"}`}>9:41</span>
       <StatusBarIcons />
     </div>

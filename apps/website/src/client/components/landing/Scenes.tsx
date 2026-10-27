@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react";
 import { AppIcon, type AppTile, Island, LockScreen, PhoneNote, StatusBar, Tap } from "./Phone";
 import {
   type AppCopy,
@@ -202,20 +202,19 @@ const DAYS = ["M", "T", "W", "T", "F", "S", "S"];
 function WebApp({ app }: { app: AppCopy }) {
   const { chart } = app;
   return (
-    <div className="hark-webapp">
-      <div className="hark-webapp-bar">
-        <span className="hark-webapp-done">Done</span>
-        <span className="hark-webapp-url">
-          <LockIcon /> {app.url}
-        </span>
-        <span className="hark-webapp-more">•••</span>
-      </div>
-      <div className="hark-webapp-pass">
-        <Check size={13} /> {app.signedIn}
-      </div>
-      <div className="hark-webapp-body">
+    <div className="hark-webapp" style={{ "--app-theme": app.bg } as CSSProperties}>
+      <div className="hark-webapp-head">
+        <div className="hark-webapp-head-row">
+          <span className="hark-webapp-name">{app.name}</span>
+          <span className="hark-webapp-me">{app.signedInAs.charAt(0)}</span>
+        </div>
         <div className="hark-webapp-kicker">{app.kicker}</div>
         <div className="hark-webapp-title">{app.headline}</div>
+        <div className="hark-webapp-pass">
+          <Check size={13} /> Signed in with Hark as {app.signedInAs}
+        </div>
+      </div>
+      <div className="hark-webapp-body">
         <div className="hark-webapp-list">
           {app.rows.map((row) => (
             <div className="hark-webapp-row" key={row.label}>
@@ -244,16 +243,23 @@ function WebApp({ app }: { app: AppCopy }) {
             </div>
           </div>
         ) : null}
+        {app.latest ? (
+          <div className="hark-webapp-list">
+            <div className="hark-webapp-list-head">Latest orders</div>
+            {app.latest.map((row) => (
+              <div className="hark-webapp-row" key={row.label}>
+                <span>{row.label}</span>
+                <span className="hark-webapp-muted">{row.value}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
+      <div className="hark-webapp-hint">
+        <i />
+        Hold two fingers for Hark · swipe from the left edge to go back
       </div>
     </div>
-  );
-}
-
-function LockIcon() {
-  return (
-    <svg aria-hidden="true" fill="currentColor" height="11" viewBox="0 0 14 18" width="9">
-      <path d="M7 0a4.5 4.5 0 0 0-4.5 4.5V7H2a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-.5V4.5A4.5 4.5 0 0 0 7 0Zm-3 4.5a3 3 0 0 1 6 0V7H4V4.5Z" />
-    </svg>
   );
 }
 
@@ -305,18 +311,20 @@ function AppScene({ app, step }: { app: AppCopy; step: number }) {
   ].slice(0, 4);
   return (
     <div className="hark-app-screen">
-      <div className="hark-app-title">Apps</div>
-      <div className="hark-app-section">
-        <div className="hark-app-section-head">
-          <span>My apps</span>
+      <div className="hark-app-under">
+        <div className="hark-app-title">Apps</div>
+        <div className="hark-app-section">
+          <div className="hark-app-section-head">
+            <span>My apps</span>
+          </div>
+          <div className="hark-app-grid">
+            {tiles.map((tile, index) => (
+              <AppIcon app={tile} key={tile.name} pressed={index === 0 && step === APP_TAP} />
+            ))}
+          </div>
         </div>
-        <div className="hark-app-grid">
-          {tiles.map((tile, index) => (
-            <AppIcon app={tile} key={tile.name} pressed={index === 0 && step === APP_TAP} />
-          ))}
-        </div>
+        <AppTabs />
       </div>
-      <AppTabs />
       {step === APP_TAP ? <Tap style={{ left: 66, top: 216 }} /> : null}
       <div className={`hark-webapp-sheet ${step > APP_TAP ? "is-open" : ""}`}>
         <WebApp app={app} />
@@ -349,7 +357,7 @@ export function PhoneStage({ id, scene, step }: { id: string; scene: Scene; step
           <LockNote scene={scene} step={step} />
         </NoteSwap>
       </LockScreen>
-      <StatusBar dark={isApp && step > APP_TAP} time={isApp} />
+      <StatusBar time={isApp} />
       <Island mode="idle" />
     </>
   );

@@ -35,13 +35,15 @@ export interface AppCopy {
   glyph: string;
   bg: string;
   fg: string;
-  url: string;
-  signedIn: string;
+  /** Who Hark signed in, as the app shows it. */
+  signedInAs: string;
   kicker: string;
   headline: string;
   rows: AppRow[];
   /** A small bar chart under the rows; values are percent of the tallest bar. */
   chart?: { label: string; delta: string; values: number[] };
+  /** A short list under the chart. */
+  latest?: AppRow[];
 }
 
 export interface TeamCopy {
@@ -137,8 +139,7 @@ export const STEPS: Step[] = [
         glyph: "$",
         bg: "#635BFF",
         fg: "#fff",
-        url: "admin.myapp.com",
-        signedIn: "Signed in as Ryan",
+        signedInAs: "Ryan",
         kicker: "Today",
         headline: "$1,284 in sales",
         rows: [
@@ -152,6 +153,10 @@ export const STEPS: Step[] = [
           delta: "+18%",
           values: [46, 58, 51, 72, 64, 83, 100],
         },
+        latest: [
+          { label: "Northwind · Annual", value: "$240" },
+          { label: "Lumen Labs · Monthly", value: "$29" },
+        ],
       },
     },
   },
