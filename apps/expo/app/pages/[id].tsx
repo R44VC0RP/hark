@@ -12,6 +12,7 @@ import {
   PrimaryButton,
   ScreenHeader,
   SecondaryButton,
+  SectionLabel,
   ui,
 } from "../../src/components/screen-parts";
 import { ApiError, api } from "../../src/lib/api";
@@ -19,7 +20,13 @@ import { useSession } from "../../src/lib/auth";
 import { openTopLevelDestination } from "../../src/lib/inbox-body";
 import { previewPages, previewViewer } from "../../src/lib/inbox-preview";
 import { dismissNotificationsForPage } from "../../src/lib/notification-withdrawals";
-import { escalationLabel, onPageClaimed, pageStatusLabel, timeAgo } from "../../src/lib/teams";
+import {
+  escalationLabel,
+  onPageClaimed,
+  pageStatusLabel,
+  timeAgo,
+  timelineLabel,
+} from "../../src/lib/teams";
 import { colors, fonts, tightTracking } from "../../src/lib/theme";
 
 type Busy = "acknowledge" | "escalate" | "resolve" | null;
@@ -303,6 +310,40 @@ export default function PageDetailScreen() {
                 />
               </View>
             ) : null}
+
+            {page.timeline && page.timeline.length > 0 ? (
+              <View style={{ marginTop: 8 }}>
+                <SectionLabel>Timeline</SectionLabel>
+                {page.timeline.map((event, index) => (
+                  <View
+                    accessible
+                    key={`${event.at}-${event.kind}-${event.people.map((person) => person.userId).join(",")}`}
+                    style={[ui.row, index === (page.timeline?.length ?? 0) - 1 && ui.lastRow]}
+                  >
+                    <View
+                      style={[
+                        styles.timelineDot,
+                        event.kind === "acknowledged" && { backgroundColor: colors.accent },
+                        event.kind === "paged" && { backgroundColor: colors.danger },
+                      ]}
+                    />
+                    <Text style={[ui.rowValue, { flex: 1 }]}>{timelineLabel(event)}</Text>
+                    <Text style={ui.rowTrailing}>
+                      {new Date(event.at).toLocaleTimeString(undefined, {
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+            {page.ringing && page.ringing.length > 0 ? (
+              <Text style={[ui.muted, { marginTop: 8 }]}>
+                Ringing {page.ringing.map((ring) => ring.person.name).join(", ")} until someone
+                acknowledges.
+              </Text>
+            ) : null}
           </ScrollView>
 
           {resolved ? null : (
@@ -402,6 +443,12 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.line,
     backgroundColor: colors.paper,
+  },
+  timelineDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: colors.soft,
   },
   secondaryActions: {
     flexDirection: "row",

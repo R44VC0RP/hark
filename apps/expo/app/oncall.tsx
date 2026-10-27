@@ -38,6 +38,7 @@ import {
 } from "../src/lib/inbox-preview";
 import {
   currentShift,
+  escalationPolicySummary,
   formatHandoff,
   isUnsupportedRoute,
   onPageClaimed,
@@ -233,6 +234,15 @@ export default function OncallScreen() {
                         {group.rotation.handoffAt}
                       </Text>
                     </View>
+                    <Text style={ui.rowValue}>
+                      {escalationPolicySummary(
+                        group,
+                        (id) =>
+                          group.rotation.members.find((member) => member.userId === id)?.name ??
+                          "a teammate",
+                        (id) => groups.find((other) => other.id === id)?.name ?? "another group",
+                      )}
+                    </Text>
                     {group.upcoming.slice(0, 4).map((item, shiftIndex) => {
                       const live = shiftIndex === 0 && group.current !== null;
                       const you = item.person.userId === viewerId;

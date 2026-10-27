@@ -4,6 +4,7 @@ import { ApiError } from "./api-error";
 import {
   currentShift,
   escalationLabel,
+  escalationPolicySummary,
   formatHandoff,
   groupAppsByTeam,
   isSeatLimitError,
@@ -15,6 +16,7 @@ import {
   pagesNeedYouLabel,
   seatsFull,
   seatsLabel,
+  timelineLabel,
 } from "./teams";
 
 function app(id: string, team?: { id: string; name: string }): AppDto {
@@ -152,6 +154,41 @@ describe("on-call formatting", () => {
         now,
       ),
     ).toBe("Acknowledged by Maya");
+  });
+
+  it("describes escalation policies and page timelines", () => {
+    const maya = { userId: "m", name: "Maya", image: null };
+    const sam = { userId: "s", name: "Sam", image: null };
+    expect(
+      escalationPolicySummary(
+        {
+          escalation: [
+            { afterMinutes: 5, target: "next" },
+            { afterMinutes: 10, target: "people", userIds: ["m", "s"] },
+          ],
+          escalationMode: "fan_out",
+          escalationLoops: 1,
+          escalationFinal: "team",
+        },
+        (id) => (id === "m" ? "Maya" : "Sam"),
+      ),
+    ).toBe(
+      "On call → 5 min → Next in rotation → 10 min → Maya + Sam · repeats 1× · then everyone in the team",
+    );
+    const at = new Date(0).toISOString();
+    expect(
+      timelineLabel({ at, kind: "paged", level: 1, loop: 1, people: [maya], escalatedBy: sam }),
+    ).toBe("Sam escalated · Paged Maya · level 1, loop 2");
+    expect(
+      timelineLabel({
+        at,
+        kind: "acknowledged",
+        level: null,
+        loop: null,
+        people: [maya],
+        escalatedBy: null,
+      }),
+    ).toBe("Claimed by Maya");
   });
 });
 

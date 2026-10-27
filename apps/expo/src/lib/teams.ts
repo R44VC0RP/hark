@@ -2,7 +2,9 @@ import {
   API_ERROR_CODE_SEAT_LIMIT,
   type AppDto,
   HARK_PAGE_CATEGORY_ID,
+  type OncallGroupDto,
   type OncallPageDto,
+  type OncallPageEventDto,
   type OncallShiftDto,
   oncallPageClaimedPushDataSchema,
   oncallPagePushDataSchema,
@@ -169,6 +171,54 @@ export function escalationLabel(
   const step = page.escalationStep > 0 ? `Escalated ${page.escalationStep}×` : "Not escalated";
   if (!page.nextEscalationAt) return `${step} · no further steps`;
   return `${step} · next ${relativeMinutes(Date.parse(page.nextEscalationAt), now)}`;
+}
+
+/** One timeline line: "Paged Ana · level 0", "Cal escalated · paged Ben · level 1", "Claimed by Ben". */
+export function timelineLabel(event: OncallPageEventDto): string {
+  const names = event.people.map((person) => person.name).join(", ");
+  if (event.kind === "acknowledged") return `Claimed by ${names}`;
+  if (event.kind === "resolved") return `Resolved by ${names}`;
+  const where = [
+    event.level !== null ? `level ${event.level}` : null,
+    event.loop ? `loop ${event.loop + 1}` : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const paged = `Paged ${names || "nobody"}${where ? ` · ${where}` : ""}`;
+  return event.escalatedBy ? `${event.escalatedBy.name} escalated · ${paged}` : paged;
+}
+
+/** Readable escalation policy: "On call → 5 min → Next in rotation → 10 min → Everyone in the group". */
+export function escalationPolicySummary(
+  group: Pick<
+    OncallGroupDto,
+    "escalation" | "escalationMode" | "escalationLoops" | "escalationFinal"
+  >,
+  nameOf: (userId: string) => string = (id) => id,
+  groupNameOf: (groupId: string) => string = () => "another group",
+): string {
+  const target = (step: OncallGroupDto["escalation"][number]): string => {
+    switch (step.target) {
+      case "next":
+        return "Next in rotation";
+      case "oncall":
+        return step.groupId ? `On call in ${groupNameOf(step.groupId)}` : "Whoever is on call";
+      case "people":
+        return (step.userIds ?? []).map(nameOf).join(" + ");
+      case "group":
+        return "Everyone in the group";
+      case "team":
+        return "Everyone in the team";
+    }
+  };
+  const parts = ["On call"];
+  for (const step of group.escalation) parts.push(`${step.afterMinutes} min`, target(step));
+  let summary = parts.join(" → ");
+  if (group.escalationLoops) summary += ` · repeats ${group.escalationLoops}×`;
+  if (group.escalationFinal === "group") summary += " · then everyone in the group";
+  if (group.escalationFinal === "team") summary += " · then everyone in the team";
+  if (group.escalationMode === "hand_off") summary += " · hands off";
+  return summary;
 }
 
 /** "Just now", "3 min ago", "2 hr ago", "4 days ago". */

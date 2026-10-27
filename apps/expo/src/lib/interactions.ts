@@ -20,7 +20,7 @@ import { trackAppEvent } from "./analytics";
 import { ApiError, api } from "./api";
 import { getCookie } from "./auth";
 import { compositeIdForPushEvent, openTopLevelDestination } from "./inbox-body";
-import { joinCodeFromUrl, pagePushData } from "./teams";
+import { claimedPageId, joinCodeFromUrl, pagePushData } from "./teams";
 
 export const DEVICE_ID_KEY = "hark.device.serverId";
 const RETRY_QUEUE_KEY = "hark.interaction.responseQueue.v1";
@@ -328,6 +328,13 @@ function openJoin(code: string): void {
 
 /** Handles taps and actions on on-call pages; returns false for other pushes. */
 async function handlePageResponse(response: Notifications.NotificationResponse): Promise<boolean> {
+  // The quiet "Claimed by <name>" notice that replaces a page's alert.
+  const claimed = claimedPageId(response.notification.request.content.data);
+  if (claimed) {
+    openPage(claimed);
+    void trackAppEvent("notification_opened", { path: "/pages", properties: {} });
+    return true;
+  }
   const page = pagePushData(response.notification.request.content.data);
   if (!page) return false;
   if (response.actionIdentifier === HARK_ACKNOWLEDGE_ACTION_ID) {
