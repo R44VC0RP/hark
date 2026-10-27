@@ -28,6 +28,9 @@ export default ({ config: _config }: ConfigContext): ExpoConfig => ({
     entitlements: {
       "aps-environment": "development",
       "com.apple.developer.usernotifications.communication": true,
+      // Without this, iOS delivers interruptionLevel "time-sensitive" pushes
+      // (on-call pages) as ordinary alerts that Focus can silence.
+      "com.apple.developer.usernotifications.time-sensitive": true,
       "com.apple.developer.siri": true,
       ...(criticalAlerts ? { "com.apple.developer.usernotifications.critical-alerts": true } : {}),
     },
