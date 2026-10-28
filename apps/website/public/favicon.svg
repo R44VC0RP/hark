@@ -1,4 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <title>Hark</title>
   <rect width="512" height="512" rx="112" fill="#035B49"/>
   <rect x="136" y="136" width="240" height="240" rx="64" fill="#fff"/>
   <circle cx="368" cy="144" r="58" fill="#5ED8B7" stroke="#035B49" stroke-width="24"/>
