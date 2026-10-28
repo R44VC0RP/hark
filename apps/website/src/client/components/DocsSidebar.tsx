@@ -1,8 +1,12 @@
 import { useEffect, useState } from "react";
 import { DOC_ANCHOR_IDS, DOC_NAV, type DocAnchorId } from "../../shared/docs/nav";
 
-/** Distance below the sticky header that counts as "the current heading". */
-const SPY_OFFSET_PX = 120;
+/**
+ * Distance below the sticky header that counts as "the current heading". Just
+ * past the sections' scroll-margin-top (index.css), so a jumped-to heading is
+ * the current one.
+ */
+const SPY_OFFSET_PX = 144;
 
 /**
  * Tracks which anchor is currently at the top of the viewport.

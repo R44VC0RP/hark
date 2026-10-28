@@ -204,7 +204,18 @@
    rest of the site keeps instant jumps. */
 :root:has(.hark-docs) {
   scroll-behavior: smooth;
-  scroll-padding-top: 6rem;
+}
+
+/* Anchored sections land below the sticky chrome: the 4rem header plus, below
+   lg, the 3.5rem chapter strip (DocsSidebar), with a little air either way. */
+.hark-docs section[id] {
+  scroll-margin-top: 8.5rem;
+}
+
+@media (min-width: 1024px) {
+  .hark-docs section[id] {
+    scroll-margin-top: 6rem;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
