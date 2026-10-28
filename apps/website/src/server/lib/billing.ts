@@ -112,6 +112,9 @@ function staticPlans(): PricingPlansDto {
  * Public pricing data, sourced live from the Autumn plan catalog so the
  * pricing page cannot drift from what checkout actually attaches.
  */
+/** Plans existing customers keep but nobody new can buy. */
+export const RETIRED_PLAN_IDS = new Set(["pro_monthly"]);
+
 export async function getPricingPlans(): Promise<PricingPlansDto> {
   if (!autumn) return staticPlans();
   if (plansCache && plansCache.expiresAt > Date.now()) return plansCache.value;
@@ -119,8 +122,15 @@ export async function getPricingPlans(): Promise<PricingPlansDto> {
   try {
     const response = await autumn.plans.list();
     const plans = response.list
-      // Team seats are billed to the team, not shown as a personal plan.
-      .filter((plan) => !plan.addOn && !plan.archived && plan.id !== "team_monthly")
+      // Team seats are billed to the team, not shown as a personal plan. Pro
+      // is kept only for existing subscribers and is no longer sold.
+      .filter(
+        (plan) =>
+          !plan.addOn &&
+          !plan.archived &&
+          plan.id !== "team_monthly" &&
+          !RETIRED_PLAN_IDS.has(plan.id),
+      )
       .map((plan): PricingPlanDto => {
         const item = (featureId: string) =>
           plan.items.find((candidate) => candidate.featureId === featureId);

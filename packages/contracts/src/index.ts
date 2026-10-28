@@ -1508,9 +1508,13 @@ export type TeamRole = z.infer<typeof teamRoleSchema>;
 export const TEAM_NAME_MAX_CHARS = 60 as const;
 export const MAX_TEAMS_PER_ACCOUNT = 20 as const;
 export const MAX_MEMBERS_PER_TEAM = 500 as const;
-/** Seats included without a paid team plan (the creator's own seat). */
-export const TEAM_FREE_SEATS = 1 as const;
-/** Monthly price per seat beyond the free one, in USD. */
+/**
+ * Seats included without a paid team plan. Every seat is paid, including the
+ * creator's: a team works (members, shared apps, on-call) once it is on the
+ * Team plan. Personal use stays free without a team.
+ */
+export const TEAM_FREE_SEATS = 0 as const;
+/** Monthly price per team seat, in USD. */
 export const TEAM_SEAT_PRICE_MONTHLY = 5 as const;
 export const TEAM_INVITE_TTL_SECONDS = 604_800 as const;
 /** Open (unaccepted, unrevoked, unexpired) invites a team may hold at once. */

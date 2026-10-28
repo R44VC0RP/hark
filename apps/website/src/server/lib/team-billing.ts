@@ -4,10 +4,10 @@ import { env } from "../env";
 
 /**
  * Team seat billing. The Autumn customer for a team is the team itself
- * (customer ID = team ID), separate from every member's personal plan. The
- * first seat is free; any further member needs the `team_monthly` plan,
- * which bills the `seats` feature per seat. Without Autumn (development,
- * tests, self-hosting) seats are unlimited.
+ * (customer ID = team ID), separate from every member's personal plan. Every
+ * seat is paid: a team needs the `team_monthly` plan, which bills the `seats`
+ * feature per member, before it can add people, share apps or page. Without
+ * Autumn (development, tests, self-hosting) teams are unlimited.
  */
 
 const TEAM_PLAN_ID = "team_monthly";
@@ -101,6 +101,15 @@ export async function teamSeats(
 export async function teamCanSeat(team: TeamCustomer, nextCount: number): Promise<boolean> {
   if (!autumn || nextCount <= TEAM_FREE_SEATS || teamIsComped(team)) return true;
   return teamHasPaidPlan(team, false);
+}
+
+/**
+ * Whether the team's features work: sharing apps into it, on-call groups and
+ * pages. True without billing, for comped teams and on an active Team plan.
+ */
+export async function teamIsActive(team: TeamCustomer): Promise<boolean> {
+  if (!autumn || teamIsComped(team)) return true;
+  return teamHasPaidPlan(team);
 }
 
 /** Reports the current member count as seat usage. Best effort; never throws. */

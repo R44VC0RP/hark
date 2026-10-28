@@ -58,6 +58,7 @@ export const freeV1 = plan({
   ],
 });
 
+/** No longer offered to new customers; kept for existing Pro subscribers. */
 export const pro = plan({
   id: "pro_monthly",
   name: "Pro",
@@ -85,9 +86,9 @@ export const pro = plan({
 });
 
 /**
- * Team plan, attached to the team's own customer (ID = team ID). The first
- * seat is included (TEAM_FREE_SEATS); every further member is $5/month
- * (TEAM_SEAT_PRICE_MONTHLY), prorated as people join and leave.
+ * Team plan, attached to the team's own customer (ID = team ID). Every seat
+ * is $5/month (TEAM_SEAT_PRICE_MONTHLY), the creator's included
+ * (TEAM_FREE_SEATS = 0), prorated as people join and leave.
  */
 export const teamMonthly = plan({
   id: "team_monthly",
@@ -97,14 +98,13 @@ export const teamMonthly = plan({
   items: [
     item({
       featureId: seats.id,
-      included: 1,
+      included: 0,
       price: {
         amount: 5,
         interval: "month",
         billingMethod: "usage_based",
         billingUnits: 1,
       },
-      proration: { onIncrease: "prorate", onDecrease: "prorate" },
     }),
   ],
 });

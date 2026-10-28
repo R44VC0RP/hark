@@ -61,10 +61,7 @@ describe("SEO metadata", () => {
 
   it("uses the same public pricing facts in the fallback catalog", () => {
     const plans = staticPricingPlans().plans;
-    expect(plans.map((plan) => [plan.name, plan.priceMonthly])).toEqual([
-      ["Free", 0],
-      ["Pro", PRO_PRICE_MONTHLY],
-    ]);
+    expect(plans.map((plan) => [plan.name, plan.priceMonthly])).toEqual([["Free", 0]]);
   });
 });
 

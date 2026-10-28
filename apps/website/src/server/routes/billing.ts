@@ -4,13 +4,7 @@ import { Hono } from "hono";
 import { db } from "../db";
 import { user as userTable } from "../db/schema";
 import { track } from "../lib/analytics";
-import {
-  createBillingPortal,
-  createCheckout,
-  getBilling,
-  getPricingPlans,
-  hasAutumn,
-} from "../lib/billing";
+import { createBillingPortal, getBilling, getPricingPlans, hasAutumn } from "../lib/billing";
 import {
   type AgentEnv,
   type AuthedEnv,
@@ -27,17 +21,18 @@ export const billingRoute = new Hono<AuthedEnv>()
   })
   .use("*", requireAuth)
   .get("/", async (c) => c.json(await getBilling(c.get("user"))))
-  .post("/checkout", async (c) => {
-    if (!hasAutumn()) return c.json({ error: "Billing is not configured" }, 503);
-    try {
-      const url = await createCheckout(c.get("user"));
-      track({ name: "plan_checkout_started", userId: c.get("user").id, outcome: "pro_monthly" });
-      return c.json<BillingRedirectResponse>({ url });
-    } catch (error) {
-      console.error("[billing] Could not create checkout", error);
-      return c.json({ error: "Could not start checkout" }, 502);
-    }
-  })
+  // Hark Pro is no longer sold: personal use is free, teams pay per seat
+  // (POST /api/teams/:id/billing/checkout). Existing Pro subscribers keep
+  // their plan and manage it from the portal below.
+  .post("/checkout", (c) =>
+    c.json(
+      {
+        error:
+          "Hark Pro is no longer offered. Personal use is free; teams are $5 per seat per month.",
+      },
+      410,
+    ),
+  )
   .post("/portal", async (c) => {
     if (!hasAutumn()) return c.json({ error: "Billing is not configured" }, 503);
     try {

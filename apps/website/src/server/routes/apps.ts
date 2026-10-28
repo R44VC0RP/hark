@@ -1,5 +1,6 @@
 import {
   API_ERROR_CODE_CONSENT_REQUIRED,
+  API_ERROR_CODE_SEAT_LIMIT,
   APP_PASS_JWKS_PATH,
   type AppCreateResponse,
   type AppDto,
@@ -28,7 +29,16 @@ import {
 } from "../lib/apps";
 import { newId } from "../lib/id";
 import { resolveProjectForDelivery } from "../lib/projects";
-import { hasRole, memberIds, membership, returnAppToAdder, sendNotice } from "../lib/teams";
+import {
+  hasRole,
+  memberIds,
+  membership,
+  returnAppToAdder,
+  sendNotice,
+  shareNoticeAllowed,
+  TEAM_PLAN_REQUIRED_MESSAGE,
+  teamActive,
+} from "../lib/teams";
 import {
   type AgentEnv,
   type AuthedEnv,
@@ -133,6 +143,7 @@ async function upsertMemberState(
 }
 
 async function notifyTeamOfApp(actor: Actor, row: AppRow, teamId: string, teamName: string) {
+  if (!shareNoticeAllowed(actor.id, row.id, teamId)) return;
   const recipients = (await memberIds(teamId)).filter((id) => id !== actor.id);
   await sendNotice(recipients, {
     title: `${actor.name} added ${row.name} to ${teamName}`,
@@ -171,6 +182,12 @@ async function shareApp(actor: Actor, appId: string, input: unknown): Promise<Ou
 
   const destination = await membership(target, actor.id);
   if (!destination) return { status: 404, body: { error: "Team not found" } };
+  if (!(await teamActive(target))) {
+    return {
+      status: 402,
+      body: { error: TEAM_PLAN_REQUIRED_MESSAGE, code: API_ERROR_CODE_SEAT_LIMIT },
+    };
+  }
   const now = new Date();
   db.transaction((tx) => {
     if (current.teamId === null) {
@@ -215,6 +232,9 @@ export const appsAgentRoute = new Hono<AgentEnv>()
     const input = parsed.data;
     const destination = input.teamId ? await membership(input.teamId, token.userId) : undefined;
     if (input.teamId && !destination) return c.json({ error: "Team not found" }, 404);
+    if (destination && !(await teamActive(destination.team.id))) {
+      return c.json({ error: TEAM_PLAN_REQUIRED_MESSAGE, code: API_ERROR_CODE_SEAT_LIMIT }, 402);
+    }
     const teamId = destination?.team.id ?? null;
     const projectResolution = input.project
       ? await resolveProjectForDelivery(token.userId, input.project)

@@ -44,9 +44,9 @@ export const PAGE_SEO: Record<SeoPage, PageSeo> = {
   },
   pricing: {
     path: "/pricing",
-    title: "Hark Pricing — Free and Pro iPhone Notifications",
+    title: "Hark Pricing — Free for Personal Use, $5 per Team Seat",
     description:
-      "Compare Hark Free and Pro plans: interactive responses and Live Activities on every plan, plus multiple iPhones, device routing, and higher limits with Pro.",
+      "Hark is free for personal use: notifications, approvals, replies and Live Activities on one iPhone. Teams with shared apps and on-call paging are $5 per seat per month.",
     index: true,
   },
   launched: {

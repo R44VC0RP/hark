@@ -65,7 +65,7 @@ import {
   type PageTarget,
   sendPushMessages,
 } from "./push";
-import { memberIds } from "./teams";
+import { memberIds, TEAM_PLAN_REQUIRED_MESSAGE, teamActive } from "./teams";
 import { generatePageResponseToken, hashPageResponseToken } from "./token";
 
 export type GroupRow = typeof oncallGroup.$inferSelect;
@@ -966,7 +966,7 @@ export interface RaisePageInput {
 
 export type RaisePageOutcome =
   | { ok: true; status: 200 | 201; body: OncallPageCreateResponse }
-  | { ok: false; status: 400 | 429; error: string; retryAfterSeconds?: number };
+  | { ok: false; status: 400 | 402 | 429; error: string; retryAfterSeconds?: number };
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -1063,6 +1063,9 @@ export async function raisePage({
   creatorUserId,
   sourceName,
 }: RaisePageInput): Promise<RaisePageOutcome> {
+  if (!(await teamActive(group.teamId))) {
+    return { ok: false, status: 402, error: TEAM_PLAN_REQUIRED_MESSAGE };
+  }
   let appId: string | null = null;
   if (input.appId) {
     const [row] = await db

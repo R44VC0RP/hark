@@ -46,6 +46,8 @@ import {
   revokeInvitesBy,
   sendNotice,
   syncSeats,
+  TEAM_PLAN_REQUIRED_MESSAGE,
+  teamActive,
   toInviteDto,
   toTeamDto,
 } from "../lib/teams";
@@ -84,11 +86,7 @@ export function send(c: Context, outcome: Outcome) {
 
 export const TEAM_NOT_FOUND = failure(404, "Team not found");
 const FORBIDDEN_ADMIN = failure(403, "Only team owners and admins can do this");
-const SEAT_LIMIT = failure(
-  402,
-  "This team has used its free seat. Upgrade to the team plan to add members.",
-  { code: API_ERROR_CODE_SEAT_LIMIT },
-);
+const SEAT_LIMIT = failure(402, TEAM_PLAN_REQUIRED_MESSAGE, { code: API_ERROR_CODE_SEAT_LIMIT });
 
 export async function readJson(c: Context): Promise<unknown> {
   return c.req.json().catch(() => null);
@@ -470,6 +468,7 @@ async function createGroup(actor: Actor, teamId: string, input: unknown): Promis
   const current = await membership(teamId, actor.id);
   if (!current) return TEAM_NOT_FOUND;
   if (!hasRole(current.role, "admin")) return FORBIDDEN_ADMIN;
+  if (!(await teamActive(teamId))) return SEAT_LIMIT;
   const parsed = oncallGroupCreateSchema.safeParse(input);
   if (!parsed.success)
     return failure(400, "Invalid on-call group", { issues: parsed.error.issues });

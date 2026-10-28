@@ -21,7 +21,7 @@ import {
 } from "../db/schema";
 import { newId } from "./id";
 import { buildPushMessages, sendPushMessages } from "./push";
-import { syncTeamSeats, teamSeats } from "./team-billing";
+import { syncTeamSeats, teamIsActive, teamSeats } from "./team-billing";
 
 export type TeamRow = typeof team.$inferSelect;
 export type InviteRow = typeof teamInvite.$inferSelect;
@@ -73,6 +73,54 @@ export async function billingCustomer(teamRow: TeamRow) {
     .where(and(eq(teamMember.teamId, teamRow.id), eq(teamMember.role, "owner")))
     .limit(1);
   return { id: teamRow.id, name: teamRow.name, ...(owner ? { email: owner.email } : {}) };
+}
+
+/** Team-wide "added an app" pushes one person can cause per hour. */
+const SHARE_NOTICES_PER_HOUR = 10;
+/** Once per app and team per day, so moving an app back and forth can't spam. */
+const SHARE_NOTICE_REPEAT_MS = 86_400_000;
+const shareNoticeBuckets = new Map<string, { count: number; resetAt: number }>();
+const shareNoticesSent = new Map<string, number>();
+
+/**
+ * Whether an "added an app" push to the whole team may go out. Each one can
+ * reach every member's iPhones, so it is capped per person and per app.
+ */
+export function shareNoticeAllowed(actorId: string, appId: string, teamId: string): boolean {
+  const now = Date.now();
+  if (shareNoticesSent.size > 10_000) {
+    for (const [key, at] of shareNoticesSent) {
+      if (now - at > SHARE_NOTICE_REPEAT_MS) shareNoticesSent.delete(key);
+    }
+  }
+  const key = `${appId}:${teamId}`;
+  const last = shareNoticesSent.get(key);
+  if (last !== undefined && now - last < SHARE_NOTICE_REPEAT_MS) return false;
+  const bucket = shareNoticeBuckets.get(actorId);
+  if (!bucket || bucket.resetAt <= now) {
+    if (shareNoticeBuckets.size > 10_000) {
+      for (const [id, entry] of shareNoticeBuckets) {
+        if (entry.resetAt <= now) shareNoticeBuckets.delete(id);
+      }
+    }
+    shareNoticeBuckets.set(actorId, { count: 1, resetAt: now + 3_600_000 });
+  } else {
+    if (bucket.count >= SHARE_NOTICES_PER_HOUR) return false;
+    bucket.count += 1;
+  }
+  shareNoticesSent.set(key, now);
+  return true;
+}
+
+/** Shown (with code `seat_limit`) when a team without the Team plan tries a team feature. */
+export const TEAM_PLAN_REQUIRED_MESSAGE =
+  "This team needs the Team plan ($5 per seat per month) to add people, share apps and page.";
+
+/** Whether the team's features work (see `teamIsActive`). */
+export async function teamActive(teamId: string): Promise<boolean> {
+  const [row] = await db.select().from(team).where(eq(team.id, teamId)).limit(1);
+  if (!row) return false;
+  return teamIsActive(await billingCustomer(row));
 }
 
 const seatSyncs = new Map<string, Promise<void>>();

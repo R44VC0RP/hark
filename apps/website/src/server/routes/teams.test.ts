@@ -47,14 +47,15 @@ vi.mock("../auth", () => ({
 }));
 
 // Seats are unlimited without Autumn; this mock stands in for a configured
-// Autumn account so the free-seat limit can be exercised.
+// Autumn account so the Team plan requirement can be exercised.
 vi.mock("../lib/team-billing", () => ({
   teamBillingConfigured: () => true,
   teamSeats: async (_team: unknown, used: number) =>
     seatState.paid
-      ? { plan: "team", seats: { used, available: null, billable: Math.max(0, used - 1) } }
-      : { plan: "free", seats: { used, available: 1, billable: 0 } },
-  teamCanSeat: async (_team: unknown, next: number) => seatState.paid || next <= 1,
+      ? { plan: "team", seats: { used, available: null, billable: used } }
+      : { plan: "free", seats: { used, available: 0, billable: 0 } },
+  teamCanSeat: async () => seatState.paid,
+  teamIsActive: async () => seatState.paid,
   syncTeamSeats: async () => undefined,
   createTeamCheckout: async (team: { id: string }) => `https://billing.example.com/${team.id}`,
   createTeamBillingPortal: async () => "https://billing.example.com/portal",
@@ -211,13 +212,19 @@ describe("teams and invites", () => {
     expect(listed.teams.map((entry) => [entry.name, entry.role])).toEqual([["Acme", "member"]]);
   });
 
-  it("requires the paid team plan for a second seat", async () => {
+  it("requires the Team plan for every seat and every team feature", async () => {
     seatState.paid = false;
     const team = await createTeam("Solo");
-    expect(team).toMatchObject({ plan: "free", seats: { used: 1, available: 1, billable: 0 } });
+    expect(team).toMatchObject({ plan: "free", seats: { used: 1, available: 0, billable: 0 } });
     const response = await call("POST", `/api/teams/${team.id}/invites`, {});
     expect(response.status).toBe(402);
     expect(await response.json()).toMatchObject({ code: "seat_limit" });
+    const group = await call("POST", `/api/teams/${team.id}/oncall`, {
+      name: "Primary",
+      memberIds: ["user_a"],
+    });
+    expect(group.status).toBe(402);
+    expect(await group.json()).toMatchObject({ code: "seat_limit" });
 
     // An invite created while paid still cannot be redeemed after downgrading.
     seatState.paid = true;
