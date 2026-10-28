@@ -88,7 +88,7 @@ export const pro = plan({
 /**
  * Team plan, attached to the team's own customer (ID = team ID). Every seat
  * is $5/month (TEAM_SEAT_PRICE_MONTHLY), the creator's included
- * (TEAM_FREE_SEATS = 0), prorated as people join and leave.
+ * (TEAM_FREE_SEATS = 0), billed monthly on the number of members (usage-based seats).
  */
 export const teamMonthly = plan({
   id: "team_monthly",

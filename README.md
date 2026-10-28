@@ -298,9 +298,9 @@ OAuth scopes are the [agent API](#agent-api) scopes one to one (`notifications:s
 `billing:read`, `tokens:manage`, `teams:read`/`write`, `oncall:read`/`write`) plus
 `offline_access`. A client that requests no scope gets everything except `tokens:manage`.
 
-There is one tool per agent API operation (65 in all), from `notify`, `ask` (sends a prompt and
-waits up to ten minutes for your answer, with progress updates), and `activities_*` to services,
-the inbox, web apps, teams, on-call, and pages. Each tool runs through the same handler, validation,
+There is one tool per agent API operation, from `notify` and `activities_*` to services, the
+inbox, web apps, teams, on-call, and pages, plus `ask`, which sends a prompt and waits up to ten
+minutes for your answer, with progress updates. Each tool runs through the same handler, validation,
 and scope check as its `/api/agent` route. Human-only actions are never tools: answering prompts,
 acknowledging or escalating pages, accepting team invites, approving app sign-in, changing app
 sharing or issuing Hark passes, creating tokens, and billing checkout or the billing portal.
