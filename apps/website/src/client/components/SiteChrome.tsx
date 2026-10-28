@@ -24,7 +24,10 @@ const navLink = "text-ink-muted transition-colors duration-150 hover:text-white"
 export function Brand() {
   return (
     <Link to="/" className="flex items-center gap-[9px] text-[17px] font-medium text-white">
-      <span aria-hidden="true" className="size-[18px] rounded-[5px] bg-white" />
+      {/* The app icon's mark: a white tile with a mint notification badge. */}
+      <span aria-hidden="true" className="relative size-[18px] rounded-[5px] bg-white">
+        <span className="absolute -top-[3px] -right-[3px] size-[8px] rounded-full bg-mint ring-2 ring-paper" />
+      </span>
       Hark
     </Link>
   );
