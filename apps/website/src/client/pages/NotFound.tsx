@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import { PAGE_COLUMN, SiteFooter, SiteHeader } from "../components/SiteChrome";
 import { primaryButton, textLink } from "../components/ui";
 
-/** Client-side fallback for unknown routes; the server answers those with a real 404. */
+/** Unknown routes. The server answers those with this page prerendered (dist/404.html) and a 404 status. */
 export function NotFound() {
   useEffect(() => {
     document.title = "Page not found — Hark";

@@ -22,7 +22,7 @@ type Outcome =
   | { kind: "seat_limit" }
   | { kind: "error"; message: string };
 
-/** `/join/:code`: preview a team invite, sign in if needed, then accept it. */
+/** `/join/:code`: preview a team invite, sign in if needed, then accept it. `/join` alone is an invalid link. */
 export function Join() {
   const { code = "" } = useParams();
   const { data: session, isPending } = useSession();
@@ -31,6 +31,11 @@ export function Join() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    // `/join` without a code: nothing to look up.
+    if (!code) {
+      setPreview({ kind: "invalid" });
+      return;
+    }
     let cancelled = false;
     setPreview({ kind: "loading" });
     api

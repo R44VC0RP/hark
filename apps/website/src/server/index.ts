@@ -1,9 +1,9 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { and, isNotNull, lt, or, sql } from "drizzle-orm";
-import { app } from "./app";
+import { app, setNotFoundPage } from "./app";
 import { db, sqlite } from "./db";
 import { runMigrations } from "./db/migrate";
 import { analyticsEvent, session, teamInvite, verification } from "./db/schema";
@@ -91,13 +91,18 @@ if (existsSync(clientDir)) {
   }
   // Client-routed private pages reuse the noindex dashboard shell.
   if (existsSync(resolve(clientDir, "dashboard/index.html"))) {
-    for (const path of ["/dashboard/teams/:teamId", "/join/:code", "/oauth/consent"]) {
+    // `/join` without a code shows the invite page's invalid-link state.
+    for (const path of ["/dashboard/teams/:teamId", "/join", "/join/:code", "/oauth/consent"]) {
       app.get(path, shell("./dist/client/dashboard/index.html"));
     }
   }
   if (existsSync(resolve(clientDir, "cli/authorize/index.html"))) {
     app.get("/cli/authorize", shell("./dist/client/cli/authorize/index.html"));
   }
+  // Unknown pages get the styled, noindex "page not found" document with a 404
+  // status. It lives outside dist/client so it is never served with a 200.
+  const notFoundPath = resolve(clientDir, "../404.html");
+  if (existsSync(notFoundPath)) setNotFoundPage(readFileSync(notFoundPath, "utf8"));
   app.use(
     "*",
     serveStatic({

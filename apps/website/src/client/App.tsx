@@ -24,6 +24,7 @@ export function App() {
         <Route path="/" element={<Landing />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/dashboard/teams/:teamId" element={<TeamPage />} />
+        <Route path="/join" element={<Join />} />
         <Route path="/join/:code" element={<Join />} />
         <Route path="/cli/authorize" element={<CliAuthorize />} />
         <Route path="/docs" element={<Docs />} />

@@ -13,7 +13,7 @@ import {
 
 /** Private pages with a path parameter; never indexed. */
 function dynamicSeo(pathname: string): PageSeo | null {
-  if (pathname.startsWith("/join/")) {
+  if (pathname === "/join" || pathname.startsWith("/join/")) {
     return {
       path: pathname,
       title: "Join a team — Hark",

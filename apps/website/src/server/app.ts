@@ -287,6 +287,13 @@ app.route("/api/events", eventsRoute);
 app.route("/hooks", activityHooksRoute);
 app.route("/hooks", hooksRoute);
 
+/** The prerendered "page not found" document, set by index.ts when a client build exists. */
+let notFoundPage: string | null = null;
+
+export function setNotFoundPage(html: string | null): void {
+  notFoundPage = html;
+}
+
 app.notFound((c) => {
   if (
     c.req.path.startsWith("/api") ||
@@ -294,6 +301,10 @@ app.notFound((c) => {
     c.req.path.startsWith("/.well-known/oauth")
   ) {
     return c.json({ error: "Not found" }, 404);
+  }
+  if (notFoundPage && (c.req.method === "GET" || c.req.method === "HEAD")) {
+    c.header("Cache-Control", "no-cache");
+    return c.html(notFoundPage, 404);
   }
   return c.text("Not found", 404);
 });

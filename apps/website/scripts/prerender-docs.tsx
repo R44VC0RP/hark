@@ -1,4 +1,4 @@
-/** Prerenders public pages and writes noindex shells for private application routes. */
+/** Prerenders public pages and the 404 page, and writes noindex shells for private application routes. */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { StrictMode } from "react";
@@ -133,4 +133,29 @@ for (const page of PRIVATE_SEO_PAGES) {
   const html = renderPage(page, false);
   await writeFile(outputPath, html);
   console.log(`wrote noindex shell ${seo.path} → ${outputPath}`);
+}
+
+// The server answers unknown page paths with this document and a 404 status.
+// It sits beside dist/client, not in it, so it is never served as a 200.
+{
+  const markup = renderToString(
+    <StrictMode>
+      <StaticRouter location="/404">
+        <App />
+      </StaticRouter>
+    </StrictMode>,
+  );
+  const head = [
+    "<!-- seo:start -->",
+    '    <title data-seo="true">Page not found — Hark</title>',
+    '    <meta data-seo="true" name="description" content="This page doesn’t exist." />',
+    '    <meta data-seo="true" name="robots" content="noindex, nofollow" />',
+    "    <!-- seo:end -->",
+  ].join("\n");
+  const html = shell
+    .replace('<div id="root"></div>', `<div id="root">${markup}</div>`)
+    .replace(/<!-- seo:start -->[\s\S]*?<!-- seo:end -->/, head);
+  const outputPath = resolve(clientDir, "../404.html");
+  await writeFile(outputPath, html);
+  console.log(`prerendered not-found page → ${outputPath}`);
 }
