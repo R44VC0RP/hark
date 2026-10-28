@@ -2,7 +2,7 @@ import { Link } from "react-router";
 import { APP_STORE_URL, PAGE_COLUMN, SiteFooter, SiteHeader } from "../components/SiteChrome";
 import { primaryButton } from "../components/ui";
 
-const SUPPORT_EMAIL = "hark@ryan.ceo";
+const SUPPORT_EMAIL = "support@hark.fyi";
 
 export function Launched() {
   return (

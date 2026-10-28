@@ -93,7 +93,7 @@ export const MCP_SERVER_URL = "https://hark.fyi/mcp";
 
 /** Where people and agents report problems. */
 export const ISSUES_URL = "https://github.com/R44VC0RP/hark/issues";
-export const SUPPORT_EMAIL = "hark@ryan.ceo";
+export const SUPPORT_EMAIL = "support@hark.fyi";
 
 /**
  * "For agents" primer at the top of `/docs.md`, `/agents.md` and `/llms.txt`:
