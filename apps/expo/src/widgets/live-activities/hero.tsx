@@ -96,9 +96,12 @@ export function HeroLiveActivityStyle(
   );
 
   const expandedLeading = (
-    <HStack spacing={7} modifiers={[padding({ leading: 4 })]}>
-      <Image systemName={symbol} color={accent} size={14} />
-    </HStack>
+    <Image
+      systemName={symbol}
+      color={accent}
+      size={20}
+      modifiers={[padding({ leading: 7, top: 2 })]}
+    />
   );
 
   const expandedBottom = (
@@ -106,7 +109,7 @@ export function HeroLiveActivityStyle(
       alignment="leading"
       spacing={7}
       modifiers={[
-        padding({ horizontal: 4, vertical: 2 }),
+        padding({ leading: 7, trailing: 7, bottom: 7 }),
         accessibilityElement("combine"),
         accessibilityLabel(a11ySummary),
       ]}

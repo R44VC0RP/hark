@@ -62,6 +62,15 @@ export function RingLiveActivityStyle(
       <Image systemName={symbol} color={accent} size={30} />
     );
 
+  // In the expanded island the percentage sits top right like the other
+  // progress styles, so the ring there carries no label of its own.
+  const islandRing =
+    props.progress !== undefined ? (
+      <Gauge value={props.progress} modifiers={[gaugeStyle("circularCapacity"), tint(accent)]} />
+    ) : (
+      <Image systemName={symbol} color={accent} size={30} />
+    );
+
   const banner = (
     <HStack
       spacing={13}
@@ -108,13 +117,22 @@ export function RingLiveActivityStyle(
     <HStack
       spacing={14}
       modifiers={[
-        padding({ horizontal: 4, vertical: 2 }),
+        padding({ leading: 7, trailing: 7, bottom: 7 }),
         accessibilityElement("combine"),
         accessibilityLabel(a11ySummary),
       ]}
     >
-      {ringHero}
+      {islandRing}
       <VStack alignment="leading" spacing={2}>
+        <Text
+          modifiers={[
+            font({ textStyle: "headline", weight: "semibold" }),
+            foregroundStyle(primary),
+            lineLimit(1),
+          ]}
+        >
+          {title}
+        </Text>
         <Text
           modifiers={[
             font({ textStyle: "subheadline", weight: "semibold" }),
@@ -143,18 +161,6 @@ export function RingLiveActivityStyle(
     compactTrailing: standard.compactTrailing,
     minimal: standard.minimal,
     expandedLeading: standard.expandedLeading,
-    // standard's leading region is icon-only, so the title sits below the camera.
-    expandedCenter: (
-      <Text
-        modifiers={[
-          font({ textStyle: "headline", weight: "semibold" }),
-          foregroundStyle(primary),
-          lineLimit(1),
-        ]}
-      >
-        {title}
-      </Text>
-    ),
     expandedTrailing: standard.expandedTrailing,
     expandedBottom,
   };

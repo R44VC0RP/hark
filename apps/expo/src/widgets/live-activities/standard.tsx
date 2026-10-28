@@ -159,13 +159,13 @@ export function StandardLiveActivityStyle(
       systemName={symbol}
       color={accent}
       size={20}
-      modifiers={[padding({ leading: 4, top: 2 })]}
+      modifiers={[padding({ leading: 7, top: 2 })]}
     />
   );
   const expandedTrailing = percentage ? (
     <Text
       modifiers={[
-        padding({ trailing: 4, top: 2 }),
+        padding({ trailing: 7, top: 2 }),
         font({ textStyle: "headline", weight: "semibold" }),
         monospacedDigit(),
         foregroundStyle(accent),
@@ -180,8 +180,9 @@ export function StandardLiveActivityStyle(
     <VStack
       alignment="leading"
       spacing={7}
+      // 25pt from the island edge, matching the approval island's insets.
       modifiers={[
-        padding({ horizontal: 4, vertical: 2 }),
+        padding({ leading: 7, trailing: 7, bottom: 7 }),
         accessibilityElement("combine"),
         accessibilityLabel(a11ySummary),
       ]}

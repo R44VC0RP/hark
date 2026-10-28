@@ -98,29 +98,36 @@ export function StepsLiveActivityStyle(
     </VStack>
   );
 
-  const expandedTrailing = (
-    <Text
-      modifiers={[
-        padding({ trailing: 4 }),
-        font({ textStyle: "subheadline", weight: "semibold" }),
-        foregroundStyle(accent),
-        lineLimit(1),
-      ]}
-    >
-      {status}
-    </Text>
-  );
-
   const expandedBottom = (
     <VStack
       alignment="leading"
       spacing={8}
       modifiers={[
-        padding({ horizontal: 4, vertical: 2 }),
+        padding({ leading: 7, trailing: 7, bottom: 7 }),
         accessibilityElement("combine"),
         accessibilityLabel(a11ySummary),
       ]}
     >
+      <VStack alignment="leading" spacing={1}>
+        <Text
+          modifiers={[
+            font({ textStyle: "headline", weight: "semibold" }),
+            foregroundStyle(primary),
+            lineLimit(1),
+          ]}
+        >
+          {title}
+        </Text>
+        <Text
+          modifiers={[
+            font({ textStyle: "subheadline", weight: "semibold" }),
+            foregroundStyle(accent),
+            lineLimit(1),
+          ]}
+        >
+          {status}
+        </Text>
+      </VStack>
       {props.progress !== undefined ? stepsPips : null}
       {detail ? (
         <Text
@@ -139,19 +146,7 @@ export function StepsLiveActivityStyle(
     compactTrailing: standard.compactTrailing,
     minimal: standard.minimal,
     expandedLeading: standard.expandedLeading,
-    // standard's leading region is icon-only, so the title sits below the camera.
-    expandedCenter: (
-      <Text
-        modifiers={[
-          font({ textStyle: "headline", weight: "semibold" }),
-          foregroundStyle(primary),
-          lineLimit(1),
-        ]}
-      >
-        {title}
-      </Text>
-    ),
-    expandedTrailing,
+    expandedTrailing: standard.expandedTrailing,
     expandedBottom,
   };
 }

@@ -82,6 +82,15 @@ export function TerminalLiveActivityStyle(
           ]}
         />
       </HStack>
+      <Text
+        modifiers={[
+          font({ size: 15, weight: "semibold", design: "monospaced" }),
+          foregroundStyle(primary),
+          lineLimit(1),
+        ]}
+      >
+        {title}
+      </Text>
       <HStack spacing={6}>
         <Text
           modifiers={[
@@ -181,24 +190,18 @@ export function TerminalLiveActivityStyle(
   );
 
   const expandedLeading = (
-    <HStack spacing={7} modifiers={[padding({ leading: 4 })]}>
-      <Image systemName={symbol} color={accent} size={16} />
-      <Text
-        modifiers={[
-          font({ size: 13, weight: "semibold", design: "monospaced" }),
-          foregroundStyle(primary),
-          lineLimit(1),
-        ]}
-      >
-        {title}
-      </Text>
-    </HStack>
+    <Image
+      systemName={symbol}
+      color={accent}
+      size={20}
+      modifiers={[padding({ leading: 7, top: 2 })]}
+    />
   );
 
   const expandedTrailing = percentage ? (
     <Text
       modifiers={[
-        padding({ trailing: 4 }),
+        padding({ trailing: 7, top: 2 }),
         font({ size: 12, weight: "semibold", design: "monospaced" }),
         monospacedDigit(),
         foregroundStyle(accent),
@@ -213,11 +216,20 @@ export function TerminalLiveActivityStyle(
       alignment="leading"
       spacing={7}
       modifiers={[
-        padding({ horizontal: 4, vertical: 2 }),
+        padding({ leading: 7, trailing: 7, bottom: 7 }),
         accessibilityElement("combine"),
         accessibilityLabel(a11ySummary),
       ]}
     >
+      <Text
+        modifiers={[
+          font({ size: 15, weight: "semibold", design: "monospaced" }),
+          foregroundStyle(primary),
+          lineLimit(1),
+        ]}
+      >
+        {title}
+      </Text>
       <HStack spacing={6}>
         <Text
           modifiers={[
