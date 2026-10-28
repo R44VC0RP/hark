@@ -761,6 +761,12 @@ and moving an app to a new origin asks for approval again. apps revoke signs the
 teams share apps and on-call groups with other Hark users. Inviting returns a join link;
 only a signed-in person can accept it. apps share --team moves an app you added into a
 team (every member then approves sign-in on their own phone); --personal moves it back.
+Personal use is free. Inviting, sharing apps into a team, creating on-call groups and
+paging need the team's Team plan ($5 per seat per month, every member including the
+owner); without it they fail with 402. Only the team owner can start it, on hark.fyi.
+
+--device (deviceIds) routes to specific iPhones only on legacy Hark Pro accounts (Pro is
+no longer sold); elsewhere it fails with 402, so leave it out.
 
 page alerts whoever is on call in an on-call group, then escalates until someone
 acknowledges. Acknowledging and escalating are deliberately human-only (on the phone or

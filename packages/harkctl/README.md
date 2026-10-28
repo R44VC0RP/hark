@@ -63,7 +63,8 @@ keeps stdout to one machine-readable object while browser instructions remain on
 
 `harkctl notify <body>` sends a one-shot push to your registered iPhones. `--title` sets the sender
 name (defaults to “Hark”), `--image` sets the avatar shown with the notification, `--url` is opened
-when the notification is tapped, and repeatable `--device` routes to specific device IDs (Hark Pro).
+when the notification is tapped, and repeatable `--device` routes to specific device IDs (legacy Hark Pro accounts only; other
+accounts get `402`, so leave it out).
 Use `--idempotency-key` for safe retries and `--stdin` to merge a JSON payload from stdin under any
 explicit flags. The command exits `7` when no push was accepted. `--stdin` accepts only `body`,
 `title`, `summary`, `project`, `bodyFormat`, `imageUrl`, and `url` (routing such as devices, `--app`,
@@ -175,7 +176,9 @@ dashboard's activity history, 20 entries per page (scope `events:read`).
 ## billing and tokens
 
 `billing` prints the plan, limits, and remaining monthly notifications (scope `billing:read`).
-Checkout and the billing portal stay in the dashboard.
+Everyone is on `free` (one iPhone, 10,000 notifications a month) except legacy Hark Pro accounts
+(`pro`, no longer sold). Team seats are billed to the team and don't show here. Checkout and the
+billing portal stay in the dashboard.
 
 `tokens list` shows the account's agent tokens (never their secrets) and `tokens revoke <id>`
 revokes one; both need the opt-in `tokens:manage` scope. There is no command that creates a token:
@@ -212,8 +215,10 @@ becomes an admin), and `teams remove-member <team_id> <user_id>` removes someone
 their sign-in to the team's apps and drops them from rotations. `teams invite <team_id> [--email
 <email>] [--role member|admin]` returns a 7-day join link (`code` and `url`); a Hark user with that
 email also gets a push. Accepting is human-only, in the app or on the website. `teams invites` and
-`teams revoke-invite <team_id> <invite_id>` manage links. The first seat is free; inviting more
-people needs the $5/seat/month team plan (the API answers `402` with code `seat_limit`).
+`teams revoke-invite <team_id> <invite_id>` manage links. Personal use is free; teams need the Team
+plan, $5 per seat per month for every member including the owner. Until the owner starts it from the
+team page on hark.fyi, invites, `apps share --team`, `oncall create` and `page` fail with `402`
+(code `seat_limit`, except on pages). Agents cannot start checkout.
 
 ## oncall and page
 
@@ -270,8 +275,8 @@ inspect state, `--idempotency-key` for retries, and `--if-sequence` to reject st
 is a number from 0 to 1. `--accent-color` accepts `#RRGGBB`. `--style` on `activity start` and
 `activity update` picks the widget layout: `standard` (default), `ring`, `hero`, `terminal`, or
 `steps`; app builds that predate a style render the standard layout until updated. Activities default to an eight-hour
-expiry and become stale after four hours without an update. Repeated `--device` targeting requires
-Hark Pro, and Hark permits one active task activity per device; pass `--replace` on `activity start`
+expiry and become stale after four hours without an update. Repeated `--device` targeting works only on
+legacy Hark Pro accounts, and Hark permits one active task activity per device; pass `--replace` on `activity start`
 to silently end whatever task occupies the device and take the slot (the response reports the count
 as `replaced`). Interactive approval activities may coexist with that task. A `--key` becomes
 reusable once its activity ends, so `activity start --key deploy --replace` works as a fixed-key

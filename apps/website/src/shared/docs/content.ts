@@ -16,6 +16,7 @@
  * Headings are *not* stored here: they come from `./nav.ts` by id, so the
  * sidebar, the in-page headings, and the markdown outline always agree.
  */
+import { FREE_NOTIFICATIONS, TEAM_SEAT_PRICE_MONTHLY } from "../pricing";
 import type { DocItemId, DocSectionId } from "./nav";
 
 /** Placeholder webhook URL used throughout the docs samples. */
@@ -68,7 +69,7 @@ export interface DocStylePreview {
 
 export interface DocSubsection {
   id: DocItemId;
-  /** Marks a capability that requires a paid Hark Pro plan. */
+  /** Marks a capability only legacy Hark Pro accounts have (Pro is no longer sold). */
   pro?: true;
   blocks: DocBlock[];
 }
@@ -89,6 +90,27 @@ export const AGENT_OPENAPI_URL = "https://hark.fyi/api/agent/openapi.json";
 
 /** The remote MCP server. */
 export const MCP_SERVER_URL = "https://hark.fyi/mcp";
+
+/** Where people and agents report problems. */
+export const ISSUES_URL = "https://github.com/R44VC0RP/hark/issues";
+export const SUPPORT_EMAIL = "hark@ryan.ceo";
+
+/**
+ * "For agents" primer at the top of `/docs.md`, `/agents.md` and `/llms.txt`:
+ * what Hark is, the fastest way in, pricing facts and where to report problems.
+ * Markdown only; the HTML docs start at the quickstart.
+ */
+export const AGENT_PRIMER: string[] = [
+  "Hark puts an agent's messages on its person's iPhone: notifications, approval / yes-no / text-reply prompts you can wait on, Live Activities, web apps that open signed in inside the Hark app, and team on-call paging. The person needs the Hark iPhone app and an account at https://hark.fyi.",
+  "Fastest paths, pick one:",
+  "- MCP: add `https://hark.fyi/mcp` (Streamable HTTP) to your MCP client; it signs in with OAuth in the browser, no token to paste. Every agent API operation is a tool.",
+  '- CLI: `npx harkctl auth login` (browser device authorization; Node.js 22+), then e.g. `harkctl notify "Deploy finished"` or `harkctl notify ask "Ship it?" --approval --wait`.',
+  "- REST: a scoped agent token (`Authorization: Bearer hark_…`) against `https://hark.fyi/api/agent`, described by the OpenAPI document at https://hark.fyi/api/agent/openapi.json. Webhook services (`POST https://hark.fyi/hooks/whk_…`) need no token beyond the secret URL.",
+  "- Skill: `npx skills add R44VC0RP/hark --skill hark` installs the Hark agent skill.",
+  `Pricing: free for personal use (one active iPhone, ${FREE_NOTIFICATIONS.toLocaleString("en-US")} notifications a month, 60 requests/minute per service and 300 per account), with prompts, response callbacks, Live Activities and web apps included. Teams pay $${TEAM_SEAT_PRICE_MONTHLY} per seat per month, every member including the owner: without the Team plan, adding people, sharing apps into the team, creating on-call groups and paging return \`402\` (code \`seat_limit\`, except on pages). Only the owner can start it, from the team page on hark.fyi; agents cannot start checkout. Hark Pro is no longer sold; \`deviceIds\` / \`--device\` routing works only for existing Pro accounts and returns \`402\` elsewhere, so omit it.`,
+  "Human-only (no tool or route can do these): answering prompts, approving web app sign-in, accepting team invites, acknowledging or escalating pages, creating API tokens, registering devices, and starting checkout or the billing portal.",
+  `Problems: open an issue at ${ISSUES_URL} or email ${SUPPORT_EMAIL}. Never include a token or webhook URL.`,
+];
 
 export const DOC_CONTENT: DocSection[] = [
   {
@@ -251,7 +273,7 @@ export const DOC_CONTENT: DocSection[] = [
               },
               {
                 name: "deviceIds",
-                type: "string[], Pro",
+                type: "string[], legacy Pro",
                 detail:
                   "1 to 50 device IDs from the dashboard. Omit to notify every active device.",
               },
@@ -399,11 +421,11 @@ export const DOC_CONTENT: DocSection[] = [
         blocks: [
           {
             kind: "p",
-            text: "By default a request fans out to every active iOS device on the account, most recently seen first. Free accounts are capped at one device, so extra phones are ignored until you upgrade.",
+            text: "By default a request fans out to every active iOS device on the account, most recently seen first. Free accounts have one active iPhone, so leave `deviceIds` out.",
           },
           {
             kind: "p",
-            text: "Hark Pro can pass a non-empty `deviceIds` array to target specific iPhones. Copy the stable device IDs from the dashboard. IDs that do not belong to the account return `400 Invalid device selection`; owned but inactive or non-iOS devices in the list are skipped silently.",
+            text: "Accounts on legacy Hark Pro (no longer sold) can pass a non-empty `deviceIds` array to target specific iPhones. Copy the stable device IDs from the dashboard. IDs that do not belong to the account return `400 Invalid device selection`; owned but inactive or non-iOS devices in the list are skipped silently.",
           },
           {
             kind: "code",
@@ -415,7 +437,7 @@ export const DOC_CONTENT: DocSection[] = [
           },
           {
             kind: "p",
-            text: "Sending `deviceIds` without device routing on your plan returns `402`.",
+            text: "Sending `deviceIds` from an account without device routing returns `402`.",
           },
         ],
       },
@@ -432,6 +454,10 @@ export const DOC_CONTENT: DocSection[] = [
               { limit: "Notifications per month", free: "10,000", pro: "100,000" },
               { limit: "Active devices", free: "1", pro: "Unlimited" },
             ],
+          },
+          {
+            kind: "note",
+            text: "Every account is on Free unless it already had Hark Pro, which is no longer sold; existing subscribers keep its limits. Team plans pay for team seats and never change anyone's personal limits.",
           },
           {
             kind: "p",
@@ -459,7 +485,12 @@ export const DOC_CONTENT: DocSection[] = [
               { name: "200", type: "ok", detail: "Accepted, or an idempotent replay." },
               { name: "202", type: "ok", detail: "An identical request is still processing." },
               { name: "400", type: "error", detail: "Invalid payload, key, or device selection." },
-              { name: "402", type: "error", detail: "`deviceIds` routing requires Hark Pro." },
+              {
+                name: "402",
+                type: "error",
+                detail:
+                  "`deviceIds` on an account without device routing (legacy Hark Pro only), or `oncall` for a team without the Team plan.",
+              },
               { name: "404", type: "error", detail: "Unknown webhook token." },
               { name: "409", type: "error", detail: "Idempotency key reused with a new payload." },
               { name: "429", type: "error", detail: "Rate limit or monthly allowance exhausted." },
@@ -796,7 +827,7 @@ curl -X POST ${EXAMPLE_ENDPOINT}/events/evt_Cxns2IdbF4H0TJYq/cancel`,
               },
               {
                 name: "deviceIds",
-                type: "string[], Pro",
+                type: "string[], legacy Pro",
                 detail: "1 to 50 device IDs. Omit to target every capable device.",
               },
             ],
@@ -1052,7 +1083,7 @@ harkctl permissions doctor`,
               {
                 name: "--device",
                 type: "id, repeatable",
-                detail: "Target specific iPhones. Requires Hark Pro.",
+                detail: "Target specific iPhones. Legacy Hark Pro accounts only.",
               },
               {
                 name: "--project",
@@ -1354,11 +1385,11 @@ harkctl apps remove app_...`,
         blocks: [
           {
             kind: "p",
-            text: "Every member uses a seat. The first seat is free, so a team of one costs nothing. Each additional member needs the team plan at $5 per seat per month, billed to the team (not to anyone's personal plan) and prorated as people join and leave.",
+            text: `Every member uses a seat, the owner included. The Team plan is $${TEAM_SEAT_PRICE_MONTHLY} per seat per month, billed to the team (not to anyone's personal plan) for its current member count. Personal use stays free, and a team never changes its members' personal limits.`,
           },
           {
             kind: "p",
-            text: "Without the team plan, creating or accepting an invite for a second member returns `402` with code `seat_limit`. The team owner starts checkout or opens the billing portal from the team page in the dashboard.",
+            text: "Anyone can create a team and set it up, but until it has the Team plan, creating or accepting invites, sharing apps into it, creating on-call groups and raising pages return `402` with a message naming the Team plan (code `seat_limit` on everything except pages). Only the team owner can start the Team plan or open the billing portal, from the team page in the dashboard; agents cannot.",
           },
           {
             kind: "note",
@@ -1634,7 +1665,7 @@ harkctl oncall settings set --ring-until-ack on --ring-interval group`,
         blocks: [
           {
             kind: "p",
-            text: "Add `oncall` to a webhook payload to page a group instead of notifying your own devices. The service owner must belong to the group's team, and `oncall` cannot be combined with `deviceIds` or `response`. The `Idempotency-Key` header becomes the page's dedup key, so retries merge into the open page.",
+            text: "Add `oncall` to a webhook payload to page a group instead of notifying your own devices. The service owner must belong to the group's team, the team needs the [Team plan](#teams-seats) (otherwise `402`), and `oncall` cannot be combined with `deviceIds` or `response`. The `Idempotency-Key` header becomes the page's dedup key, so retries merge into the open page.",
           },
           {
             kind: "code",

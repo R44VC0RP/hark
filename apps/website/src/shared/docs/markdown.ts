@@ -7,6 +7,7 @@
  * page from drifting.
  */
 import {
+  AGENT_PRIMER,
   DOC_CONTENT,
   DOCS_MARKDOWN_URL,
   DOCS_TITLE,
@@ -16,7 +17,12 @@ import {
 } from "./content";
 import { docLabel } from "./nav";
 
-const PRO_LINE = "**Hark Pro** — requires a paid plan.";
+const PRO_LINE = "**Legacy Hark Pro only** — Hark Pro is no longer sold; other accounts get `402`.";
+
+/** The "For agents" primer, shared by `/docs.md`, `/agents.md` and `/llms.txt`. */
+function agentPrimer(): string {
+  return `## For agents\n\n${AGENT_PRIMER.join("\n\n").replace(/\n\n- /g, "\n- ")}`;
+}
 
 /** Pipe tables cannot contain a raw `|` or a newline. */
 function cell(text: string): string {
@@ -51,7 +57,7 @@ function tableBlock(block: DocTableBlock): string {
       );
     case "plan":
       return table(
-        ["Limit", "Free", "Pro"],
+        ["Limit", "Free", "Legacy Pro"],
         block.rows.map((row) => [row.limit, row.free, row.pro]),
       );
   }
@@ -83,6 +89,7 @@ export function docsMarkdown(): string {
   const parts: string[] = [
     `# Hark — ${DOCS_TITLE}`,
     `Hark documentation. HTML version: ${DOCS_URL}`,
+    agentPrimer(),
   ];
 
   for (const section of DOC_CONTENT) {
@@ -109,6 +116,8 @@ export function llmsTxt(): string {
 > optional approval prompts; an Activity API drives a stateful Live Activity on the Lock Screen and
 > in the Dynamic Island.
 
+${agentPrimer()}
+
 ## Docs
 
 - [Documentation](${DOCS_URL}): ${DOCS_TITLE} — quickstart, Notification API, Activity API, CLI, and coding-agent permissions.
@@ -120,19 +129,20 @@ export function llmsTxt(): string {
 ## Product
 
 - [Home](https://hark.fyi/): product overview and webhook example.
-- [Pricing](https://hark.fyi/pricing): current Free and Pro capabilities.
+- [Pricing](https://hark.fyi/pricing): free for personal use, $5 per team seat.
 - [Hark for iPhone](https://apps.apple.com/us/app/hark-developer-notifications/id6794121509): required iOS app.
 - [Source](https://github.com/R44VC0RP/hark): Hark website, iOS app, CLI, and agent skill.
 
 ## Agent tools
 
-- [Hark agent skill](https://skills.sh/r44vc0rp/hark/hark): install Hark for compatible coding agents.
+- [Hark agent skill](https://skills.sh/r44vc0rp/hark/hark): install Hark for compatible coding agents (\`npx skills add R44VC0RP/hark --skill hark\`).
+- [Remote MCP server](https://hark.fyi/docs#mcp): \`https://hark.fyi/mcp\`, OAuth sign-in.
 - [harkctl](https://www.npmjs.com/package/harkctl): CLI for notifications, approvals, replies, Live Activities, and webhook services.
 
 ## Notes
 
 - Webhook API requests are authenticated by the token in the URL; harkctl uses a scoped agent token. Treat both as credentials.
-- Interactive responses, response callbacks, and Live Activities work on every plan, on both the webhook and agent APIs.
-- Hark Pro adds more than one active iPhone, \`deviceIds\` / \`--device\` routing, higher per-minute rate limits, and a larger monthly allowance.
+- Interactive responses, response callbacks, Live Activities, and web apps work on the Free plan, on both the webhook and agent APIs.
+- Hark Pro is no longer sold. Existing Pro accounts keep more than one active iPhone, \`deviceIds\` / \`--device\` routing, higher per-minute rate limits, and a larger allowance; everyone else should omit \`deviceIds\`.
 `;
 }

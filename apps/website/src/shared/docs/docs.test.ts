@@ -135,7 +135,7 @@ describe("docsMarkdown", () => {
     expect(markdown).toContain('```json\n{\n  "ok": true,');
     expect(markdown).toContain("| Field | Type | Description |");
     expect(markdown).toContain("| Route | Purpose |");
-    expect(markdown).toContain("| Limit | Free | Pro |");
+    expect(markdown).toContain("| Limit | Free | Legacy Pro |");
   });
 
   it("keeps table cells on one line", () => {
@@ -161,8 +161,18 @@ describe("docsMarkdown", () => {
     expect(markdown).toContain("Hark cannot run a shortcut merely because a notification arrived");
   });
 
-  it("flags Hark Pro sections", () => {
-    expect(markdown).toContain("**Hark Pro**");
+  it("flags legacy Hark Pro sections", () => {
+    expect(markdown).toContain("**Legacy Hark Pro only**");
+  });
+
+  it("opens with the agent primer", () => {
+    const head = markdown.slice(0, markdown.indexOf("## Quickstart"));
+    expect(head).toContain("## For agents");
+    expect(head).toContain("https://hark.fyi/mcp");
+    expect(head).toContain("npx skills add R44VC0RP/hark --skill hark");
+    expect(head).toContain("https://hark.fyi/api/agent/openapi.json");
+    expect(head).toContain("$5 per seat per month");
+    expect(head).toContain("https://github.com/R44VC0RP/hark/issues");
   });
 });
 
@@ -177,5 +187,7 @@ describe("llmsTxt", () => {
     expect(text).toContain("https://hark.fyi/pricing");
     expect(text).toContain("https://skills.sh/r44vc0rp/hark/hark");
     expect(text).toContain("https://www.npmjs.com/package/harkctl");
+    expect(text.indexOf("## For agents")).toBeLessThan(text.indexOf("## Docs"));
+    expect(text).not.toContain("Free and Pro");
   });
 });

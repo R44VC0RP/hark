@@ -153,7 +153,7 @@ export function RouteTable({ caption, rows }: { caption: string; rows: DocRouteR
   );
 }
 
-/** Free-versus-Pro comparison, used for the rate-limit table. */
+/** Free-versus-legacy-Pro comparison, used for the rate-limit table. */
 /* ------------------------------------------------------------------------ */
 /* Live Activity style previews                                             */
 /* ------------------------------------------------------------------------ */
@@ -429,7 +429,7 @@ export function StylePreviews({ styles }: { styles: DocStylePreview[] }) {
 export function PlanTable({ caption, rows }: { caption: string; rows: DocPlanRow[] }) {
   return (
     <TableShell caption={caption}>
-      <HeadRow headers={["Limit", "Free", "Pro"]} />
+      <HeadRow headers={["Limit", "Free", "Legacy Pro"]} />
       <tbody className="divide-y divide-line border-y border-line">
         {rows.map((row) => (
           <tr key={row.limit}>

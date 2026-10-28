@@ -647,7 +647,7 @@ export const agentOperations: Record<string, Partial<Record<AgentMethod, AgentOp
       status: 201,
       response: { oneOf: [ref("AgentNotificationCreated"), ref("OncallPageCreated")] },
       description:
-        "With `oncall` (which also needs `oncall:write`), the push pages that on-call group instead (the token owner must be on its team) and returns the page; the Idempotency-Key becomes the page's dedup key.",
+        "With `oncall` (which also needs `oncall:write`), the push pages that on-call group instead (the token owner must be on its team, and the team needs the Team plan or this returns 402) and returns the page; the Idempotency-Key becomes the page's dedup key. `deviceIds` returns 402 unless the account has device routing (legacy Hark Pro only); omit it to reach the account's active iPhone.",
     },
   },
   "/notifications/{id}/withdraw": {
@@ -798,7 +798,7 @@ export const agentOperations: Record<string, Partial<Record<AgentMethod, AgentOp
       request: appShareSchema,
       response: wrap("app", ref("App")),
       description:
-        "Only the person who added the app can move it. Other members are notified unless `notify` is false, and each approves sign-in for themselves.",
+        "Only the person who added the app can move it. Moving it into a team without the Team plan returns 402 with code `seat_limit`. Other members are notified unless `notify` is false, and each approves sign-in for themselves.",
     },
   },
   "/teams": {
@@ -813,6 +813,8 @@ export const agentOperations: Record<string, Partial<Record<AgentMethod, AgentOp
       request: teamCreateSchema,
       status: 201,
       response: wrap("team", ref("Team")),
+      description:
+        "Free to create. Adding people, sharing apps into it, on-call groups and pages need the Team plan ($5 per seat per month, every member including the owner), which only the owner can start from the team page on hark.fyi.",
     },
   },
   "/teams/{id}": {
@@ -874,7 +876,7 @@ export const agentOperations: Record<string, Partial<Record<AgentMethod, AgentOp
       status: 201,
       response: ref("TeamInviteCreated"),
       description:
-        "Returns 402 with code `seat_limit` when the team needs the paid team plan for another seat. Accepting an invite is human-only: there is no agent route for it.",
+        "Returns 402 with code `seat_limit` when the team does not have the Team plan. Accepting an invite is human-only: there is no agent route for it.",
     },
   },
   "/teams/{id}/invites/{inviteId}": {
@@ -907,6 +909,7 @@ export const agentOperations: Record<string, Partial<Record<AgentMethod, AgentOp
       request: oncallGroupCreateSchema,
       status: 201,
       response: wrap("group", ref("OncallGroup")),
+      description: "Returns 402 with code `seat_limit` when the team does not have the Team plan.",
     },
   },
   "/teams/{id}/pages": {
@@ -999,7 +1002,7 @@ export const agentOperations: Record<string, Partial<Record<AgentMethod, AgentOp
       status: 201,
       response: ref("OncallPageCreated"),
       description:
-        "Returns 200 with `deduplicated: true` when an open page with the same `dedupKey` absorbed it. Pages count against your notification allowance.",
+        "Returns 200 with `deduplicated: true` when an open page with the same `dedupKey` absorbed it. Returns 402 when the team does not have the Team plan. Pages count against your notification allowance.",
     },
   },
   "/pages/{id}": {
@@ -1086,7 +1089,8 @@ export const agentOperations: Record<string, Partial<Record<AgentMethod, AgentOp
       summary: "Plan, limits, and remaining usage",
       scopes: ["billing:read"],
       response: ref("Billing"),
-      description: "Checkout and the billing portal are session-only.",
+      description:
+        "`pro` is legacy Hark Pro (no longer sold); everyone else is `free`. `features.deviceRouting` says whether `deviceIds` is accepted. Team seats are billed to each team and never change these personal limits. Checkout and the billing portal are session-only.",
     },
   },
 };
@@ -1146,7 +1150,7 @@ export const agentOpenApiDocument = {
     title: "Hark Agent API",
     version: "1.0.0",
     description:
-      "Scoped bearer-token API for agents and scripts (`Authorization: Bearer hark_…`). Every route is owner-scoped: resources of other accounts return 404. Human-only actions are deliberately absent: answering prompts, approving app sign-in or issuing Hark passes, changing app sharing, creating API tokens, registering devices, starting checkout or the billing portal, accepting team invites, and acknowledging or escalating on-call pages.",
+      "Scoped bearer-token API for agents and scripts (`Authorization: Bearer hark_…`). Docs for agents: https://hark.fyi/agents.md. Hark is free for personal use; team features need the team's Team plan ($5 per seat per month) and otherwise return 402. Every route is owner-scoped: resources of other accounts return 404. Human-only actions are deliberately absent: answering prompts, approving app sign-in or issuing Hark passes, changing app sharing, creating API tokens, registering devices, starting checkout or the billing portal, accepting team invites, and acknowledging or escalating on-call pages.",
   },
   servers: [{ url: AGENT_API_PREFIX }],
   components: {

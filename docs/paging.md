@@ -5,6 +5,10 @@ Hark does that, the flags involved, and why it doesn't use AlarmKit.
 
 ## What happens when a page is raised
 
+0. `raisePage` in `lib/oncall.ts` first checks that the team is active (`teamActive`): a team
+   without the Team plan ($5 per seat per month) gets `402` with `TEAM_PLAN_REQUIRED_MESSAGE`.
+   Comped teams and servers without Autumn skip the check. The API, webhooks, interactions and MCP
+   all page through `raisePage`, so they share the gate.
 1. The server sends the paged person a page push (`buildPagePushMessages` in
    `apps/website/src/server/lib/push.ts`):
    - the bundled alarm sound `hark-page.caf` (28 s, generated, royalty-free; in

@@ -38,6 +38,11 @@ Requires [Node.js 22 or newer](https://nodejs.org/).
 Your agent can now notify your iPhone, request approvals or text replies, show task progress with
 Live Activities, and create webhook services for external systems.
 
+MCP clients can skip the CLI: add `https://hark.fyi/mcp` and sign in with OAuth. Agents can read
+everything at [hark.fyi/agents.md](https://hark.fyi/agents.md), and the token API is described at
+[hark.fyi/api/agent/openapi.json](https://hark.fyi/api/agent/openapi.json). Report problems in
+[GitHub issues](https://github.com/R44VC0RP/hark/issues).
+
 ## What Hark Does
 
 - Sends rich iOS notifications from a simple webhook.
@@ -45,7 +50,11 @@ Live Activities, and create webhook services for external systems.
 - Tracks delivery attempts and registered devices in a web dashboard.
 - Supports approvals and text replies for agent workflows.
 - Shows stateful task progress with Live Activities on the Lock Screen and Dynamic Island.
-- Supports multiple devices and targeted delivery with Hark Pro.
+- Shares web apps and on-call paging with your team.
+
+Hark is free for personal use: one iPhone and 10,000 notifications a month, with approvals, Live
+Activities, and web apps included. Teams pay $5 per seat per month (every member, the owner
+included) to add people, share apps, and page. See [pricing](https://hark.fyi/pricing).
 
 ## Webhook Setup
 
@@ -74,7 +83,7 @@ Only `body` is required.
 | `title` | Optional sender-name override. |
 | `imageUrl` | Optional public HTTPS avatar URL. |
 | `url` | Optional web URL, app deep link, or Shortcuts URL opened when tapped. |
-| `deviceIds` | Optional Pro routing to specific devices. |
+| `deviceIds` | Optional routing to specific devices; legacy Hark Pro accounts only (otherwise `402`). |
 | `project` | Optional project name that groups the notification in the app inbox. |
 | `summary` | Optional short digest used for the push banner and list previews. |
 | `bodyFormat` | Optional `text` or `markdown` metadata for the stored body. |
@@ -184,8 +193,10 @@ replay.
 
 ## Teams and On-Call
 
-Create a team to share web apps and page whoever is on call. Roles are owner, admin, and member;
-the first seat is free and each additional member is $5/month on the team plan.
+Create a team to share web apps and page whoever is on call. Roles are owner, admin, and member.
+Every member is a $5/month seat on the Team plan, the owner included. Until the owner starts the
+Team plan from the team page on hark.fyi, invites, sharing apps into the team, on-call groups, and
+pages return `402`.
 
 ```sh
 harkctl teams create "Acme"

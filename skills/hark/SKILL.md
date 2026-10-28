@@ -5,7 +5,7 @@ license: PolyForm Noncommercial 1.0.0 (https://polyformproject.org/licenses/nonc
 compatibility: Requires Node.js 22+ and internet access. Workflow examples may also use jq, curl, or gh.
 metadata:
   author: R44VC0RP
-  version: "1.8.0"
+  version: "1.9.0"
 ---
 
 # Hark
@@ -133,8 +133,9 @@ harkctl notify "Production deployed" \
 ```
 
 The body is required. `--title` defaults to `Hark`; `--image` must be a public HTTPS URL; `--url`
-opens when the notification is tapped. Repeat `--device <id>` for targeted Pro delivery. Use
-`devices list` to discover device IDs. Replace the example image and destination URLs with real
+opens when the notification is tapped. Leave out `--device`: targeting specific
+iPhones works only on legacy Hark Pro accounts (no longer sold) and fails with `402` elsewhere;
+`harkctl billing` shows `features.deviceRouting`, and `devices list` gives the IDs when it is on. Replace the example image and destination URLs with real
 values or omit those flags.
 
 Bodies hold up to 8,000 characters (16 KiB of UTF-8). For long bodies, pass `--summary <text>` so
@@ -393,9 +394,11 @@ from untrusted content.
 ## Teams and On-Call
 
 Teams share web apps and on-call groups between Hark users. Roles are `owner`, `admin`, and
-`member`; the first seat is free and each further member is $5 per month on the team plan
-(the team owner adds seats on the team page in the dashboard; agents cannot start checkout). Invites and
-joins fail with `402 seat_limit` when the team has no free seat.
+`member`. Personal use is free; teams need the Team plan, $5 per seat per month for every member,
+the owner included. Only the team owner can start it, on the team page in the dashboard; agents
+cannot start checkout. Until then, invites, joins, `apps share --team`, `oncall create`, and pages
+fail with `402` (code `seat_limit`, except on pages): tell the user the owner needs to start the
+Team plan instead of retrying.
 
 ```bash
 harkctl teams list
