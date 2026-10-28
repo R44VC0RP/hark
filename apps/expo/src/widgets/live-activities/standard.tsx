@@ -3,6 +3,7 @@ import {
   accessibilityElement,
   accessibilityLabel,
   activityBackgroundTint,
+  fixedSize,
   font,
   foregroundStyle,
   frame,
@@ -65,7 +66,7 @@ export function StandardLiveActivityStyle(
             modifiers={[
               font({ textStyle: "headline", weight: "semibold" }),
               foregroundStyle(primary),
-              lineLimit(1),
+              lineLimit(2),
             ]}
           >
             {title}
@@ -124,18 +125,24 @@ export function StandardLiveActivityStyle(
   );
 
   const compactLeading = <Image systemName={symbol} color={accent} size={16} />;
-  const compactTrailing = (
-    <Text
-      modifiers={[
-        font({ size: 12, weight: "semibold" }),
-        monospacedDigit(),
-        foregroundStyle(accent),
-        lineLimit(1),
-      ]}
-    >
-      {percentage ?? status}
-    </Text>
-  );
+  // The compact island grows with its trailing content, so a long status would
+  // stretch it across the screen and truncate. Show the status only when it is
+  // short; otherwise an ellipsis says the task is still running.
+  const compactTrailing =
+    percentage || status.length <= 8 ? (
+      <Text
+        modifiers={[
+          font({ size: 12, weight: "semibold" }),
+          monospacedDigit(),
+          foregroundStyle(accent),
+          lineLimit(1),
+        ]}
+      >
+        {percentage ?? status}
+      </Text>
+    ) : (
+      <Image systemName="ellipsis" color={accent} size={14} />
+    );
   const minimal = (
     <Image
       systemName={symbol}
@@ -144,27 +151,26 @@ export function StandardLiveActivityStyle(
       modifiers={[accessibilityLabel(`${title}, ${status}`)]}
     />
   );
+  // The leading and trailing regions sit beside the camera and are only a few
+  // characters wide, so they hold just the icon and percentage. The title
+  // opens the full-width bottom region, aligned under the icon.
   const expandedLeading = (
-    <HStack spacing={7} modifiers={[padding({ leading: 4 })]}>
-      <Image systemName={symbol} color={accent} size={18} />
-      <Text
-        modifiers={[
-          font({ textStyle: "headline", weight: "semibold" }),
-          foregroundStyle(primary),
-          lineLimit(1),
-        ]}
-      >
-        {title}
-      </Text>
-    </HStack>
+    <Image
+      systemName={symbol}
+      color={accent}
+      size={20}
+      modifiers={[padding({ leading: 4, top: 2 })]}
+    />
   );
   const expandedTrailing = percentage ? (
     <Text
       modifiers={[
-        padding({ trailing: 4 }),
+        padding({ trailing: 4, top: 2 }),
         font({ textStyle: "headline", weight: "semibold" }),
         monospacedDigit(),
         foregroundStyle(accent),
+        lineLimit(1),
+        fixedSize({ horizontal: true }),
       ]}
     >
       {percentage}
@@ -180,14 +186,26 @@ export function StandardLiveActivityStyle(
         accessibilityLabel(a11ySummary),
       ]}
     >
-      <Text
-        modifiers={[
-          font({ textStyle: "subheadline", weight: "semibold" }),
-          foregroundStyle(accent),
-        ]}
-      >
-        {status}
-      </Text>
+      <VStack alignment="leading" spacing={1}>
+        <Text
+          modifiers={[
+            font({ textStyle: "headline", weight: "semibold" }),
+            foregroundStyle(primary),
+            lineLimit(1),
+          ]}
+        >
+          {title}
+        </Text>
+        <Text
+          modifiers={[
+            font({ textStyle: "subheadline", weight: "semibold" }),
+            foregroundStyle(accent),
+            lineLimit(1),
+          ]}
+        >
+          {status}
+        </Text>
+      </VStack>
       {detail ? (
         <Text
           modifiers={[font({ textStyle: "footnote" }), foregroundStyle(secondary), lineLimit(2)]}

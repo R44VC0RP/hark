@@ -143,6 +143,18 @@ export function RingLiveActivityStyle(
     compactTrailing: standard.compactTrailing,
     minimal: standard.minimal,
     expandedLeading: standard.expandedLeading,
+    // standard's leading region is icon-only, so the title sits below the camera.
+    expandedCenter: (
+      <Text
+        modifiers={[
+          font({ textStyle: "headline", weight: "semibold" }),
+          foregroundStyle(primary),
+          lineLimit(1),
+        ]}
+      >
+        {title}
+      </Text>
+    ),
     expandedTrailing: standard.expandedTrailing,
     expandedBottom,
   };

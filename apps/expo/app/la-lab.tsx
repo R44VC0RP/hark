@@ -68,7 +68,17 @@ function Lab() {
   );
 
   // A unique ts value retriggers the effect when recapturing the same style.
-  const params = useLocalSearchParams<{ ts?: string; style?: string }>();
+  // Optional overrides capture edge states: title, status, detail ("none"
+  // omits it), progress (0..1 or "none") and privacy ("private").
+  const params = useLocalSearchParams<{
+    ts?: string;
+    style?: string;
+    title?: string;
+    status?: string;
+    detail?: string;
+    progress?: string;
+    privacy?: string;
+  }>();
   useEffect(() => {
     const styleParam = liveActivityStyleSchema.safeParse(params.style);
     if (!styleParam.success) return;
@@ -86,15 +96,23 @@ function Lab() {
         const nextProps: LiveActivityProps = {
           schemaVersion: LIVE_ACTIVITY_SCHEMA_VERSION,
           activityId: `lab-style-${styleParam.data}-${params.ts ?? "manual"}`,
-          title: "Deploy #184",
-          status: isInteractive ? "Approval needed" : "Building",
-          detail: isInteractive
-            ? "harkctl requests approval to deploy to production"
-            : "Compiling packages/website-runtime on raven-cobra",
-          ...(isInteractive ? {} : { progress: 0.25 }),
+          title: params.title ?? "Deploy #184",
+          status: params.status ?? (isInteractive ? "Approval needed" : "Building"),
+          ...(params.detail === "none"
+            ? {}
+            : {
+                detail:
+                  params.detail ??
+                  (isInteractive
+                    ? "harkctl requests approval to deploy to production"
+                    : "Compiling packages/website-runtime on raven-cobra"),
+              }),
+          ...(isInteractive || params.progress === "none"
+            ? {}
+            : { progress: params.progress === undefined ? 0.25 : Number(params.progress) }),
           updatedAt: new Date().toISOString(),
           symbol: isInteractive ? "terminal" : "build",
-          privacyMode: "standard",
+          privacyMode: params.privacy === "private" ? "private" : "standard",
           accentColor: LIVE_ACTIVITY_DEFAULT_ACCENT_COLOR,
           style: styleParam.data,
           ...(isInteractive
@@ -133,7 +151,16 @@ function Lab() {
         note(`auto-start failed: ${String(error)}`);
       }
     })();
-  }, [params.style, params.ts, note]);
+  }, [
+    params.style,
+    params.ts,
+    params.title,
+    params.status,
+    params.detail,
+    params.progress,
+    params.privacy,
+    note,
+  ]);
 
   const start = async () => {
     try {

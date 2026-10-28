@@ -40,6 +40,7 @@ vi.mock("@expo/ui/swift-ui/modifiers", () => ({
   buttonBorderShape: modifier("buttonBorderShape"),
   buttonStyle: modifier("buttonStyle"),
   controlSize: modifier("controlSize"),
+  fixedSize: modifier("fixedSize"),
   font: modifier("font"),
   foregroundStyle: modifier("foregroundStyle"),
   frame: modifier("frame"),
