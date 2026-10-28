@@ -333,6 +333,7 @@ export const agentRoute = new Hono<AgentEnv>()
         return c.json(
           {
             error: paged.error,
+            ...("code" in paged && paged.code ? { code: paged.code } : {}),
             ...("issues" in paged ? { issues: paged.issues } : {}),
             ...(retryAfterSeconds ? { retryAfterSeconds } : {}),
           },

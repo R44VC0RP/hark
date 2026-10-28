@@ -397,7 +397,7 @@ Teams share web apps and on-call groups between Hark users. Roles are `owner`, `
 `member`. Personal use is free; teams need the Team plan, $5 per seat per month for every member,
 the owner included. Only the team owner can start it, on the team page in the dashboard; agents
 cannot start checkout. Until then, invites, joins, `apps share --team`, `oncall create`, and pages
-fail with `402` (code `seat_limit`, except on pages): tell the user the owner needs to start the
+fail with `402` (code `seat_limit`): tell the user the owner needs to start the
 Team plan instead of retrying.
 
 ```bash

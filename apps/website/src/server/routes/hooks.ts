@@ -216,6 +216,7 @@ export const hooksRoute = new Hono()
           {
             ok: false,
             error: paged.error,
+            ...("code" in paged && paged.code ? { code: paged.code } : {}),
             ...("issues" in paged ? { issues: paged.issues } : {}),
             ...(retryAfterSeconds ? { retryAfterSeconds } : {}),
           },

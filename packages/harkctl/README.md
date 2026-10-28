@@ -218,7 +218,7 @@ email also gets a push. Accepting is human-only, in the app or on the website. `
 `teams revoke-invite <team_id> <invite_id>` manage links. Personal use is free; teams need the Team
 plan, $5 per seat per month for every member including the owner. Until the owner starts it from the
 team page on hark.fyi, invites, `apps share --team`, `oncall create` and `page` fail with `402`
-(code `seat_limit`, except on pages). Agents cannot start checkout.
+(code `seat_limit`). Agents cannot start checkout.
 
 ## oncall and page
 

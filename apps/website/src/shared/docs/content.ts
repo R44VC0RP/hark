@@ -107,7 +107,7 @@ export const AGENT_PRIMER: string[] = [
   '- CLI: `npx harkctl auth login` (browser device authorization; Node.js 22+), then e.g. `harkctl notify "Deploy finished"` or `harkctl notify ask "Ship it?" --approval --wait`.',
   "- REST: a scoped agent token (`Authorization: Bearer hark_…`) against `https://hark.fyi/api/agent`, described by the OpenAPI document at https://hark.fyi/api/agent/openapi.json. Webhook services (`POST https://hark.fyi/hooks/whk_…`) need no token beyond the secret URL.",
   "- Skill: `npx skills add R44VC0RP/hark --skill hark` installs the Hark agent skill.",
-  `Pricing: free for personal use (one active iPhone, ${FREE_NOTIFICATIONS.toLocaleString("en-US")} notifications a month, 60 requests/minute per service and 300 per account), with prompts, response callbacks, Live Activities and web apps included. Teams pay $${TEAM_SEAT_PRICE_MONTHLY} per seat per month, every member including the owner: without the Team plan, adding people, sharing apps into the team, creating on-call groups and paging return \`402\` (code \`seat_limit\`, except on pages). Only the owner can start it, from the team page on hark.fyi; agents cannot start checkout. Hark Pro is no longer sold; \`deviceIds\` / \`--device\` routing works only for existing Pro accounts and returns \`402\` elsewhere, so omit it.`,
+  `Pricing: free for personal use (one active iPhone, ${FREE_NOTIFICATIONS.toLocaleString("en-US")} notifications a month, 60 requests/minute per service and 300 per account), with prompts, response callbacks, Live Activities and web apps included. Teams pay $${TEAM_SEAT_PRICE_MONTHLY} per seat per month, every member including the owner: without the Team plan, adding people, sharing apps into the team, creating on-call groups and paging return \`402\` (code \`seat_limit\`). Only the owner can start it, from the team page on hark.fyi; agents cannot start checkout. Hark Pro is no longer sold; \`deviceIds\` / \`--device\` routing works only for existing Pro accounts and returns \`402\` elsewhere, so omit it.`,
   "Human-only (no tool or route can do these): answering prompts, approving web app sign-in, accepting team invites, acknowledging or escalating pages, creating API tokens, registering devices, and starting checkout or the billing portal.",
   `Problems: open an issue at ${ISSUES_URL} or email ${SUPPORT_EMAIL}. Never include a token or webhook URL.`,
 ];
@@ -1389,7 +1389,7 @@ harkctl apps remove app_...`,
           },
           {
             kind: "p",
-            text: "Anyone can create a team and set it up, but until it has the Team plan, creating or accepting invites, sharing apps into it, creating on-call groups and raising pages return `402` with a message naming the Team plan (code `seat_limit` on everything except pages). Only the team owner can start the Team plan or open the billing portal, from the team page in the dashboard; agents cannot.",
+            text: "Anyone can create a team and set it up, but until it has the Team plan, creating or accepting invites, sharing apps into it, creating on-call groups and raising pages return `402` with a message naming the Team plan (code `seat_limit`). Only the team owner can start the Team plan or open the billing portal, from the team page in the dashboard; agents cannot.",
           },
           {
             kind: "note",

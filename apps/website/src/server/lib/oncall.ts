@@ -1,4 +1,5 @@
 import {
+  API_ERROR_CODE_SEAT_LIMIT,
   type CriticalAlertState,
   criticalAlertStateSchema,
   type OncallGroupDto,
@@ -966,7 +967,13 @@ export interface RaisePageInput {
 
 export type RaisePageOutcome =
   | { ok: true; status: 200 | 201; body: OncallPageCreateResponse }
-  | { ok: false; status: 400 | 402 | 429; error: string; retryAfterSeconds?: number };
+  | {
+      ok: false;
+      status: 400 | 402 | 429;
+      error: string;
+      code?: string;
+      retryAfterSeconds?: number;
+    };
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -1064,7 +1071,12 @@ export async function raisePage({
   sourceName,
 }: RaisePageInput): Promise<RaisePageOutcome> {
   if (!(await teamActive(group.teamId))) {
-    return { ok: false, status: 402, error: TEAM_PLAN_REQUIRED_MESSAGE };
+    return {
+      ok: false,
+      status: 402,
+      error: TEAM_PLAN_REQUIRED_MESSAGE,
+      code: API_ERROR_CODE_SEAT_LIMIT,
+    };
   }
   let appId: string | null = null;
   if (input.appId) {

@@ -221,7 +221,9 @@ async function createPage(
     creatorUserId: actor.id,
     sourceName,
   });
-  return outcome.ok ? result(outcome.body, outcome.status) : failure(outcome.status, outcome.error);
+  return outcome.ok
+    ? result(outcome.body, outcome.status)
+    : failure(outcome.status, outcome.error, outcome.code ? { code: outcome.code } : undefined);
 }
 
 async function getPage(actor: Actor, pageId: string): Promise<Outcome> {
