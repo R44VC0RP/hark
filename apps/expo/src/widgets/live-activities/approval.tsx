@@ -114,6 +114,55 @@ export function ApprovalLiveActivityStyle(
       </HStack>
     ) : null;
 
+  // The expanded Dynamic Island has far rounder corners than the Lock Screen
+  // banner, so its buttons are capsules to stay concentric with the island.
+  // shell, verdict and signal reuse this expanded region.
+  const islandActions =
+    canRespond && primaryButtonProps && secondaryButtonProps ? (
+      <HStack spacing={9} modifiers={[frame({ maxWidth: Infinity })]}>
+        <Button
+          {...primaryButtonProps}
+          modifiers={[
+            buttonStyle("borderedProminent"),
+            buttonBorderShape("capsule"),
+            controlSize("regular"),
+            tint("#FFFFFF"),
+            frame({ height: 46, maxWidth: Infinity }),
+          ]}
+        >
+          <Text
+            modifiers={[
+              font({ size: 13, weight: "semibold" }),
+              foregroundStyle("#000000"),
+              frame({ maxWidth: Infinity }),
+            ]}
+          >
+            {interaction.primaryLabel}
+          </Text>
+        </Button>
+        <Button
+          {...secondaryButtonProps}
+          modifiers={[
+            buttonStyle("bordered"),
+            buttonBorderShape("capsule"),
+            controlSize("regular"),
+            tint("#98989D"),
+            frame({ height: 46, maxWidth: Infinity }),
+          ]}
+        >
+          <Text
+            modifiers={[
+              font({ size: 13, weight: "semibold" }),
+              foregroundStyle("#EBEBF0"),
+              frame({ maxWidth: Infinity }),
+            ]}
+          >
+            {interaction.secondaryLabel}
+          </Text>
+        </Button>
+      </HStack>
+    ) : null;
+
   const banner = interaction ? (
     <VStack
       alignment="leading"
@@ -201,7 +250,7 @@ export function ApprovalLiveActivityStyle(
       >
         {interaction.state === "pending" ? interaction.prompt : (detail ?? status)}
       </Text>
-      {approvalActions}
+      {islandActions}
     </VStack>
   ) : null;
 
