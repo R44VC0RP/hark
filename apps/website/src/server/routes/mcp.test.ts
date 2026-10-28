@@ -300,7 +300,7 @@ describe("Expo authorization proxy", () => {
   });
 
   it("rejects cross-site loads and anything that is not a top-level page load", async () => {
-    for (const headers of [
+    const forbidden: Array<Record<string, string>> = [
       {
         "sec-fetch-site": "cross-site",
         "sec-fetch-mode": "navigate",
@@ -311,7 +311,8 @@ describe("Expo authorization proxy", () => {
       { "sec-fetch-site": "none", "sec-fetch-mode": "navigate", "sec-fetch-dest": "iframe" },
       { "sec-fetch-mode": "cors" },
       { "sec-fetch-dest": "script" },
-    ]) {
+    ];
+    for (const headers of forbidden) {
       expect((await open(headers)).status).toBe(403);
     }
   });
