@@ -125,9 +125,9 @@ export function ApprovalLiveActivityStyle(
           modifiers={[
             buttonStyle("borderedProminent"),
             buttonBorderShape("capsule"),
-            controlSize("regular"),
+            controlSize("large"),
             tint("#FFFFFF"),
-            frame({ height: 46, maxWidth: Infinity }),
+            frame({ maxWidth: Infinity }),
           ]}
         >
           <Text
@@ -145,9 +145,9 @@ export function ApprovalLiveActivityStyle(
           modifiers={[
             buttonStyle("bordered"),
             buttonBorderShape("capsule"),
-            controlSize("regular"),
+            controlSize("large"),
             tint("#98989D"),
-            frame({ height: 46, maxWidth: Infinity }),
+            frame({ maxWidth: Infinity }),
           ]}
         >
           <Text
@@ -244,7 +244,11 @@ export function ApprovalLiveActivityStyle(
   );
 
   const expandedBottom = interaction ? (
-    <VStack alignment="leading" spacing={8} modifiers={[padding({ horizontal: 4, vertical: 2 })]}>
+    <VStack
+      alignment="leading"
+      spacing={8}
+      modifiers={[padding({ leading: 4, trailing: 4, bottom: 4 })]}
+    >
       <Text
         modifiers={[font({ textStyle: "subheadline" }), foregroundStyle(secondary), lineLimit(2)]}
       >
