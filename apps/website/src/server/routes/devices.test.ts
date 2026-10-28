@@ -78,6 +78,14 @@ beforeAll(async () => {
     createdAt: now,
     updatedAt: now,
   });
+  await db.insert(schema.user).values({
+    id: "other_user",
+    name: "Other User",
+    email: "other@example.com",
+    emailVerified: true,
+    createdAt: now,
+    updatedAt: now,
+  });
 });
 
 beforeEach(async () => {
@@ -94,11 +102,16 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-async function register(expoPushToken: string) {
+async function register(expoPushToken: string, apnsToken?: string) {
   return app.request("/api/devices", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ expoPushToken, platform: "ios", deviceName: "iPhone" }),
+    body: JSON.stringify({
+      expoPushToken,
+      platform: "ios",
+      deviceName: "iPhone",
+      ...(apnsToken ? { apnsToken } : {}),
+    }),
   });
 }
 
@@ -135,5 +148,66 @@ describe("POST /api/devices onboarding", () => {
 
     const [account] = await db.select().from(schema.user);
     expect(account?.welcomeNotificationSentAt).toBeInstanceOf(Date);
+  });
+});
+
+describe("POST /api/devices owner change", () => {
+  const longAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
+
+  beforeEach(async () => {
+    // Skip the welcome pushes; these tests are about ownership only.
+    await db
+      .update(schema.user)
+      .set({ welcomeNotificationSentAt: new Date() })
+      .where(eq(schema.user.id, "welcome_user"));
+  });
+
+  async function seedOtherAccountDevice(values: { apnsToken: string | null; active: boolean }) {
+    await db.insert(schema.device).values({
+      id: "dev_other",
+      userId: "other_user",
+      expoPushToken: "ExponentPushToken[shared]",
+      apnsToken: values.apnsToken,
+      active: values.active,
+      createdAt: longAgo,
+      lastSeenAt: longAgo,
+    });
+  }
+
+  async function owner() {
+    const [row] = await db
+      .select({ userId: schema.device.userId })
+      .from(schema.device)
+      .where(eq(schema.device.expoPushToken, "ExponentPushToken[shared]"));
+    return row?.userId;
+  }
+
+  it("moves the device when the same phone signs into another account", async () => {
+    await seedOtherAccountDevice({ apnsToken: "apns-shared", active: true });
+    const response = await register("ExponentPushToken[shared]", "apns-shared");
+    expect(response.status).toBe(201);
+    expect(await owner()).toBe("welcome_user");
+  });
+
+  it("rejects a stale token claimed without the phone's APNs token", async () => {
+    await seedOtherAccountDevice({ apnsToken: "apns-shared", active: false });
+    for (const apnsToken of [undefined, "apns-guess"]) {
+      const response = await register("ExponentPushToken[shared]", apnsToken);
+      expect(response.status).toBe(409);
+      const body = await response.text();
+      expect(body).not.toContain("other_user");
+      expect(body).not.toContain("other@example.com");
+    }
+    expect(await owner()).toBe("other_user");
+  });
+
+  it("rejects an idle token without an APNs token until Expo reports it unregistered", async () => {
+    await seedOtherAccountDevice({ apnsToken: null, active: true });
+    expect((await register("ExponentPushToken[shared]")).status).toBe(409);
+    expect(await owner()).toBe("other_user");
+
+    await db.update(schema.device).set({ active: false }).where(eq(schema.device.id, "dev_other"));
+    expect((await register("ExponentPushToken[shared]")).status).toBe(201);
+    expect(await owner()).toBe("welcome_user");
   });
 });
