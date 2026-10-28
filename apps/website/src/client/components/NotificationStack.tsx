@@ -28,7 +28,7 @@ const FEED: FeedItem[] = [
   {
     sender: "Stripe",
     avatar: { text: "S", bg: "#635BFF" },
-    body: "New subscription: Pro plan, $8.00/month.",
+    body: "Payment received: $1,240.00 from Acme Inc.",
   },
   {
     sender: "Claude Code",
