@@ -36,26 +36,37 @@ function Cta() {
 const hintLink =
   "underline decoration-white/20 underline-offset-[3px] transition-colors duration-150 hover:text-white hover:decoration-white/60";
 
-/** Everything else Hark does, each a link into the docs. */
+/** Everything else Hark does, each a link into the docs, then the legal pages. */
 function Hint() {
   return (
     <>
-      Also:{" "}
-      <a className={hintLink} href="/docs#activity-api">
-        Live Activities
-      </a>{" "}
-      ·{" "}
-      <a className={hintLink} href="/docs#mcp">
-        MCP
-      </a>{" "}
-      &amp;{" "}
-      <a className={hintLink} href="/docs#cli">
-        CLI
-      </a>{" "}
-      ·{" "}
-      <a className={hintLink} href="/docs">
-        and more
-      </a>
+      <span>
+        Also:{" "}
+        <a className={hintLink} href="/docs#activity-api">
+          Live Activities
+        </a>{" "}
+        ·{" "}
+        <a className={hintLink} href="/docs#mcp">
+          MCP
+        </a>{" "}
+        &amp;{" "}
+        <a className={hintLink} href="/docs#cli">
+          CLI
+        </a>{" "}
+        ·{" "}
+        <a className={hintLink} href="/docs">
+          and more
+        </a>
+      </span>
+      <nav aria-label="Legal">
+        <Link className={hintLink} to="/privacy">
+          Privacy
+        </Link>{" "}
+        ·{" "}
+        <Link className={hintLink} to="/terms">
+          Terms
+        </Link>
+      </nav>
     </>
   );
 }

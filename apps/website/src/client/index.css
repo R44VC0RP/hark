@@ -952,7 +952,11 @@ address {
 }
 
 .hark-focus-hint {
+  display: flex;
+  flex-wrap: wrap;
   grid-area: hint;
+  gap: 2px 14px;
+  justify-content: center;
   padding: 8px 0 14px;
   color: var(--color-ink-faint);
   font-size: 12px;
@@ -1031,6 +1035,8 @@ address {
   }
 
   .hark-focus-hint {
+    column-gap: 18px;
+    justify-content: flex-start;
     padding: 0 0 22px;
     font-size: 12.5px;
   }

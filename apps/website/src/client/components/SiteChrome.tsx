@@ -37,8 +37,8 @@ type NavPage = "docs" | "pricing";
 
 /**
  * Site header: the Hark mark, Docs and Pricing, and a session-aware action
- * (Open dashboard when signed in, a Sign in menu otherwise). On narrow screens
- * only the action stays, as in the landing design.
+ * (Open dashboard when signed in, a Sign in menu otherwise). Narrow screens
+ * keep all three, a little smaller and closer together.
  */
 export function SiteHeader({
   current,
@@ -54,7 +54,10 @@ export function SiteHeader({
   return (
     <header className={`${className} flex h-16 items-center justify-between`}>
       <Brand />
-      <nav aria-label="Primary" className="flex items-center gap-[22px] text-[15px]">
+      <nav
+        aria-label="Primary"
+        className="flex items-center gap-4 text-[14px] sm:gap-[22px] sm:text-[15px]"
+      >
         <NavItem current={current === "docs"} to="/docs">
           Docs
         </NavItem>
@@ -63,7 +66,8 @@ export function SiteHeader({
         </NavItem>
         {session ? (
           <Link className="text-white" to="/dashboard">
-            Open dashboard
+            <span className="hidden sm:inline">Open dashboard</span>
+            <span className="sm:hidden">Dashboard</span>
           </Link>
         ) : (
           <SignInMenu callbackURL={signInCallbackURL} />
@@ -85,7 +89,7 @@ function NavItem({
   return (
     <Link
       aria-current={current ? "page" : undefined}
-      className={`hidden sm:inline ${current ? "text-white" : navLink}`}
+      className={current ? "text-white" : navLink}
       to={to}
     >
       {children}
