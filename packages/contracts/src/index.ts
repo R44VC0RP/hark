@@ -1554,7 +1554,11 @@ export interface TeamDto extends TeamSummaryDto {
   oncallGroupCount: number;
   seats: {
     used: number;
-    /** Seats covered without payment (TEAM_FREE_SEATS) plus paid seats. */
+    /**
+     * Seats the team may fill: TEAM_FREE_SEATS (0) without the Team plan, so
+     * no one can be added; null when unlimited (Team plan, comped, or billing
+     * not configured).
+     */
     available: number | null;
     /** Seats billed at TEAM_SEAT_PRICE_MONTHLY. */
     billable: number;

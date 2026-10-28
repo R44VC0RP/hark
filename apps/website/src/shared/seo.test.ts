@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { PRO_PRICE_MONTHLY, staticPricingPlans } from "./pricing";
+import { staticPricingPlans, TEAM_SEAT_PRICE_MONTHLY } from "./pricing";
 import {
   absoluteUrl,
   homeStructuredData,
@@ -41,7 +41,10 @@ describe("SEO metadata", () => {
     expect(JSON.parse(json)).toEqual(data);
     expect(json).toContain('"SoftwareApplication"');
     expect(json).toContain('"VideoObject"');
-    expect(json).toContain(`"price":"${PRO_PRICE_MONTHLY}"`);
+    expect(json).toContain('"name":"Hark Free","price":"0"');
+    expect(json).toContain(`"name":"Hark Team"`);
+    expect(json).toContain(`"price":"${TEAM_SEAT_PRICE_MONTHLY}"`);
+    expect(json).not.toContain("Hark Pro");
     expect(SOCIAL_IMAGE_URL).toBe("https://hark.fyi/ogimage.png");
   });
 

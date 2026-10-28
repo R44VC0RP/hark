@@ -1,7 +1,7 @@
 import type * as Contracts from "@hark/contracts";
 import type { AppDto, TeamDto, TeamRole } from "@hark/contracts";
 
-export { TEAM_FREE_SEATS, TEAM_SEAT_PRICE_MONTHLY } from "../../shared/pricing";
+export { TEAM_SEAT_PRICE_MONTHLY } from "../../shared/pricing";
 
 // Contract constants mirrored as typed literals; importing the values would
 // bundle zod into the client.
@@ -33,15 +33,19 @@ export function canManage(role: TeamRole): boolean {
   return role === "owner" || role === "admin";
 }
 
-/** "3 of 5 seats", or "3 seats" when the plan has no fixed cap. */
+/** "3 seats": every member is one seat. */
 export function seatsLabel(team: TeamDto): string {
-  const { used, available } = team.seats;
-  if (available === null) return `${used} ${used === 1 ? "seat" : "seats"}`;
-  return `${used} of ${available} ${available === 1 ? "seat" : "seats"}`;
+  const { used } = team.seats;
+  return `${used} ${used === 1 ? "seat" : "seats"}`;
 }
 
-/** No seat left for the next person to join. */
-export function seatsFull(team: TeamDto): boolean {
+/**
+ * The team has no Team plan yet, so the server refuses new members, sharing
+ * apps into it, on-call groups and pages (402 `seat_limit`). Every seat is
+ * paid, so an unpaid team has no seats to spare (`available` is 0); comped
+ * teams, paid teams and servers without billing report `available: null`.
+ */
+export function needsTeamPlan(team: TeamDto): boolean {
   return team.seats.available !== null && team.seats.used >= team.seats.available;
 }
 
@@ -50,6 +54,7 @@ export function teamSummary(team: TeamDto): string {
     ROLE_LABELS[team.role],
     `${team.memberCount} ${team.memberCount === 1 ? "member" : "members"}`,
     seatsLabel(team),
+    ...(needsTeamPlan(team) ? ["Needs the Team plan"] : []),
     ...(team.oncallGroupCount > 0
       ? [`${team.oncallGroupCount} on-call ${team.oncallGroupCount === 1 ? "group" : "groups"}`]
       : []),

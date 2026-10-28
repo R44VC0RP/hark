@@ -103,8 +103,6 @@ function staticPlans(): PricingPlansDto {
   return staticPricingPlans({
     freeServicePerMinute: env.SERVICE_RATE_LIMIT_PER_MINUTE,
     freeAccountPerMinute: env.ACCOUNT_RATE_LIMIT_PER_MINUTE,
-    proServicePerMinute: env.PRO_SERVICE_RATE_LIMIT_PER_MINUTE,
-    proAccountPerMinute: env.PRO_ACCOUNT_RATE_LIMIT_PER_MINUTE,
   });
 }
 

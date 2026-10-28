@@ -9,10 +9,9 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../../lib/api";
 import {
   canManage,
+  needsTeamPlan,
   ROLE_LABELS,
-  seatsFull,
   seatsLabel,
-  TEAM_FREE_SEATS,
   TEAM_SEAT_PRICE_MONTHLY,
   withArticle,
 } from "../../lib/teams";
@@ -34,19 +33,16 @@ import {
 } from "../DashboardKit";
 import { primaryButtonSmall, rowButton, rowDangerButton, secondaryButton } from "../ui";
 
-/** Seat usage plus the checkout / billing portal entry points. */
+/** Seat usage plus the Team plan checkout / billing portal entry points. */
 export function SeatsPanel({ team, activating }: { team: TeamDto; activating: boolean }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const full = seatsFull(team);
+  const needsPlan = needsTeamPlan(team);
   const manage = canManage(team.role);
   // Only the owner can open team checkout or the billing portal.
   const owner = team.role === "owner";
   const paid = team.plan === "team";
-  const ratio =
-    team.seats.available === null || team.seats.available === 0
-      ? 1
-      : Math.min(1, team.seats.used / team.seats.available);
+  const startingCost = team.seats.used * TEAM_SEAT_PRICE_MONTHLY;
 
   const redirect = async (kind: "checkout" | "portal") => {
     setBusy(true);
@@ -74,7 +70,7 @@ export function SeatsPanel({ team, activating }: { team: TeamDto; activating: bo
             {seatsLabel(team)}
           </p>
         </div>
-        {owner ? (
+        {owner && (paid || needsPlan) ? (
           <div className="flex flex-wrap gap-2">
             {paid ? (
               <button
@@ -83,53 +79,39 @@ export function SeatsPanel({ team, activating }: { team: TeamDto; activating: bo
                 onClick={() => void redirect("portal")}
                 type="button"
               >
-                {busy ? "Opening…" : "Manage seats"}
+                {busy ? "Opening…" : "Manage billing"}
               </button>
             ) : (
               <button
                 className={primaryButtonSmall}
-                disabled={busy}
+                disabled={busy || activating}
                 onClick={() => void redirect("checkout")}
                 type="button"
               >
-                {busy ? "Opening…" : "Add seats"}
+                {busy ? "Opening…" : "Start Team plan"}
               </button>
             )}
           </div>
         ) : null}
       </div>
-      {team.seats.available !== null ? (
-        <div
-          aria-hidden="true"
-          className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/12"
-          title={seatsLabel(team)}
-        >
-          <div
-            className={`h-full rounded-full ${full ? "bg-warn" : "bg-mint"}`}
-            style={{ width: `${Math.max(4, ratio * 100)}%` }}
-          />
-        </div>
-      ) : null}
       <p className="mt-3 text-sm leading-relaxed text-ink-muted">
-        First seat free, ${TEAM_SEAT_PRICE_MONTHLY} per extra seat per month.
-        {paid && manage
+        ${TEAM_SEAT_PRICE_MONTHLY} per seat per month. Every member is a seat, the owner included.
+        {paid && manage && team.seats.billable > 0
           ? ` ${team.seats.billable} paid ${team.seats.billable === 1 ? "seat" : "seats"} · $${
               team.seats.billable * TEAM_SEAT_PRICE_MONTHLY
             }/month.`
-          : paid
-            ? ""
-            : ` This team is on the free plan with ${TEAM_FREE_SEATS} seat.`}
-        {manage && !owner ? " The team owner manages billing." : ""}
+          : ""}
+        {paid && manage && !owner ? " The team owner manages billing." : ""}
       </p>
       {activating ? (
         <p className="mt-3 rounded-2xl bg-white/12 px-4 py-3 text-[15px] text-white" role="status">
-          Payment received. Updating your seats…
+          Payment received. Starting the Team plan…
         </p>
-      ) : full ? (
+      ) : needsPlan ? (
         <p className="mt-3 rounded-2xl bg-warn/12 px-4 py-3 text-sm text-white ring-1 ring-warn/40 ring-inset">
           {owner
-            ? "Every seat is in use. Add a seat before the next person accepts an invite."
-            : "Every seat is in use. Ask the team owner to add seats before inviting anyone else."}
+            ? `This team needs the Team plan to add people, share apps and page. It starts at $${startingCost}/month for ${seatsLabel(team)} and follows the member count.`
+            : "This team needs the Team plan to add people, share apps and page. Ask the owner to start the Team plan."}
         </p>
       ) : null}
       <ErrorText>{error}</ErrorText>
@@ -452,10 +434,11 @@ function InviteModal({
             <option value="admin">Admin</option>
           </Select>
         </Field>
-        {seatsFull(team) ? (
+        {needsTeamPlan(team) ? (
           <p className="rounded-2xl bg-warn/12 px-4 py-3 text-sm text-white ring-1 ring-warn/40 ring-inset">
-            Every seat is in use, so they won't be able to join until you add a seat. First seat
-            free, ${TEAM_SEAT_PRICE_MONTHLY} per extra seat per month.
+            {team.role === "owner"
+              ? `Start the Team plan before inviting anyone. Each person is one more $${TEAM_SEAT_PRICE_MONTHLY}/month seat.`
+              : "This team needs the Team plan before anyone can join. Ask the owner to start it."}
           </p>
         ) : null}
       </div>
@@ -464,7 +447,7 @@ function InviteModal({
         <button className={secondaryButton} disabled={busy} onClick={onClose} type="button">
           Cancel
         </button>
-        <button className={primaryButtonSmall} disabled={busy} type="submit">
+        <button className={primaryButtonSmall} disabled={busy || needsTeamPlan(team)} type="submit">
           {busy ? "Creating…" : "Create invite"}
         </button>
       </div>

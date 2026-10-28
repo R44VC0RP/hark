@@ -1,28 +1,28 @@
 import type { PricingPlanDto, PricingPlansDto } from "@hark/contracts";
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
-import { staticPricingPlans, TEAM_PLAN } from "../../shared/pricing";
+import { FREE_NOTIFICATIONS, staticPricingPlans, TEAM_PLAN } from "../../shared/pricing";
 import { AppleButton } from "../components/AppleButton";
 import { GoogleButton } from "../components/GoogleButton";
 import { PAGE_COLUMN, SiteFooter, SiteHeader } from "../components/SiteChrome";
-import { primaryButton, secondaryButton } from "../components/ui";
+import { secondaryButton } from "../components/ui";
 import { api } from "../lib/api";
 import { signInWithApple, signInWithGoogle, useSession } from "../lib/auth";
 
 const numberFormat = new Intl.NumberFormat("en-US");
 
-/**
- * Included on every plan. Pro only changes what the plan rows list: iPhones,
- * `deviceIds` routing, per-minute limits and the monthly allowance.
- */
-const EVERY_PLAN = ["Approval and reply prompts", "Live Activities", "Response callbacks"];
+/** Included on the Free plan alongside its limits. */
+const EVERY_PLAN = [
+  "Approval and reply prompts",
+  "Live Activities",
+  "Response callbacks",
+  "Web apps in the Hark app",
+];
 
 export function Pricing() {
   const { data: session, isPending } = useSession();
   const [data, setData] = useState<PricingPlansDto>(staticPricingPlans);
   const [failed, setFailed] = useState(false);
-  const [checkoutError, setCheckoutError] = useState<string | null>(null);
-  const [checkoutPending, setCheckoutPending] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -39,18 +39,6 @@ export function Pricing() {
     };
   }, []);
 
-  async function upgrade() {
-    setCheckoutError(null);
-    setCheckoutPending(true);
-    try {
-      const { url } = await api.startCheckout();
-      window.location.href = url;
-    } catch {
-      setCheckoutPending(false);
-      setCheckoutError("Could not start checkout. Manage your plan from the dashboard instead.");
-    }
-  }
-
   return (
     <div className="flex min-h-dvh flex-col">
       <SiteHeader current="pricing" />
@@ -60,8 +48,8 @@ export function Pricing() {
           Pricing
         </h1>
         <p className="mt-3 max-w-[30rem] text-lg leading-[1.55] text-pretty text-ink-muted">
-          Start free with one iPhone and 10,000 notifications a month. Upgrade when your webhooks
-          outgrow it.
+          Free for personal use: one iPhone and {numberFormat.format(FREE_NOTIFICATIONS)}{" "}
+          notifications a month. Teams pay ${TEAM_PLAN.seatPriceMonthly} per seat.
         </p>
 
         {failed ? (
@@ -78,23 +66,10 @@ export function Pricing() {
               .filter((plan) => !plan.id.startsWith("team"))
               .map((plan) => (
                 <PlanCard key={plan.id} plan={plan}>
-                  {plan.priceMonthly === 0 ? (
-                    session ? (
-                      <Link to="/dashboard" className={secondaryButton}>
-                        Open dashboard
-                      </Link>
-                    ) : (
-                      <SignInButtons disabled={isPending} />
-                    )
-                  ) : session ? (
-                    <button
-                      type="button"
-                      onClick={() => void upgrade()}
-                      disabled={checkoutPending}
-                      className={primaryButton}
-                    >
-                      {checkoutPending ? "Opening checkout…" : "Upgrade to Pro"}
-                    </button>
+                  {session ? (
+                    <Link to="/dashboard" className={secondaryButton}>
+                      Open dashboard
+                    </Link>
                   ) : (
                     <SignInButtons disabled={isPending} />
                   )}
@@ -104,15 +79,10 @@ export function Pricing() {
           </div>
         )}
 
-        {checkoutError ? (
-          <p className="mt-4 text-sm text-danger" role="alert">
-            {checkoutError}
-          </p>
-        ) : null}
-
         <p className="mt-8 max-w-[34rem] text-sm text-ink-faint">
-          Prices in USD. Cancel anytime from the dashboard. Notifications, interactive responses,
-          and Live Activity updates share the same monthly allowance.
+          Prices in USD. Notifications, interactive responses and Live Activity updates share the
+          monthly allowance. A team's owner starts the Team plan from the team's page; seats follow
+          the member count and the plan can be cancelled anytime.
         </p>
       </main>
 
@@ -125,7 +95,7 @@ function TeamPlanCard({ signedIn }: { signedIn: boolean }) {
   return (
     <section
       aria-label={`${TEAM_PLAN.name} plan`}
-      className="hark-glass flex flex-col rounded-3xl p-6 sm:col-span-2"
+      className="hark-glass flex flex-col rounded-3xl p-6"
     >
       <div className="flex items-baseline justify-between gap-4">
         <h2 className="text-xl font-medium text-white">{TEAM_PLAN.name}</h2>
@@ -136,22 +106,19 @@ function TeamPlanCard({ signedIn }: { signedIn: boolean }) {
           <span className="text-sm text-ink-faint"> per seat / month</span>
         </p>
       </div>
-      <p className="mt-2 text-[15px] leading-relaxed text-ink-muted">
-        {TEAM_PLAN.description} The first seat is free; each extra seat is $
-        {TEAM_PLAN.seatPriceMonthly} a month.
-      </p>
-      <div className="mt-5 flex flex-col gap-6 border-t border-line pt-5 sm:flex-row sm:items-end sm:justify-between">
-        <ul className="grid gap-x-8 gap-y-2.5 sm:grid-cols-2">
-          {TEAM_PLAN.features.map((row) => (
-            <li key={row} className="flex items-baseline gap-2.5 text-[15px] text-ink">
-              <span aria-hidden="true" className="text-[13px] text-mint">
-                ✓
-              </span>
-              {row}
-            </li>
-          ))}
-        </ul>
-        <Link className={`${secondaryButton} shrink-0`} to={signedIn ? "/dashboard" : "/docs"}>
+      <p className="mt-2 text-[15px] leading-relaxed text-ink-muted">{TEAM_PLAN.description}</p>
+      <ul className="mt-5 flex flex-col gap-2.5 border-t border-line pt-5">
+        {TEAM_PLAN.features.map((row) => (
+          <li key={row} className="flex items-baseline gap-2.5 text-[15px] text-ink">
+            <span aria-hidden="true" className="text-[13px] text-mint">
+              ✓
+            </span>
+            {row}
+          </li>
+        ))}
+      </ul>
+      <div className="mt-6 flex flex-1 items-end">
+        <Link className={secondaryButton} to={signedIn ? "/dashboard" : "/docs#teams"}>
           {signedIn ? "Create a team" : "Read about teams"}
         </Link>
       </div>

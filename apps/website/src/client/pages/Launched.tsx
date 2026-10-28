@@ -63,13 +63,13 @@ export function Launched() {
 
             <section className="border-t border-line py-8">
               <h2 className="text-[clamp(22px,3vw,26px)] leading-[1.15] font-medium tracking-[-0.015em] text-white">
-                Support what comes next
+                Free for personal use
               </h2>
               <p className="mt-1.5 max-w-[34rem] text-pretty">
-                Upgrade to Hark Pro to support continued development and unlock more iPhones, device
-                routing, higher rate limits, and a larger monthly allowance.{" "}
+                Hark is free for one iPhone, with approvals, Live Activities and web apps included.
+                Teams that share apps and on-call pay per seat.{" "}
                 <Link className="hark-link" to="/pricing">
-                  See Hark Pro
+                  See pricing
                 </Link>
                 .
               </p>

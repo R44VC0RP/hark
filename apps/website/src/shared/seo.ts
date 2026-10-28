@@ -1,4 +1,4 @@
-import { PRO_PRICE_MONTHLY } from "./pricing";
+import { TEAM_SEAT_PRICE_MONTHLY } from "./pricing";
 
 export const SITE_URL = "https://hark.fyi";
 export const SOCIAL_IMAGE_URL = `${SITE_URL}/ogimage.png`;
@@ -162,9 +162,17 @@ export function homeStructuredData(): Record<string, unknown> {
           },
           {
             "@type": "Offer",
-            name: "Hark Pro",
-            price: String(PRO_PRICE_MONTHLY),
+            name: "Hark Team",
+            description: "Billed per team member, the owner included.",
+            price: String(TEAM_SEAT_PRICE_MONTHLY),
             priceCurrency: "USD",
+            priceSpecification: {
+              "@type": "UnitPriceSpecification",
+              price: String(TEAM_SEAT_PRICE_MONTHLY),
+              priceCurrency: "USD",
+              unitText: "seat per month",
+              billingDuration: "P1M",
+            },
             url: `${SITE_URL}/pricing`,
           },
         ],

@@ -2,7 +2,7 @@ import type { TeamDto } from "@hark/contracts";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { api } from "../lib/api";
-import { seatsFull, TEAM_NAME_MAX_CHARS, TEAM_SEAT_PRICE_MONTHLY, teamSummary } from "../lib/teams";
+import { TEAM_NAME_MAX_CHARS, TEAM_SEAT_PRICE_MONTHLY, teamSummary } from "../lib/teams";
 import {
   Badge,
   EmptyState,
@@ -45,8 +45,8 @@ export function TeamsSection({
       {teams === null && !error ? <p className="py-4 text-ink-faint">Loading teams…</p> : null}
       {teams?.length === 0 ? (
         <EmptyState title="No teams yet">
-          Create a team to share apps and set up on-call rotations. The first seat is free, then $
-          {TEAM_SEAT_PRICE_MONTHLY} per extra seat per month.
+          Create a team to share apps and set up on-call rotations. Teams use the Team plan: $
+          {TEAM_SEAT_PRICE_MONTHLY} per seat per month, every member including you.
         </EmptyState>
       ) : null}
       {teams && teams.length > 0 ? (
@@ -67,11 +67,6 @@ export function TeamsSection({
                     {teamSummary(team)}
                   </span>
                 </span>
-                {seatsFull(team) && team.plan === "team" && team.role !== "member" ? (
-                  <span className="hidden sm:inline">
-                    <Badge tone="warn">Seats full</Badge>
-                  </span>
-                ) : null}
                 <span
                   aria-hidden="true"
                   className="shrink-0 text-ink-muted transition-transform group-hover:translate-x-0.5"
@@ -126,7 +121,7 @@ function CreateTeamModal({
   return (
     <Modal
       busy={busy}
-      description="You'll be the owner. Your own seat is free."
+      description={`You'll be the owner. Start the Team plan ($${TEAM_SEAT_PRICE_MONTHLY} per seat per month, you included) to add people, share apps and page.`}
       onClose={onClose}
       onSubmit={submit}
       title="New team"

@@ -124,8 +124,6 @@ export const api = {
   removeDevice: (id: string) => request<{ ok: true }>(`/api/devices/${id}`, { method: "DELETE" }),
   getBilling: () => request<BillingDto>("/api/billing"),
   getPricingPlans: () => request<PricingPlansDto>("/api/billing/plans"),
-  startCheckout: () =>
-    request<BillingRedirectResponse>("/api/billing/checkout", { method: "POST" }),
   openBillingPortal: () =>
     request<BillingRedirectResponse>("/api/billing/portal", { method: "POST" }),
   listEvents: (limit = 50) => request<{ events: EventDto[] }>(`/api/events?limit=${limit}`),

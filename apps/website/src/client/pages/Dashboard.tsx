@@ -36,6 +36,8 @@ import {
 import { api, isMissingRoute } from "../lib/api";
 import { useSession } from "../lib/auth";
 
+const numberFormat = new Intl.NumberFormat("en-US");
+
 function curlExample(webhookUrl: string): string {
   return [
     `curl -X POST ${webhookUrl} \\`,
@@ -45,7 +47,7 @@ function curlExample(webhookUrl: string): string {
   ].join("\n");
 }
 
-function agentPrompt(webhookUrl: string, devices: DeviceDto[]): string {
+function agentPrompt(webhookUrl: string, devices: DeviceDto[], deviceRouting: boolean): string {
   const schema = {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
@@ -77,18 +79,24 @@ function agentPrompt(webhookUrl: string, devices: DeviceDto[]): string {
         maxLength: 2048,
         description: "Optional destination opened when the notification is tapped.",
       },
-      deviceIds: {
-        type: "array",
-        minItems: 1,
-        maxItems: 50,
-        uniqueItems: true,
-        items: {
-          type: "string",
-          ...(devices.length > 0 ? { enum: devices.map((device) => device.id) } : {}),
-        },
-        description:
-          "Optional Hark Pro routing targets. Omit to notify every active registered device.",
-      },
+      // Only accounts with device routing (legacy Hark Pro) may send deviceIds;
+      // everyone else gets a 402, so the schema leaves it out for them.
+      ...(deviceRouting
+        ? {
+            deviceIds: {
+              type: "array",
+              minItems: 1,
+              maxItems: 50,
+              uniqueItems: true,
+              items: {
+                type: "string",
+                ...(devices.length > 0 ? { enum: devices.map((device) => device.id) } : {}),
+              },
+              description:
+                "Optional routing targets. Omit to notify every active registered device.",
+            },
+          }
+        : {}),
     },
   };
 
@@ -106,8 +114,12 @@ function agentPrompt(webhookUrl: string, devices: DeviceDto[]): string {
     curlExample(webhookUrl),
     "",
     "Use body for the notification message. title, imageUrl, and url are optional per-request overrides of the service defaults.",
-    "Omit deviceIds to deliver to all devices. Include one or more IDs to route only to those devices.",
-    ...(devices.length > 0
+    ...(deviceRouting
+      ? [
+          "Omit deviceIds to deliver to all devices. Include one or more IDs to route only to those devices.",
+        ]
+      : ["Every request is delivered to the account's active iPhone."]),
+    ...(deviceRouting && devices.length > 0
       ? [
           "",
           "Registered devices:",
@@ -131,10 +143,6 @@ export function Dashboard() {
   const [teams, setTeams] = useState<TeamDto[] | "unsupported" | null>(null);
   const [teamsError, setTeamsError] = useState<string | null>(null);
   const [billing, setBilling] = useState<BillingDto | null>(null);
-  const [billingActivating, setBillingActivating] = useState(() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get("billing") === "success" && !params.get("team");
-  });
   const [planOpen, setPlanOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<ServiceDto | null>(null);
@@ -191,7 +199,7 @@ export function Dashboard() {
   }, []);
 
   // Team checkout returns here with `?team=<id>&billing=success`; the team page
-  // shows that activation instead of the personal Pro one.
+  // shows the activation.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const teamId = params.get("team");
@@ -217,37 +225,6 @@ export function Dashboard() {
     return () => window.clearInterval(interval);
   }, [session, refreshActivity]);
 
-  useEffect(() => {
-    if (!session || !billingActivating) return;
-    let cancelled = false;
-    let attempts = 0;
-    let timeout: number | undefined;
-
-    const poll = async () => {
-      attempts += 1;
-      try {
-        const next = await api.getBilling();
-        if (cancelled) return;
-        setBilling(next);
-        if (next.plan === "pro") {
-          setBillingActivating(false);
-          window.history.replaceState(null, "", "/dashboard");
-          return;
-        }
-      } catch {
-        // Autumn can take a moment to receive Stripe's checkout webhook.
-      }
-      if (!cancelled && attempts < 8) timeout = window.setTimeout(() => void poll(), 2_000);
-      else if (!cancelled) setBillingActivating(false);
-    };
-
-    void poll();
-    return () => {
-      cancelled = true;
-      if (timeout !== undefined) window.clearTimeout(timeout);
-    };
-  }, [session, billingActivating]);
-
   if (isPending || !session) {
     return (
       <div className="flex min-h-dvh flex-col">
@@ -272,14 +249,11 @@ export function Dashboard() {
   return (
     <div className="flex min-h-dvh flex-col">
       <DashboardHeader>
-        <button
-          type="button"
-          disabled={billing === null}
-          onClick={() => setPlanOpen(true)}
-          className={primaryButtonSmall}
-        >
-          {billingActivating ? "Activating…" : billing?.plan === "pro" ? "Pro" : "Upgrade"}
-        </button>
+        {billing?.plan === "pro" ? (
+          <button type="button" onClick={() => setPlanOpen(true)} className={primaryButtonSmall}>
+            Pro
+          </button>
+        ) : null}
       </DashboardHeader>
 
       <main className={`${PAGE_COLUMN} flex-1 pt-6 pb-16`}>
@@ -318,6 +292,7 @@ export function Dashboard() {
 
         {reveal ? (
           <WebhookReveal
+            deviceRouting={billing?.features.deviceRouting ?? false}
             devices={devices?.filter((device) => device.active) ?? []}
             reveal={reveal}
             onDismiss={() => setReveal(null)}
@@ -346,12 +321,8 @@ export function Dashboard() {
           />
         ) : null}
 
-        {planOpen ? (
-          <PlanModal
-            activating={billingActivating}
-            billing={billing}
-            onClose={() => setPlanOpen(false)}
-          />
+        {planOpen && billing ? (
+          <LegacyProModal billing={billing} onClose={() => setPlanOpen(false)} />
         ) : null}
 
         <ServiceList
@@ -400,10 +371,12 @@ export function Dashboard() {
 }
 
 function WebhookReveal({
+  deviceRouting,
   devices,
   reveal,
   onDismiss,
 }: {
+  deviceRouting: boolean;
   devices: DeviceDto[];
   reveal: ServiceCreatedResponse & { kind: "created" | "rotated" };
   onDismiss: () => void;
@@ -418,7 +391,7 @@ function WebhookReveal({
 
   const copyAgentPrompt = async () => {
     try {
-      await navigator.clipboard.writeText(agentPrompt(reveal.webhookUrl, devices));
+      await navigator.clipboard.writeText(agentPrompt(reveal.webhookUrl, devices, deviceRouting));
       setAgentPromptCopied(true);
     } catch {
       // Clipboard access can be unavailable outside a secure context.
@@ -460,15 +433,8 @@ function WebhookReveal({
   );
 }
 
-function PlanModal({
-  billing,
-  activating,
-  onClose,
-}: {
-  billing: BillingDto | null;
-  activating: boolean;
-  onClose: () => void;
-}) {
+/** Hark Pro is no longer sold; existing subscribers keep it and its billing portal. */
+function LegacyProModal({ billing, onClose }: { billing: BillingDto; onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [closing, setClosing] = useState(false);
@@ -492,41 +458,52 @@ function PlanModal({
     };
   }, [close]);
 
-  const redirectToBilling = async (kind: "checkout" | "portal") => {
+  const openPortal = async () => {
     setBusy(true);
     setError(null);
     try {
-      const response =
-        kind === "checkout" ? await api.startCheckout() : await api.openBillingPortal();
-      window.location.assign(response.url);
+      window.location.assign((await api.openBillingPortal()).url);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not open billing");
       setBusy(false);
     }
   };
 
+  const { limits } = billing;
+  const rows = [
+    limits.devices === null
+      ? "Unlimited active iPhones"
+      : `${limits.devices} active iPhone${limits.devices === 1 ? "" : "s"}`,
+    ...(billing.features.deviceRouting ? ["Route notifications to specific devices"] : []),
+    limits.notificationsPerMonth === null
+      ? "Unlimited notifications"
+      : `${numberFormat.format(limits.notificationsPerMonth)} notifications per month`,
+    `${numberFormat.format(limits.servicePerMinute)} requests per minute per service`,
+    `${numberFormat.format(limits.accountPerMinute)} requests per minute per account`,
+  ];
+
   return (
     <div className={`hark-modal-backdrop ${closing ? "is-closing" : ""}`}>
       <button
-        aria-label="Close plans dialog"
+        aria-label="Close plan dialog"
         className="hark-modal-dismiss"
         disabled={busy}
         onClick={close}
         type="button"
       />
       <section
-        aria-labelledby="plans-title"
+        aria-labelledby="plan-title"
         aria-modal="true"
-        className="hark-modal-panel hark-plan-panel hark-glass hark-glass-strong"
+        className="hark-modal-panel hark-glass hark-glass-strong"
         role="dialog"
       >
         <div className="flex items-start justify-between gap-6">
           <div>
-            <h2 id="plans-title" className="text-[22px] leading-[1.2] font-medium text-white">
-              Choose how far Hark can reach.
+            <h2 id="plan-title" className="text-[22px] leading-[1.2] font-medium text-white">
+              You're on Hark Pro (legacy)
             </h2>
             <p className="mt-1.5 text-[15px] text-ink-muted">
-              Start free, then upgrade when you need more devices or volume.
+              Hark Pro is no longer sold. Your plan keeps working as long as you stay subscribed.
             </p>
           </div>
           <button
@@ -540,123 +517,36 @@ function PlanModal({
           </button>
         </div>
 
-        <div className="mt-6 grid gap-3 sm:grid-cols-2">
-          <PlanTier
-            current={billing?.plan === "free"}
-            description="Everything a personal webhook setup needs."
-            features={[
-              "1 active iPhone",
-              "10,000 notifications per month",
-              "60 requests per minute per service",
-              "300 requests per minute per account",
-            ]}
-            name="Free"
-            price="$0"
-          />
-          <PlanTier
-            current={billing?.plan === "pro"}
-            description="For more devices and busier automations."
-            featured
-            features={[
-              "Unlimited active iPhones",
-              "Route notifications to specific devices",
-              "100,000 notifications per month",
-              "300 requests per minute per service",
-              "1,500 requests per minute per account",
-            ]}
-            name="Pro"
-            price="$8"
-            priceSuffix="/ month"
-          />
-        </div>
+        <ul className="mt-5 space-y-2.5 rounded-2xl border border-line bg-panel p-4">
+          {rows.map((row) => (
+            <li className="flex gap-2 text-sm leading-snug text-ink" key={row}>
+              <span
+                className="mt-[7px] size-1.5 shrink-0 rounded-full bg-mint"
+                aria-hidden="true"
+              />
+              <span>{row}</span>
+            </li>
+          ))}
+        </ul>
 
-        {activating ? (
-          <p
-            className="mt-4 rounded-2xl bg-white/12 px-4 py-3 text-[15px] text-white"
-            role="status"
-          >
-            Payment received. Activating your Pro entitlements…
-          </p>
-        ) : null}
         {error ? (
           <p className="mt-3 text-sm text-danger" role="alert">
             {error}
           </p>
         ) : null}
 
-        <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-ink-faint">Cancel anytime.</p>
+        <div className="mt-5 flex justify-end">
           <button
             type="button"
-            disabled={busy || billing === null || !billing.configured || activating}
-            onClick={() => void redirectToBilling(billing?.plan === "pro" ? "portal" : "checkout")}
+            disabled={busy || !billing.configured}
+            onClick={() => void openPortal()}
             className={primaryButton}
           >
-            {busy
-              ? "Opening…"
-              : activating
-                ? "Activating…"
-                : billing?.configured === false
-                  ? "Billing unavailable"
-                  : billing?.plan === "pro"
-                    ? "Manage billing"
-                    : "Upgrade to Pro · $8/month"}
+            {busy ? "Opening…" : billing.configured ? "Manage billing" : "Billing unavailable"}
           </button>
         </div>
       </section>
     </div>
-  );
-}
-
-function PlanTier({
-  name,
-  price,
-  priceSuffix,
-  description,
-  features,
-  current,
-  featured,
-}: {
-  name: string;
-  price: string;
-  priceSuffix?: string;
-  description: string;
-  features: string[];
-  current: boolean;
-  featured?: boolean;
-}) {
-  return (
-    <article
-      className={`rounded-2xl border p-4 ${
-        featured ? "border-white/45 bg-white/10" : "border-line bg-panel"
-      }`}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-[15px] font-medium text-white">{name}</h3>
-          <p className="mt-1 text-[26px] leading-tight font-medium tracking-[-0.015em] text-white tabular-nums">
-            {price}
-            {priceSuffix ? (
-              <span className="ml-1 text-sm font-normal text-ink-faint">{priceSuffix}</span>
-            ) : null}
-          </p>
-        </div>
-        {current ? (
-          <span className="rounded-full bg-white px-2.5 py-0.5 text-[13px] font-medium text-green">
-            Current
-          </span>
-        ) : null}
-      </div>
-      <p className="mt-2 text-sm leading-relaxed text-ink-muted">{description}</p>
-      <ul className="mt-4 space-y-2.5">
-        {features.map((feature) => (
-          <li className="flex gap-2 text-sm leading-snug text-ink" key={feature}>
-            <span className="mt-[7px] size-1.5 shrink-0 rounded-full bg-mint" aria-hidden="true" />
-            <span>{feature}</span>
-          </li>
-        ))}
-      </ul>
-    </article>
   );
 }
 
@@ -704,8 +594,14 @@ function Devices({
           Devices
         </h2>
         <p className="mt-1.5 text-ink-muted">
-          Omit <InlineCode>deviceIds</InlineCode> to notify all active devices. Pro can route a
-          webhook to specific IDs.
+          {billing?.features.deviceRouting ? (
+            <>
+              Omit <InlineCode>deviceIds</InlineCode> to notify all active devices, or pass IDs to
+              route a webhook to specific ones.
+            </>
+          ) : (
+            "Webhooks, prompts and Live Activities go to your active iPhone."
+          )}
         </p>
       </div>
       {devices === null ? <p className="py-4 text-ink-faint">Loading devices…</p> : null}
@@ -753,7 +649,8 @@ function Devices({
       ) : null}
       {billing?.plan === "free" && activeDevices.length >= 1 ? (
         <p className="mt-3 text-sm text-ink-faint">
-          Free includes one active iPhone. Upgrade to Pro before registering another.
+          Free includes one active iPhone. Remove this one before signing in on another. Joining a
+          team doesn't change this limit.
         </p>
       ) : null}
       {error ? (
