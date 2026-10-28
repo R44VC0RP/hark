@@ -17,6 +17,7 @@ import {
   type LiveActivitySymbol,
   liveActivityStyleSchema,
 } from "@hark/contracts";
+import * as Notifications from "expo-notifications";
 import { Redirect, useLocalSearchParams } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import type { LiveActivity } from "expo-widgets";
@@ -73,6 +74,9 @@ function Lab() {
     if (!styleParam.success) return;
     (async () => {
       try {
+        // Delivered notifications stack under the activity on the Lock Screen
+        // and shift it out of capture-la.sh's fixed crop.
+        await Notifications.dismissAllNotificationsAsync();
         const existing = HarkAgentActivity.getInstances();
         const isInteractive =
           styleParam.data === "approval" ||
