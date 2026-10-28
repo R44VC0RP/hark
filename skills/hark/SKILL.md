@@ -5,7 +5,7 @@ license: PolyForm Noncommercial 1.0.0 (https://polyformproject.org/licenses/nonc
 compatibility: Requires Node.js 22+ and internet access. Workflow examples may also use jq, curl, or gh.
 metadata:
   author: R44VC0RP
-  version: "1.7.0"
+  version: "1.8.0"
 ---
 
 # Hark
@@ -286,11 +286,14 @@ internal tool "on my phone", "in Hark", or for their team.
    Cloudflare Workers/Pages, Vercel, Netlify, Fly, their own server). Ask once if none is evident.
    The app must be served over `https:`; plain `http://localhost` registers only for development and
    is reachable only from a simulator on the same Mac, not a real phone.
-3. **Build it phone-first.** One page that works at 390 px wide, respects safe areas
-   (`<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">` plus
-   `env(safe-area-inset-*)` padding), and sets `<meta name="theme-color">` and a body background;
-   Hark tints its chrome from them. No sign-in screen. Avoid two-finger hold gestures: a still
-   two-finger hold opens the Hark menu.
+3. **Build it phone-first, edge to edge.** Read [web-apps.md](web-apps.md) before writing the
+   page: Hark has no browser chrome, so the app brings its own back button and handles the
+   screen edges. In short: one page that works at 390 px wide, with
+   `<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">` and
+   `env(safe-area-inset-*)` padding (never forced to `0`), a hex `<meta name="theme-color">`
+   matching the top of the page (Hark picks the status bar text from it), a 44 pt back button in
+   its own header whenever there is history, `100dvh` layouts, inputs at 16 px or larger, and no
+   sign-in screen. Avoid two-finger hold gestures: a still two-finger hold opens the Hark menu.
 4. **Identify the viewer** (skip only for apps with nothing private and no per-user data). The
    page asks Hark for a pass and sends it to the app's own server, which verifies it once and starts
    its own session. Never trust a pass in the browser alone; anyone can load the public URL.
@@ -319,6 +322,8 @@ Inside Hark, the page has `window.hark` (only on the registered origin, only in 
   error such as `consent_required` when the viewer has not approved sign-in or no pass can be
   issued; show a retry button rather than looping.
 - `window.hark.close()` returns to the Hark home screen.
+- `window.hark.edgeToEdge` is `true` while Hark draws the page under the status bar and home
+  indicator (pages with `viewport-fit=cover`, Hark 1.3 build 30 and later).
 - When `window.hark` is missing, the page is open in a normal browser: show a short "Open this in
   the Hark app" message instead of a login form, unless the app has its own fallback.
 
