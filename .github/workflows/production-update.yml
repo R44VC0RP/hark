@@ -134,8 +134,11 @@ jobs:
             https://hark.fyi/api/health >/dev/null
           curl --fail --show-error --silent https://hark.fyi/ \
             | grep --fixed-strings 'https://hark.fyi/ogimage.png' >/dev/null
+          # Free for personal use, $5 per team seat.
           curl --fail --show-error --silent https://hark.fyi/pricing \
-            | grep --fixed-strings '100,000 notifications per month' >/dev/null
+            | grep --fixed-strings '10,000 notifications per month' >/dev/null
+          curl --fail --show-error --silent https://hark.fyi/pricing \
+            | grep --fixed-strings 'per seat per month' >/dev/null
           curl --fail --show-error --silent https://hark.fyi/robots.txt \
             | grep --fixed-strings 'Sitemap: https://hark.fyi/sitemap.xml' >/dev/null
           curl --fail --show-error --silent https://hark.fyi/sitemap.xml \
