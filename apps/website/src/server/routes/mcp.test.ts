@@ -253,6 +253,16 @@ describe("earlier domains", () => {
     ).not.toBe(301);
     expect((await app.request("http://localhost:5173/pricing")).status).not.toBe(301);
   });
+
+  it("start the app's OAuth sign-in on APP_URL, where the provider calls back", async () => {
+    const start = await app.request(
+      "https://hark.ryan.ceo/api/auth/expo-authorization-proxy?authorizationURL=x&oauthState=y",
+    );
+    expect(start.status).toBe(302);
+    expect(start.headers.get("location")).toBe(
+      "http://localhost:5173/api/auth/expo-authorization-proxy?authorizationURL=x&oauthState=y",
+    );
+  });
 });
 
 describe("MCP tool catalog", () => {

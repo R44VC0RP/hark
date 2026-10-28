@@ -113,7 +113,23 @@ app.use(
  * move to APP_URL with the same path, so old links land on the new domain.
  */
 const LEGACY_PASSTHROUGH = ["/api/", "/hooks/", "/mcp", "/.well-known/", "/oss"];
+/**
+ * Browser steps of OAuth sign-in that set the state cookie. On a legacy host
+ * the cookie would land on that host while the provider calls back to
+ * APP_URL, so the sign-in fails with a state mismatch (the App Store app
+ * before 1.3 starts Google sign-in on hark.ryan.ceo). These move to APP_URL
+ * first, with a temporary redirect, so the cookie and callback share a host.
+ */
+const LEGACY_OAUTH_BROWSER_STEPS = ["/api/auth/expo-authorization-proxy"];
 app.use("*", async (c, next) => {
+  if (
+    (c.req.method === "GET" || c.req.method === "HEAD") &&
+    isLegacyRequest(c.req.url) &&
+    LEGACY_OAUTH_BROWSER_STEPS.includes(c.req.path)
+  ) {
+    const url = new URL(c.req.url);
+    return c.redirect(`${canonicalOrigin()}${url.pathname}${url.search}`, 302);
+  }
   if (
     (c.req.method === "GET" || c.req.method === "HEAD") &&
     isLegacyRequest(c.req.url) &&
