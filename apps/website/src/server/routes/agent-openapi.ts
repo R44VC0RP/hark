@@ -39,6 +39,7 @@ import {
 } from "@hark/contracts";
 import { Hono } from "hono";
 import { z } from "zod";
+import { canonicalOrigin } from "../lib/origins";
 
 /**
  * Hand-maintained OpenAPI 3.1 description of every `/api/agent/**` route.
@@ -1152,6 +1153,7 @@ export const agentOpenApiDocument = {
     description:
       "Scoped bearer-token API for agents and scripts (`Authorization: Bearer hark_…`). Docs for agents: https://hark.fyi/agents.md. Hark is free for personal use; team features need the team's Team plan ($5 per seat per month) and otherwise return 402. Every route is owner-scoped: resources of other accounts return 404. Human-only actions are deliberately absent: answering prompts, approving app sign-in or issuing Hark passes, changing app sharing, creating API tokens, registering devices, starting checkout or the billing portal, accepting team invites, and acknowledging or escalating on-call pages.",
   },
+  /** Relative here; the route below serves it absolute on the canonical origin. */
   servers: [{ url: AGENT_API_PREFIX }],
   components: {
     securitySchemes: {
@@ -1167,8 +1169,16 @@ export const agentOpenApiDocument = {
   "x-hark-scopes": [...API_TOKEN_SCOPES],
 };
 
-/** Public, unauthenticated discovery document. Mount before the agent routes. */
+/**
+ * Public, unauthenticated discovery document. Mount before the agent routes.
+ * The server URL is absolute so clients that load the spec from elsewhere (or
+ * from a legacy host) call the canonical API, and any origin may read it.
+ */
 export const agentOpenApiRoute = new Hono().get("/openapi.json", (c) => {
   c.header("Cache-Control", "public, max-age=300");
-  return c.json(agentOpenApiDocument);
+  c.header("Access-Control-Allow-Origin", "*");
+  return c.json({
+    ...agentOpenApiDocument,
+    servers: [{ url: `${canonicalOrigin()}${AGENT_API_PREFIX}` }],
+  });
 });

@@ -274,11 +274,14 @@ describe("agent OpenAPI document", () => {
   it("is public and documents every registered agent route", async () => {
     const response = await call("GET", "/api/agent/openapi.json", null);
     expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
     const document = (await response.json()) as {
       openapi: string;
+      servers: { url: string }[];
       paths: Record<string, Record<string, { "x-hark-scopes": string[] }>>;
     };
     expect(document.openapi).toBe("3.1.0");
+    expect(document.servers[0]?.url).toMatch(/^https?:\/\/[^/]+\/api\/agent$/);
 
     const prefix = openApi.AGENT_API_PREFIX;
     const registered = new Set(
