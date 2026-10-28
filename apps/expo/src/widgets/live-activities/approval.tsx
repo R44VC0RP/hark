@@ -1,5 +1,6 @@
 import { Button, HStack, Image, Spacer, Text, VStack } from "@expo/ui/swift-ui";
 import {
+  accessibilityLabel,
   activityBackgroundTint,
   buttonBorderShape,
   buttonStyle,
@@ -228,29 +229,34 @@ export function ApprovalLiveActivityStyle(
     </VStack>
   ) : null;
 
+  // The expanded island's top row sits beside the camera and its leading side
+  // is capped near 100pt, too narrow for a status such as "Approval needed".
+  // It holds only the icon; the prompt below is the headline, and the status
+  // and title stay on the Lock Screen.
   const expandedLeading = (
-    <HStack spacing={7} modifiers={[padding({ leading: 4 })]}>
-      <Image systemName="sparkles" color={accent} size={16} />
-      <Text
-        modifiers={[
-          font({ textStyle: "headline", weight: "semibold" }),
-          foregroundStyle(primary),
-          lineLimit(1),
-        ]}
-      >
-        {status}
-      </Text>
-    </HStack>
+    <Image
+      systemName="sparkles"
+      color={accent}
+      size={17}
+      modifiers={[padding({ leading: 7, top: 2 }), accessibilityLabel(status)]}
+    />
   );
 
   const expandedBottom = interaction ? (
     <VStack
       alignment="leading"
       spacing={8}
-      modifiers={[padding({ leading: 4, trailing: 4, bottom: 4 })]}
+      // 25pt from the island edge on the sides and bottom keeps the capsule
+      // buttons (22.9pt radius) concentric with the island's 48pt corners.
+      modifiers={[padding({ leading: 7, trailing: 7, bottom: 7 })]}
     >
       <Text
-        modifiers={[font({ textStyle: "subheadline" }), foregroundStyle(secondary), lineLimit(2)]}
+        modifiers={[
+          font({ textStyle: "subheadline", weight: "medium" }),
+          foregroundStyle(primary),
+          lineLimit(2),
+          frame({ maxWidth: Infinity, alignment: "leading" }),
+        ]}
       >
         {interaction.state === "pending" ? interaction.prompt : (detail ?? status)}
       </Text>
