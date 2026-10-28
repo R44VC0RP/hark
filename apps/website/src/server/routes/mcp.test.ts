@@ -263,6 +263,57 @@ describe("earlier domains", () => {
       "http://localhost:5173/api/auth/expo-authorization-proxy?authorizationURL=x&oauthState=y",
     );
   });
+
+  it("redirect the OAuth proxy to APP_URL before checking how it was opened", async () => {
+    const start = await app.request(
+      "https://hark.ryan.ceo/api/auth/expo-authorization-proxy?authorizationURL=x&oauthState=y",
+      { headers: { "sec-fetch-mode": "no-cors", "sec-fetch-dest": "image" } },
+    );
+    expect(start.status).toBe(302);
+  });
+});
+
+describe("Expo authorization proxy", () => {
+  const proxy = `/api/auth/expo-authorization-proxy?authorizationURL=${encodeURIComponent(
+    "https://accounts.google.com/o/oauth2/v2/auth?client_id=x",
+  )}&oauthState=y`;
+  const open = (headers: Record<string, string> = {}) => app.request(proxy, { headers });
+
+  it("passes the app's own sign-in navigation through to Better Auth", async () => {
+    expect((await open()).status).toBe(200);
+    const navigation = await open({
+      "sec-fetch-site": "none",
+      "sec-fetch-mode": "navigate",
+      "sec-fetch-dest": "document",
+    });
+    expect(navigation.status).toBe(200);
+  });
+
+  it("rejects targets other than the sign-in providers", async () => {
+    const response = await app.request(
+      `/api/auth/expo-authorization-proxy?authorizationURL=${encodeURIComponent(
+        "https://evil.example/auth",
+      )}`,
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects cross-site loads and anything that is not a top-level page load", async () => {
+    for (const headers of [
+      {
+        "sec-fetch-site": "cross-site",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-dest": "document",
+      },
+      { "sec-fetch-site": "same-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" },
+      { "sec-fetch-site": "none", "sec-fetch-mode": "no-cors", "sec-fetch-dest": "image" },
+      { "sec-fetch-site": "none", "sec-fetch-mode": "navigate", "sec-fetch-dest": "iframe" },
+      { "sec-fetch-mode": "cors" },
+      { "sec-fetch-dest": "script" },
+    ]) {
+      expect((await open(headers)).status).toBe(403);
+    }
+  });
 });
 
 describe("MCP tool catalog", () => {

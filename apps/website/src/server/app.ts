@@ -197,8 +197,17 @@ app.on(["GET", "POST"], "/api/auth/expo-authorization-proxy", async (c, next) =>
   }
   // The app opens this in a fresh auth session (Sec-Fetch-Site: none). A page on
   // another site linking here could still plant its own state cookie.
+  // It is also a top-level page load there, never a subresource, fetch or
+  // frame another page could trigger. Older browsers omit these headers.
   const site = c.req.header("sec-fetch-site")?.toLowerCase();
-  if (site === "cross-site" || site === "same-site") {
+  const mode = c.req.header("sec-fetch-mode")?.toLowerCase();
+  const dest = c.req.header("sec-fetch-dest")?.toLowerCase();
+  if (
+    site === "cross-site" ||
+    site === "same-site" ||
+    (mode !== undefined && mode !== "navigate") ||
+    (dest !== undefined && dest !== "document")
+  ) {
     return c.json({ error: "Forbidden" }, 403);
   }
   await next();
