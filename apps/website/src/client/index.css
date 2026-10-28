@@ -764,6 +764,12 @@ address {
 :root:has(.hark-landing) {
   overflow-y: auto;
   scrollbar-gutter: auto;
+  /* One screen, nothing to scroll to: no rubber-band bounce. */
+  overscroll-behavior: none;
+}
+
+:root:has(.hark-landing) body {
+  overscroll-behavior: none;
 }
 
 /* Phones: headline, line, phone, slides, download. Wide screens put the phone
