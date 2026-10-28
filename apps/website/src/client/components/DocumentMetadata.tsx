@@ -6,7 +6,10 @@ import {
   PAGE_SEO,
   type PageSeo,
   type SeoPage,
+  SOCIAL_IMAGE_ALT,
+  SOCIAL_IMAGE_HEIGHT,
   SOCIAL_IMAGE_URL,
+  SOCIAL_IMAGE_WIDTH,
   seoPageForPath,
   structuredDataForPage,
 } from "../../shared/seo";
@@ -73,14 +76,14 @@ export function DocumentMetadata() {
       meta("og:url", canonical, true),
       meta("og:image", SOCIAL_IMAGE_URL, true),
       meta("og:image:type", "image/png", true),
-      meta("og:image:width", "1920", true),
-      meta("og:image:height", "1080", true),
-      meta("og:image:alt", "Hark iOS alerts, notifications, and Live Activities", true),
+      meta("og:image:width", String(SOCIAL_IMAGE_WIDTH), true),
+      meta("og:image:height", String(SOCIAL_IMAGE_HEIGHT), true),
+      meta("og:image:alt", SOCIAL_IMAGE_ALT, true),
       meta("twitter:card", "summary_large_image"),
       meta("twitter:title", seo.title),
       meta("twitter:description", seo.description),
       meta("twitter:image", SOCIAL_IMAGE_URL),
-      meta("twitter:image:alt", "Hark iOS alerts, notifications, and Live Activities"),
+      meta("twitter:image:alt", SOCIAL_IMAGE_ALT),
     );
 
     if (seo.type === "article" && seo.publishedTime) {

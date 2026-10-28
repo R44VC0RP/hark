@@ -12,7 +12,10 @@ import {
   PRIVATE_SEO_PAGES,
   PUBLIC_SEO_PAGES,
   type SeoPage,
+  SOCIAL_IMAGE_ALT,
+  SOCIAL_IMAGE_HEIGHT,
   SOCIAL_IMAGE_URL,
+  SOCIAL_IMAGE_WIDTH,
   structuredDataForPage,
 } from "../src/shared/seo";
 
@@ -58,14 +61,14 @@ function seoHead(page: SeoPage): string {
     `    <meta data-seo="true" property="og:url" content="${canonical}" />`,
     `    <meta data-seo="true" property="og:image" content="${SOCIAL_IMAGE_URL}" />`,
     '    <meta data-seo="true" property="og:image:type" content="image/png" />',
-    '    <meta data-seo="true" property="og:image:width" content="1920" />',
-    '    <meta data-seo="true" property="og:image:height" content="1080" />',
-    '    <meta data-seo="true" property="og:image:alt" content="Hark iOS alerts, notifications, and Live Activities" />',
+    `    <meta data-seo="true" property="og:image:width" content="${SOCIAL_IMAGE_WIDTH}" />`,
+    `    <meta data-seo="true" property="og:image:height" content="${SOCIAL_IMAGE_HEIGHT}" />`,
+    `    <meta data-seo="true" property="og:image:alt" content="${escapeAttribute(SOCIAL_IMAGE_ALT)}" />`,
     '    <meta data-seo="true" name="twitter:card" content="summary_large_image" />',
     `    <meta data-seo="true" name="twitter:title" content="${title}" />`,
     `    <meta data-seo="true" name="twitter:description" content="${description}" />`,
     `    <meta data-seo="true" name="twitter:image" content="${SOCIAL_IMAGE_URL}" />`,
-    '    <meta data-seo="true" name="twitter:image:alt" content="Hark iOS alerts, notifications, and Live Activities" />',
+    `    <meta data-seo="true" name="twitter:image:alt" content="${escapeAttribute(SOCIAL_IMAGE_ALT)}" />`,
   ];
 
   if (seo.type === "article" && seo.publishedTime) {

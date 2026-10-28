@@ -7,7 +7,9 @@ import {
   homeStructuredData,
   PAGE_SEO,
   PUBLIC_SEO_PAGES,
+  SOCIAL_IMAGE_HEIGHT,
   SOCIAL_IMAGE_URL,
+  SOCIAL_IMAGE_WIDTH,
   seoPageForPath,
   structuredDataForPage,
 } from "./seo";
@@ -69,6 +71,15 @@ describe("SEO metadata", () => {
 });
 
 describe("crawler files", () => {
+  it("ships a share image with the advertised dimensions", async () => {
+    const png = await readFile(resolve(publicDir, "ogimage.png"));
+    expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([
+      SOCIAL_IMAGE_WIDTH,
+      SOCIAL_IMAGE_HEIGHT,
+    ]);
+    expect(png.length).toBeLessThan(300 * 1024);
+  });
+
   it("publishes a sitemap containing only canonical public HTML pages", async () => {
     const sitemap = await readFile(resolve(publicDir, "sitemap.xml"), "utf8");
     const locations = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]);

@@ -2,6 +2,10 @@ import { TEAM_SEAT_PRICE_MONTHLY } from "./pricing";
 
 export const SITE_URL = "https://hark.fyi";
 export const SOCIAL_IMAGE_URL = `${SITE_URL}/ogimage.png`;
+export const SOCIAL_IMAGE_WIDTH = 1200;
+export const SOCIAL_IMAGE_HEIGHT = 630;
+export const SOCIAL_IMAGE_ALT =
+  "Hark, the everything app for developer teams: notifications, approvals, Live Activities, on-call and mini apps. hark.fyi";
 export const DEMO_POSTER_URL = `${SITE_URL}/notifications-demo-poster.jpg`;
 export const DEMO_VIDEO_URL = `${SITE_URL}/notifications-demo.mp4`;
 
