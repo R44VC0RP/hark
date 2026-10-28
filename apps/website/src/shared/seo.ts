@@ -29,9 +29,9 @@ export interface PageSeo {
 export const PAGE_SEO: Record<SeoPage, PageSeo> = {
   home: {
     path: "/",
-    title: "Hark — Webhooks to iPhone Notifications",
+    title: "Hark — The Everything App for Developer Teams",
     description:
-      "Turn webhooks from CI, coding agents, scripts, and monitors into source-branded iPhone notifications, approvals, replies, and Live Activities.",
+      "Webhook notifications, agent approvals, Live Activities, on-call paging and mini apps on your iPhone, for you and your team. Free for personal use.",
     index: true,
   },
   docs: {
