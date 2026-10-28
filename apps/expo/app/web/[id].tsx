@@ -51,6 +51,12 @@ const HINT_SHOWS = 3;
 /** Reuse a prefetched pass only while it has comfortable validity left. */
 const PASS_REUSE_MARGIN_MS = 30_000;
 
+/**
+ * Apps whose page last asked for `viewport-fit=cover`, so reopening one
+ * starts edge to edge instead of jumping once the page reports it again.
+ */
+const edgeToEdgeApps = new Set<string>();
+
 export default function WebAppScreen() {
   const params = useLocalSearchParams<{ id: string; url?: string }>();
   const id = String(params.id);
@@ -67,6 +73,10 @@ export default function WebAppScreen() {
   const [canGoBack, setCanGoBack] = useState(false);
   const [stripColor, setStripColor] = useState("#FFFFFF");
   const [reloadKey, setReloadKey] = useState(0);
+  // Safari's rule: a page that sets viewport-fit=cover draws under the status
+  // bar and home indicator and handles the edges with env(safe-area-inset-*).
+  // Other pages keep Hark's status strip and the system's insets.
+  const [edgeToEdge, setEdgeToEdge] = useState(() => edgeToEdgeApps.has(id));
 
   const close = useCallback(() => {
     if (router.canGoBack()) router.back();
@@ -180,6 +190,13 @@ export default function WebAppScreen() {
       isAppOrigin(event.nativeEvent.url, app.origin) &&
       topUrl !== null &&
       isAppOrigin(topUrl, app.origin);
+    if (message.type === "viewport") {
+      if (!fromAppOrigin) return;
+      if (message.cover) edgeToEdgeApps.add(id);
+      else edgeToEdgeApps.delete(id);
+      setEdgeToEdge(message.cover);
+      return;
+    }
     if (message.type === "theme") {
       if (!fromAppOrigin) return;
       const color = pickStripColor(message.color, message.background);
@@ -348,24 +365,45 @@ export default function WebAppScreen() {
   return (
     <View style={[styles.container, { backgroundColor: stripColor }]}>
       <StatusBar style={isDarkColor(stripColor) ? "light" : "dark"} />
-      {/*
-        iOS keeps status-bar touches for itself, so this strip mainly serves
-        VoiceOver; people open the menu with a two-finger hold on the page.
-      */}
-      <Pressable
-        accessibilityHint="Shows Hark options"
-        accessibilityLabel="Hark menu"
-        accessibilityRole="button"
-        delayLongPress={400}
-        onLongPress={showMenu}
-        onPress={showMenu}
-        style={{ height: insets.top, backgroundColor: stripColor }}
-      />
+      {edgeToEdge ? (
+        // Edge to edge, nothing native may sit on the page: the menu button is
+        // for VoiceOver only (an action on an element that takes no touches).
+        // Everyone else opens the menu with a two-finger hold on the page.
+        <View
+          accessibilityActions={[{ name: "activate" }]}
+          accessibilityHint="Shows Hark options"
+          accessibilityLabel="Hark menu"
+          accessibilityRole="button"
+          accessible
+          onAccessibilityAction={(event) => {
+            if (event.nativeEvent.actionName === "activate") showMenu();
+          }}
+          pointerEvents="none"
+          style={[styles.menuOverlay, { height: insets.top }]}
+        />
+      ) : (
+        /*
+          iOS keeps status-bar touches for itself, so this strip mainly serves
+          VoiceOver; people open the menu with a two-finger hold on the page.
+        */
+        <Pressable
+          accessibilityHint="Shows Hark options"
+          accessibilityLabel="Hark menu"
+          accessibilityRole="button"
+          delayLongPress={400}
+          onLongPress={showMenu}
+          onPress={showMenu}
+          style={{ height: insets.top, backgroundColor: stripColor }}
+        />
+      )}
       <WebView
         allowsBackForwardNavigationGestures={canGoBack}
         allowsInlineMediaPlayback
         applicationNameForUserAgent="Hark"
-        contentInsetAdjustmentBehavior="automatic"
+        // Edge to edge, WebKit gets the real safe area, so the page's
+        // env(safe-area-inset-*) values are the device's, not 0.
+        automaticallyAdjustContentInsets={!edgeToEdge}
+        contentInsetAdjustmentBehavior={edgeToEdge ? "never" : "automatic"}
         injectedJavaScriptBeforeContentLoaded={bridgeScript}
         injectedJavaScriptBeforeContentLoadedForMainFrameOnly
         key={reloadKey}
@@ -542,6 +580,13 @@ const styles = StyleSheet.create({
   },
   webView: {
     flex: 1,
+  },
+  menuOverlay: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    left: 0,
+    zIndex: 1,
   },
   center: {
     flex: 1,

@@ -13,7 +13,8 @@ export type BridgeMessage =
   | { type: "getToken"; id: string }
   | { type: "close" }
   | { type: "menu" }
-  | { type: "theme"; color: string | null; background: string | null };
+  | { type: "theme"; color: string | null; background: string | null }
+  | { type: "viewport"; cover: boolean };
 
 export function originOf(url: string): string | null {
   try {
@@ -45,6 +46,8 @@ export function buildBridgeScript(origin: string): string {
   if (window.location.origin !== ORIGIN || window.hark) return;
   var pending = {};
   var sequence = 0;
+  // Whether the page asked for viewport-fit=cover; null until first read.
+  var cover = null;
   function send(message) {
     var bridge = window.ReactNativeWebView;
     if (bridge) bridge.postMessage(JSON.stringify(message));
@@ -71,6 +74,12 @@ export function buildBridgeScript(origin: string): string {
       },
       close: function () {
         send({ hark: 1, type: "close" });
+      },
+      // True while the page opted into edge to edge (viewport-fit=cover):
+      // Hark then draws it under the status bar and home indicator, and
+      // env(safe-area-inset-*) reports the real insets.
+      get edgeToEdge() {
+        return cover === true;
       },
     }),
   });
@@ -107,8 +116,28 @@ export function buildBridgeScript(origin: string): string {
     var background = document.body ? window.getComputedStyle(document.body).backgroundColor : null;
     send({ hark: 1, type: "theme", color: meta ? meta.getAttribute("content") : null, background: background });
   }
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", reportTheme);
-  else reportTheme();
+  // Safari's opt-in for drawing under the status bar and home indicator.
+  function reportViewport() {
+    var meta = document.querySelector('meta[name="viewport"]');
+    var content = meta ? meta.getAttribute("content") || "" : "";
+    var next = /(^|[,;\\s])viewport-fit\\s*=\\s*cover(?![\\w-])/i.test(content);
+    if (next === cover) return;
+    cover = next;
+    send({ hark: 1, type: "viewport", cover: next });
+  }
+  function start() {
+    reportTheme();
+    reportViewport();
+    // Pages (and frameworks) can add or edit the viewport meta later.
+    new MutationObserver(reportViewport).observe(document.documentElement, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["content", "name"],
+    });
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+  else start();
 })();
 true;`;
 }
@@ -144,6 +173,9 @@ export function parseBridgeMessage(data: string): BridgeMessage | null {
   }
   if (record.type === "close") return { type: "close" };
   if (record.type === "menu") return { type: "menu" };
+  if (record.type === "viewport" && typeof record.cover === "boolean") {
+    return { type: "viewport", cover: record.cover };
+  }
   if (record.type === "theme") {
     return {
       type: "theme",
