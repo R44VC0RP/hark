@@ -12,10 +12,12 @@ allowBuilds:
 # Only install releases that have been public for a week (minutes).
 minimumReleaseAge: 10080
 
-# Security floors for transitive dependencies (undici via expo-server-sdk, fast-uri via ajv).
+# Security floors for transitive dependencies (undici via expo-server-sdk, fast-uri via ajv,
+# zod 4 via better-auth; Expo's own zod 3 is left alone).
 overrides:
   undici: "^7.29.1"
   fast-uri: "^3.1.8"
+  "zod@^4": "^4.6.7"
 
 patchedDependencies:
   '@better-auth/core@1.6.25': patches/@better-auth__core@1.6.25.patch
