@@ -75,10 +75,10 @@ export function memberCountLabel(count: number): string {
 }
 
 export function seatsLabel(seats: TeamDto["seats"]): string {
-  if (seats.available === null) return seats.used === 1 ? "1 seat" : `${seats.used} seats`;
-  return `${seats.used} of ${seats.available} seat${seats.available === 1 ? "" : "s"}`;
+  return seats.used === 1 ? "1 seat" : `${seats.used} seats`;
 }
 
+/** No seat for another person: a team without the Team plan has 0 seats to fill. */
 export function seatsFull(seats: TeamDto["seats"]): boolean {
   return seats.available !== null && seats.used >= seats.available;
 }
@@ -279,7 +279,7 @@ export function claimedPageId(candidate: unknown): string | null {
 /** SecureStore key holding an invite code opened while signed out. */
 export const PENDING_JOIN_CODE_KEY = "hark.team.pendingJoinCode";
 
-/** Pricing copy shown when a team runs out of seats. */
+/** Where team owners start the Team plan (billing lives on the web). */
 export const TEAM_BILLING_URL = "https://hark.fyi/dashboard";
 
 type PageClaimedListener = (pageId: string) => void;

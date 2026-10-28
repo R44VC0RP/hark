@@ -59,11 +59,10 @@ describe("groupAppsByTeam", () => {
 });
 
 describe("seats", () => {
-  it("labels and detects full teams", () => {
-    expect(seatsLabel({ used: 3, available: 5, billable: 2 })).toBe("3 of 5 seats");
-    expect(seatsLabel({ used: 1, available: 1, billable: 0 })).toBe("1 of 1 seat");
-    expect(seatsLabel({ used: 7, available: null, billable: 6 })).toBe("7 seats");
-    expect(seatsFull({ used: 1, available: 1, billable: 0 })).toBe(true);
+  it("labels seats and detects teams without the Team plan", () => {
+    expect(seatsLabel({ used: 1, available: 0, billable: 0 })).toBe("1 seat");
+    expect(seatsLabel({ used: 7, available: null, billable: 7 })).toBe("7 seats");
+    expect(seatsFull({ used: 1, available: 0, billable: 0 })).toBe(true);
     expect(seatsFull({ used: 7, available: null, billable: 6 })).toBe(false);
   });
 });

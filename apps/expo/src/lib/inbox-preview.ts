@@ -251,7 +251,7 @@ export const previewTeams: TeamDto[] = [
     memberCount: 4,
     appCount: 3,
     oncallGroupCount: 1,
-    seats: { used: 4, available: 5, billable: 4 },
+    seats: { used: 4, available: null, billable: 4 },
     plan: "team",
     createdAt: new Date(now - 40 * 86_400_000).toISOString(),
   },

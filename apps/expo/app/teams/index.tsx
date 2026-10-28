@@ -76,7 +76,7 @@ export default function TeamsScreen() {
           memberCount: 1,
           appCount: 0,
           oncallGroupCount: 0,
-          seats: { used: 1, available: 1, billable: 0 },
+          seats: { used: 1, available: 0, billable: 0 },
           plan: "free",
           createdAt: new Date().toISOString(),
         };

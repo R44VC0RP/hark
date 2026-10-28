@@ -378,11 +378,7 @@ export default function TeamDetailScreen() {
           ) : null}
 
           {seatLimitHit || seatsFull(team.seats) ? (
-            <SeatLimitNotice
-              admin={admin}
-              teamName={team.name}
-              title={seatLimitHit ? undefined : "Every seat is in use"}
-            />
+            <SeatLimitNotice owner={team.role === "owner"} teamName={team.name} />
           ) : null}
 
           {groups && groups.length > 0 ? (

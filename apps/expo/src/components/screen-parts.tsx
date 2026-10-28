@@ -1,4 +1,4 @@
-import { TEAM_FREE_SEATS, TEAM_SEAT_PRICE_MONTHLY } from "@hark/contracts";
+import { TEAM_SEAT_PRICE_MONTHLY } from "@hark/contracts";
 import { useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import type { ReactNode } from "react";
@@ -151,25 +151,17 @@ export function SecondaryButton({
   );
 }
 
-/** Explains the team plan when a team has no free seat; billing lives on the web. */
-export function SeatLimitNotice({
-  teamName,
-  admin,
-  title,
-}: {
-  teamName: string;
-  admin: boolean;
-  title?: string;
-}) {
+/** Explains the Team plan when a team doesn't have it; billing lives on the web. */
+export function SeatLimitNotice({ teamName, owner }: { teamName: string; owner: boolean }) {
   return (
     <View accessibilityRole="summary" style={ui.notice}>
-      <Text style={ui.noticeTitle}>{title ?? `${teamName} is out of seats`}</Text>
+      <Text style={ui.noticeTitle}>{`${teamName} needs the Team plan`}</Text>
       <Text style={ui.muted}>
-        Teams include {TEAM_FREE_SEATS === 1 ? "one seat" : `${TEAM_FREE_SEATS} seats`} free. Each
-        extra person is ${TEAM_SEAT_PRICE_MONTHLY} a month on the team plan.{" "}
-        {admin
-          ? "Add seats from the Hark dashboard, then invite again."
-          : "Ask the team owner to add a seat from the Hark dashboard."}
+        Adding people, sharing apps and paging need the Team plan: ${TEAM_SEAT_PRICE_MONTHLY} per
+        seat per month, every member including the owner.{" "}
+        {owner
+          ? "Start it from the Hark dashboard, then invite again."
+          : "Ask the team owner to start it from the Hark dashboard."}
       </Text>
       <Pressable
         accessibilityHint="Opens hark.fyi in Safari"

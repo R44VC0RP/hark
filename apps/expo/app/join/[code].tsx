@@ -119,7 +119,7 @@ export default function JoinTeamScreen() {
             <Text style={[ui.muted, { marginTop: 12 }]}>
               Each team app still asks before signing you in, and you choose what it sees.
             </Text>
-            {seatLimit ? <SeatLimitNotice admin={false} teamName={invite.teamName} /> : null}
+            {seatLimit ? <SeatLimitNotice owner={false} teamName={invite.teamName} /> : null}
             {joinError ? (
               <Text
                 accessibilityLiveRegion="polite"
