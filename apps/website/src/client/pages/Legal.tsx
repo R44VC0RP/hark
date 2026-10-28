@@ -1,16 +1,6 @@
 import { PAGE_COLUMN, SiteFooter, SiteHeader } from "../components/SiteChrome";
 
-const updated = "October 28, 2026";
-
-const SUPPORT_EMAIL = "support@hark.fyi";
-
-function SupportLink() {
-  return (
-    <a className="hark-link" href={`mailto:${SUPPORT_EMAIL}`}>
-      {SUPPORT_EMAIL}
-    </a>
-  );
-}
+const updated = "August 9, 2026";
 
 function LegalLayout({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -45,9 +35,8 @@ export function Privacy() {
       <Section title="Overview">
         <p>
           Hark is operated by Ryan Vogel. This policy explains the information Hark processes to
-          deliver notifications, approvals, Live Activities, on-call pages, team features and
-          signed-in web apps through the website, API, CLI, MCP server and iOS app. Hark does not
-          sell personal information or use it for targeted advertising.
+          deliver webhook notifications through the website and iOS app. Hark does not sell personal
+          information or use it for targeted advertising.
         </p>
       </Section>
 
@@ -88,31 +77,8 @@ export function Privacy() {
             task content from Hark's encrypted network and account-scoped processing.
           </li>
           <li>
-            Teams you create or join: the team name, members and their roles, invite codes (stored
-            as hashes), the email address an invite was sent to, who invited whom, and when people
-            joined or left. Other members of a team can see your name, email address and profile
-            image.
-          </li>
-          <li>
-            On-call information: rotation schedules, your time zone, overrides, escalation steps,
-            pages and their content, who was notified, acknowledgements, escalations and
-            resolutions, and your paging preferences, including whether your iPhone allows Critical
-            Alerts.
-          </li>
-          <li>
-            Web apps you add or open in Hark: the app's name, address and icon, which team it
-            belongs to, and your sign-in approval. When you approve sign-in, Hark gives that site a
-            short-lived signed pass with an identifier made only for that site, your team and role
-            for team apps, and your name and email only if you choose to share them. The site
-            receives that information under its own privacy terms, not Hark's.
-          </li>
-          <li>
-            Agent clients connected through the MCP server or the CLI: the client's name, the
-            permissions you granted, and hashed access and refresh tokens.
-          </li>
-          <li>
-            Subscription status and billing identifiers when you or your team choose a paid plan.
-            Payment-card details are collected and handled by Stripe, not stored by Hark.
+            Subscription status and billing identifiers when you choose a paid plan. Payment-card
+            details are collected and handled by Stripe, not stored by Hark.
           </li>
           <li>Limited technical logs used to secure, operate, and troubleshoot the service.</li>
           <li>
@@ -131,19 +97,17 @@ export function Privacy() {
           We use this information to authenticate your account, create and secure webhook endpoints,
           deliver notifications, show delivery activity, prevent duplicate or abusive requests,
           deliver requested interactions and return your response to the authorized agent, start and
-          update Live Activities you authorize, run teams and on-call rotations, route and escalate
-          pages, sign you in to web apps you approve, bill for paid plans, provide support, and
-          maintain the reliability and security of Hark.
+          update Live Activities you authorize, provide support, and maintain the reliability and
+          security of Hark.
         </p>
       </Section>
 
       <Section title="Service providers">
         <p>
           Hark relies on Google and Apple for authentication, Expo and Apple for push delivery and
-          app distribution, Autumn and Stripe for billing, Amazon Web Services for hosting the API
-          and database, Cloudflare for DNS, encrypted connections and traffic protection, and
-          Inbound for support email. These providers process information only as needed to provide
-          their services and under their own privacy terms.
+          app distribution, Autumn and Stripe for optional web billing, and hosting infrastructure
+          for the website, API, and database. These providers process information only as needed to
+          provide their services and under their own privacy terms.
         </p>
       </Section>
 
@@ -153,8 +117,7 @@ export function Privacy() {
           notification content — including titles, bodies, summaries, projects, and read state —
           persists in your inbox and is not expired on a schedule; it is removed when your account
           is deleted. You can permanently delete your account inside the Hark app. Deletion removes
-          your services, devices, projects, notifications, activity, team memberships and web-app
-          approvals from the active database; teams you own are handed to another admin or deleted.
+          your services, devices, projects, notifications, and activity from the active database.
           For accounts using Apple, Hark first asks Apple to revoke stored authorization grants;
           deletion stops and reports an error if that revocation cannot be confirmed. Limited backup
           copies may remain temporarily until rotated.
@@ -180,7 +143,11 @@ export function Privacy() {
 
       <Section title="Contact">
         <p>
-          Questions or privacy requests can be sent to <SupportLink />.
+          Questions or privacy requests can be sent to{" "}
+          <a className="hark-link" href="mailto:ryan@mandarin3d.com">
+            ryan@mandarin3d.com
+          </a>
+          .
         </p>
       </Section>
     </LegalLayout>
@@ -199,10 +166,9 @@ export function Terms() {
 
       <Section title="The service">
         <p>
-          Hark turns webhooks and agent requests into push notifications, approvals, replies and
-          Live Activities on registered iPhones, pages on-call teams, and opens web apps you add
-          with a Hark sign-in. Features may change as the service develops, and beta or preview
-          features may be modified or removed without notice.
+          Hark provides private webhook endpoints that convert submitted data into push
+          notifications on registered devices. Features may change as the service develops, and beta
+          or preview features may be modified or removed without notice.
         </p>
       </Section>
 
@@ -212,25 +178,6 @@ export function Terms() {
           You are responsible for deciding what authority an agent receives and for reviewing
           prompts before responding. Hark does not guarantee that a push is delivered, seen, or
           answered, and callers must treat canceled, expired, denied, and missing responses safely.
-        </p>
-      </Section>
-
-      <Section title="On-call paging">
-        <p>
-          On-call paging is a convenience for engineering teams, not an emergency or life-safety
-          service. Pages can be delayed, silenced or missed because of device settings, Focus,
-          network conditions, Apple or Expo outages, or Hark itself. Do not rely on Hark as your
-          only way to reach someone when harm to people or property is at stake, and keep a backup
-          way to escalate.
-        </p>
-      </Section>
-
-      <Section title="Teams and web apps">
-        <p>
-          Team owners and admins decide who joins a team, which apps it shares and who is on call,
-          and are responsible for removing people who should no longer have access. Web apps you add
-          or open in Hark are run by their own operators; Hark only signs you in with the details
-          you approve and is not responsible for those sites or how they use that information.
         </p>
       </Section>
 
@@ -260,24 +207,21 @@ export function Terms() {
 
       <Section title="Paid plans">
         <p>
-          Hark is free for personal use within the limits shown on the pricing page. Teams need the
-          Team plan, which the team owner starts on the Hark website and which is billed through
-          Autumn and Stripe per seat: every member of the team, including the owner, is one seat at
-          the monthly price shown before checkout. The seat count follows the team's membership, and
-          charges change as people join or leave. Existing Hark Pro subscriptions continue on their
-          current terms until canceled. Subscriptions renew automatically until canceled. You can
-          manage or cancel a subscription from the web dashboard; cancellation takes effect at the
-          end of the current paid period unless stated otherwise. Fees are non-refundable except
-          where required by law. We may change future pricing with advance notice, but changes do
-          not apply retroactively to an already-paid period.
+          Hark Pro is an optional subscription purchased on the Hark website and billed in advance
+          through Autumn and Stripe. The current price and billing interval are shown before
+          checkout. Subscriptions renew automatically until canceled. You can manage or cancel a
+          subscription from the web dashboard; cancellation takes effect at the end of the current
+          paid period unless stated otherwise. Fees are non-refundable except where required by law.
+          We may change future pricing with advance notice, but changes do not apply retroactively
+          to an already-paid period.
         </p>
       </Section>
 
       <Section title="Third-party services">
         <p>
-          Hark depends on services provided by Google, Apple, Expo, Autumn, Stripe, Amazon Web
-          Services, Cloudflare and Inbound. Their availability and terms are outside Hark's control,
-          and integrations may stop working if those services change.
+          Hark depends on services provided by Google, Expo, Apple, Autumn, Stripe, and hosting
+          providers. Their availability and terms are outside Hark's control, and integrations may
+          stop working if those services change.
         </p>
       </Section>
 
@@ -300,7 +244,11 @@ export function Terms() {
 
       <Section title="Contact">
         <p>
-          Questions about these terms can be sent to <SupportLink />.
+          Questions about these terms can be sent to{" "}
+          <a className="hark-link" href="mailto:ryan@mandarin3d.com">
+            ryan@mandarin3d.com
+          </a>
+          .
         </p>
       </Section>
     </LegalLayout>
