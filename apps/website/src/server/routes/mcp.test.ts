@@ -185,6 +185,7 @@ describe("MCP discovery and authentication", () => {
       body: "{}",
     });
     expect(response.status).toBe(401);
+    expect(response.headers.get("cache-control")).toBe("no-store");
     const challenge = response.headers.get("www-authenticate") ?? "";
     expect(challenge).toContain(
       'resource_metadata="http://localhost:5173/.well-known/oauth-protected-resource/mcp"',

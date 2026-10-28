@@ -170,6 +170,8 @@ async function noStoreByDefault(c: Context, next: Next): Promise<void> {
 }
 app.use("/api/*", noStoreByDefault);
 app.use("/hooks/*", noStoreByDefault);
+// MCP answers (including 401 challenges) are per-caller too.
+app.use(MCP_PATH, noStoreByDefault);
 
 app.get("/api/health", (c) => c.json({ ok: true }));
 app.get("/oss", (c) => c.redirect("https://github.com/R44VC0RP/hark/"));
