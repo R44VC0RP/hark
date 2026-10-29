@@ -2124,3 +2124,126 @@ address {
     background: rgb(255 255 255 / 0.14);
   }
 }
+
+/* -------------------------------------------------------------------------- */
+/* Seasonal theme: Halloween (set by /theme.js, landing page only)            */
+/* -------------------------------------------------------------------------- */
+
+:root[data-theme="halloween"]:has(.hark-landing) {
+  --color-paper: #140b1f;
+  --color-green: #2a1240;
+  --color-mint: #ff8a1f;
+  --color-on-accent: #3a1356;
+  background: #140b1f;
+}
+
+:root[data-theme="halloween"]:has(.hark-landing) body {
+  background: #140b1f;
+}
+
+/* The dither canvas is drawn in Hark green; shift it to midnight purple. */
+:root[data-theme="halloween"] .hark-landing ~ .hark-dither,
+:root[data-theme="halloween"]:has(.hark-landing) .hark-dither {
+  filter: hue-rotate(118deg) saturate(1.25) brightness(0.62);
+}
+
+:root[data-theme="halloween"] .hark-landing .hark-focus-phrases {
+  text-shadow: 0 0 24px rgb(255 120 0 / 0.45);
+}
+
+:root[data-theme="halloween"] .hark-landing .hark-focus-tab-track i {
+  background: #ff8a1f;
+}
+
+/* The phone: night sky, an orange haze and a moon. */
+:root[data-theme="halloween"] .hark-landing .hark-wallpaper {
+  background:
+    radial-gradient(42% 22% at 74% 15%, rgb(255 214 140 / 0.5), transparent 60%),
+    radial-gradient(70% 40% at 10% 90%, rgb(255 110 20 / 0.35), transparent 65%),
+    linear-gradient(170deg, #2c1747 0%, #170b28 55%, #0b0614 100%);
+}
+
+:root[data-theme="halloween"] .hark-landing .hark-lock::before {
+  position: absolute;
+  top: 300px;
+  right: 52px;
+  z-index: 1;
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #fff4d6, #f3cf86 60%, #d9a74e);
+  box-shadow: 0 0 40px 12px rgb(255 214 140 / 0.35);
+  content: "";
+}
+
+/* A cropped phone (small screens) shows notifications under the clock: keep
+   the moon clear of them, up beside the clock. */
+:root[data-theme="halloween"] .hark-landing .hark-phone.is-cropped .hark-lock::before {
+  top: 150px;
+  right: 22px;
+  width: 44px;
+  height: 44px;
+}
+
+:root[data-theme="halloween"] .hark-landing header > a:first-child::after {
+  margin-left: 4px;
+  content: "🎃";
+}
+
+.hark-bats {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  display: none;
+  overflow: hidden;
+  color: #05020a;
+  pointer-events: none;
+}
+
+.hark-bat {
+  position: absolute;
+  left: 0;
+  width: 64px;
+  filter: drop-shadow(0 0 6px rgb(255 140 40 / 0.35));
+  opacity: 0.9;
+}
+
+.hark-bat:nth-child(1) {
+  top: 14%;
+  animation-delay: -3s;
+}
+
+.hark-bat:nth-child(2) {
+  top: 24%;
+  width: 50px;
+  animation-delay: -8s;
+}
+
+.hark-bat:nth-child(3) {
+  top: 8%;
+  width: 36px;
+  animation-delay: -11s;
+}
+
+@keyframes hark-bat-fly {
+  from {
+    transform: translate(-80px, 0);
+  }
+  50% {
+    transform: translate(55vw, -30px);
+  }
+  to {
+    transform: translate(110vw, 10px);
+  }
+}
+
+/* Bats only fly for visitors who allow motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .hark-bats {
+    display: block;
+  }
+
+  .hark-bat {
+    animation: hark-bat-fly 14s linear infinite;
+  }
+}

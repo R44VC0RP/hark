@@ -1,4 +1,5 @@
 import { Link } from "react-router";
+import { HalloweenBats } from "../components/landing/Bats";
 import { Focus } from "../components/landing/Focus";
 import { IOS_DOWNLOAD_URL, SiteHeader } from "../components/SiteChrome";
 import { primaryButton, textLink } from "../components/ui";
@@ -78,6 +79,7 @@ function Hint() {
 export function Landing() {
   return (
     <div className="hark-landing flex h-dvh flex-col overflow-hidden">
+      <HalloweenBats />
       <SiteHeader />
       <main className={`${LANDING_COLUMN} flex min-h-0 flex-1 flex-col`}>
         <Focus cta={<Cta />} hint={<Hint />} />

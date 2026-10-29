@@ -1,4 +1,5 @@
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react";
+import { useSiteTheme } from "../../lib/theme";
 import { Island, LockScreen, NoteActions, PhoneNote, StatusBar, Tap } from "./Phone";
 import { type AppCopy, type NoteCopy, type PageCopy, SCENE_STEPS, type Scene } from "./slides";
 
@@ -352,6 +353,7 @@ function AppScene({ app, step }: { app: AppCopy; step: number }) {
  * Screen slides up) instead of cutting to a new screen.
  */
 export function PhoneStage({ id, scene, step }: { id: string; scene: Scene; step: number }) {
+  const halloween = useSiteTheme() === "halloween";
   const isApp = scene.kind === "app";
   // The app stays under the Lock Screen as it was, so locking again doesn't
   // show it resetting. It starts fresh (keyed by moment) on the next unlock.
@@ -365,6 +367,7 @@ export function PhoneStage({ id, scene, step }: { id: string; scene: Scene; step
     <>
       {app ? <AppScene app={app.app} key={app.id} step={app.step} /> : null}
       <LockScreen
+        date={halloween ? "Sat Oct 31" : undefined}
         className={isApp ? "is-unlocked" : ""}
         dimmed={scene.kind === "approve" && step === APPROVE_PRESSED}
       >

@@ -10,10 +10,11 @@ import {
   useSyncExternalStore,
 } from "react";
 import { usePrefersReducedMotion } from "../../lib/motion";
+import { useSiteTheme } from "../../lib/theme";
 import { PHONE_H, PHONE_W, PhoneFrame } from "./Phone";
 import { PhoneStage } from "./Scenes";
 import { ShuffleText } from "./ShuffleText";
-import { pinnedStep, SCENE_STEPS, type Scene, STEPS } from "./slides";
+import { HALLOWEEN_STEPS, pinnedStep, SCENE_STEPS, type Scene, STEPS } from "./slides";
 
 /** A clicked step stays this long before the rotation picks up again. */
 const HOLD_MS = 5000;
@@ -130,6 +131,8 @@ interface Story {
  */
 export function Focus({ cta, hint }: { cta: ReactNode; hint: ReactNode }) {
   const pinned = pinnedStep(useNicheParam());
+  /** The same steps, in Halloween copy while that theme is on (see /theme.js). */
+  const slides = useSiteTheme() === "halloween" ? HALLOWEEN_STEPS : STEPS;
   const reduced = usePrefersReducedMotion();
   const hidden = usePageHidden();
   const [hovered, setHovered] = useState(false);
@@ -160,7 +163,7 @@ export function Focus({ cta, hint }: { cta: ReactNode; hint: ReactNode }) {
     }));
   }, [pinned]);
 
-  const current = STEPS[story.index] ?? STEPS[0];
+  const current = slides[story.index] ?? slides[0];
   if (!current) throw new Error("No landing steps");
   const steps = SCENE_STEPS[current.scene.kind];
   const last = steps.length - 1;
@@ -226,7 +229,7 @@ export function Focus({ cta, hint }: { cta: ReactNode; hint: ReactNode }) {
   };
 
   const onTabKey = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
-    const end = STEPS.length - 1;
+    const end = slides.length - 1;
     const target =
       event.key === "ArrowRight"
         ? index === end
@@ -262,7 +265,7 @@ export function Focus({ cta, hint }: { cta: ReactNode; hint: ReactNode }) {
           The everything app for{" "}
           <span className="hark-focus-phrases">
             {/* Every phrase, invisible, in one grid cell: the longest sets the size. */}
-            {STEPS.map((s) => (
+            {slides.map((s) => (
               <span aria-hidden="true" className="hark-focus-phrase" key={s.id}>
                 {s.phrase}
               </span>
@@ -291,7 +294,7 @@ export function Focus({ cta, hint }: { cta: ReactNode; hint: ReactNode }) {
           }}
           role="tablist"
         >
-          {STEPS.map((s, index) => {
+          {slides.map((s, index) => {
             const selected = index === story.index;
             return (
               <button

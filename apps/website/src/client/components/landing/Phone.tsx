@@ -143,10 +143,13 @@ function ClockGlass() {
 export function LockScreen({
   children,
   className = "",
+  date = "Tue Oct 27",
   dimmed = false,
 }: {
   children?: ReactNode;
   className?: string;
+  /** The short date over the clock. */
+  date?: string;
   dimmed?: boolean;
 }) {
   return (
@@ -154,7 +157,7 @@ export function LockScreen({
       <Wallpaper />
       <ClockGlass />
       <div className="hark-lock-head">
-        <div className="hark-lock-date">Tue Oct 27</div>
+        <div className="hark-lock-date">{date}</div>
         <div className="hark-lock-clock">9:41</div>
       </div>
       <div className={`hark-lock-dim ${dimmed ? "is-on" : ""}`} />

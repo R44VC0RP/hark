@@ -202,3 +202,52 @@ export function pinnedStep(value: string | null): number | null {
   const index = STEPS.findIndex((step) => step.id === value);
   return index === -1 ? null : index;
 }
+
+/** Halloween copy for each step (see /theme.js); anything not listed stays. */
+const HALLOWEEN: Record<string, { phrase: string; line: string; scene?: (scene: Scene) => Scene }> =
+  {
+    dev: {
+      phrase: "haunted dev teams.",
+      line: "Webhook notifications from beyond the grave.",
+      scene: (scene) =>
+        scene.kind === "notify"
+          ? {
+              ...scene,
+              note: {
+                ...scene.note,
+                subtitle: "Raised from the dead",
+                body: "acme/api rose at midnight. 13 commits, all checks cursed.",
+              },
+            }
+          : scene,
+    },
+    ops: {
+      phrase: "on-call ghouls.",
+      line: "Paging that wails until someone answers.",
+      scene: (scene) =>
+        scene.kind === "page"
+          ? {
+              ...scene,
+              page: {
+                ...scene.page,
+                title: "SEV-1 · Crypt API",
+                body: "Something is in the server room.",
+              },
+            }
+          : scene,
+    },
+    indie: { phrase: "indie witches.", line: "Your own mini apps, signed in." },
+    agents: { phrase: "AI agent necromancers.", line: "Approvals from your agents." },
+    founders: { phrase: "startup vampires.", line: "For you, or your whole coven." },
+  };
+
+export const HALLOWEEN_STEPS: Step[] = STEPS.map((step) => {
+  const themed = HALLOWEEN[step.id];
+  if (!themed) return step;
+  return {
+    ...step,
+    phrase: themed.phrase,
+    line: themed.line,
+    scene: themed.scene ? themed.scene(step.scene) : step.scene,
+  };
+});
