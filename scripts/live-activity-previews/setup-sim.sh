@@ -10,19 +10,26 @@ set -euo pipefail
 APP="${1:?usage: setup-sim.sh <Hark.app>}"
 NAME="${LA_DEVICE_NAME:-Live Activity Previews}"
 TYPES=(com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro)
-RUNTIME="$(xcrun simctl list runtimes -j | python3 -c '
-import json, sys
+# Runtimes to try: the one matching the active Xcode's simulator SDK first
+# (a newer runtime can be installed that this Xcode can't create devices on),
+# then the rest, newest first.
+SDK="$(xcrun --sdk iphonesimulator --show-sdk-version)"
+RUNTIMES="$(xcrun simctl list runtimes -j | SDK="$SDK" python3 -c '
+import json, os, sys
 ios = [r for r in json.load(sys.stdin)["runtimes"] if r["platform"] == "iOS" and r["isAvailable"]]
-print(sorted(ios, key=lambda r: [int(p) for p in r["version"].split(".")])[-1]["identifier"])')"
-echo "runtime: $RUNTIME" >&2
+ios.sort(key=lambda r: (r["version"] != os.environ["SDK"], [-int(p) for p in r["version"].split(".")]))
+print("\n".join(r["identifier"] for r in ios))')"
+echo "simulator SDK $SDK; runtimes: $(echo "$RUNTIMES" | tr '\n' ' ')" >&2
 
 UDID=""
-for type in "${TYPES[@]}"; do
-  if UDID="$(xcrun simctl create "$NAME" "$type" "$RUNTIME" 2>/dev/null)"; then
-    echo "device: $type" >&2
-    break
-  fi
-  echo "cannot create $type on $RUNTIME" >&2
+for runtime in $RUNTIMES; do
+  for type in "${TYPES[@]}"; do
+    if UDID="$(xcrun simctl create "$NAME" "$type" "$runtime" 2>/dev/null)"; then
+      echo "device: $type on $runtime" >&2
+      break 2
+    fi
+    echo "cannot create $type on $runtime" >&2
+  done
 done
 if [ -z "$UDID" ]; then
   xcrun simctl list devicetypes >&2
