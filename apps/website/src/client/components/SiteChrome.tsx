@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 import { signInWithApple, signInWithGoogle, useSession } from "../lib/auth";
+import { toggleSiteTheme } from "../lib/theme";
 import { AppleButton } from "./AppleButton";
 import { GoogleButton } from "./GoogleButton";
 
@@ -27,9 +28,25 @@ export const SITE_FRAME = "mx-auto w-full max-w-6xl px-6";
 
 const navLink = "text-ink-muted transition-colors duration-150 hover:text-white";
 
+/**
+ * The Hark mark, linking home. On the homepage itself (where the link would
+ * go nowhere) it flips the Halloween theme instead, with a bat swarm.
+ */
 export function Brand() {
+  const { pathname } = useLocation();
+  const onHome = pathname === "/";
   return (
-    <Link to="/" className="flex items-center gap-[9px] text-[17px] font-medium text-white">
+    <Link
+      className="flex items-center gap-[9px] text-[17px] font-medium text-white"
+      onClick={(event) => {
+        if (!onHome || event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) {
+          return;
+        }
+        event.preventDefault();
+        toggleSiteTheme();
+      }}
+      to="/"
+    >
       {/* The app icon's mark: a white tile with a mint notification badge. */}
       <span aria-hidden="true" className="relative size-[18px] rounded-[5px] bg-white">
         <span className="absolute -top-[3px] -right-[3px] size-[8px] rounded-full bg-mint ring-2 ring-paper" />

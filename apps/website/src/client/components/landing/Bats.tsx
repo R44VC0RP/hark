@@ -9,7 +9,13 @@ export function HalloweenBats() {
   return (
     <div aria-hidden="true" className="hark-bats">
       {[0, 1, 2].map((index) => (
-        <svg aria-hidden="true" className="hark-bat" fill="currentColor" key={index} viewBox="0 0 64 28">
+        <svg
+          aria-hidden="true"
+          className="hark-bat"
+          fill="currentColor"
+          key={index}
+          viewBox="0 0 64 28"
+        >
           <path d={BAT} />
         </svg>
       ))}
