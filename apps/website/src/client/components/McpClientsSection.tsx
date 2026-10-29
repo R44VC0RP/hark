@@ -2,6 +2,7 @@ import { API_TOKEN_SCOPE_DESCRIPTIONS, type OAuthClientGrantDto } from "@hark/co
 import { useCallback, useEffect, useState } from "react";
 import { oauthApi } from "../lib/oauth-api";
 import { useConfirm } from "./ConfirmDialog";
+import { EmptyState } from "./DashboardKit";
 import { rowDangerButton } from "./ui";
 
 const LIST_PANEL = "hark-glass divide-y divide-line rounded-3xl px-4 sm:px-5";
@@ -12,21 +13,27 @@ const LIST_PANEL = "hark-glass divide-y divide-line rounded-3xl px-4 sm:px-5";
  * action that revokes their access and refresh tokens. Self-contained:
  * render `<McpClientsSection />` anywhere on the dashboard.
  */
-export function McpClientsSection({ mcpUrl }: { mcpUrl?: string }) {
+export function McpClientsSection({
+  onChange,
+}: {
+  /** Called with the list after it loads and after a disconnect. */
+  onChange?: (clients: OAuthClientGrantDto[]) => void;
+}) {
   const [clients, setClients] = useState<OAuthClientGrantDto[] | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { confirm, dialog } = useConfirm();
-  const endpoint = mcpUrl ?? `${window.location.origin}/mcp`;
 
   const load = useCallback(async () => {
     try {
-      setClients((await oauthApi.listClients()).clients);
+      const { clients: next } = await oauthApi.listClients();
+      setClients(next);
+      onChange?.(next);
     } catch (err) {
       setClients([]);
       setError(err instanceof Error ? err.message : "Could not load connected clients");
     }
-  }, []);
+  }, [onChange]);
 
   useEffect(() => {
     void load();
@@ -44,7 +51,9 @@ export function McpClientsSection({ mcpUrl }: { mcpUrl?: string }) {
     setError(null);
     try {
       await oauthApi.revokeClient(client.clientId);
-      setClients((current) => current?.filter((item) => item.clientId !== client.clientId) ?? null);
+      const next = (clients ?? []).filter((item) => item.clientId !== client.clientId);
+      setClients(next);
+      onChange?.(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not disconnect this client");
     } finally {
@@ -62,18 +71,14 @@ export function McpClientsSection({ mcpUrl }: { mcpUrl?: string }) {
           Connected MCP clients
         </h2>
         <p className="mt-1.5 text-ink-muted">
-          Add{" "}
-          <code className="rounded-md bg-white/8 px-1 py-px font-mono text-[0.86em] text-white">
-            {endpoint}
-          </code>{" "}
-          to Claude, OpenCode, Cursor, or any MCP client. It asks for your approval here first.
+          Clients you've approved through the MCP server, and what each one can do.
         </p>
       </div>
       {clients === null ? <p className="py-4 text-ink-faint">Loading clients…</p> : null}
       {clients?.length === 0 && !error ? (
-        <div className="rounded-3xl border border-dashed border-line-strong px-6 py-10 text-center">
-          <p className="font-medium text-white">No MCP clients connected</p>
-        </div>
+        <EmptyState title="No MCP clients connected">
+          Clients you approve show up here, with what they can do.
+        </EmptyState>
       ) : null}
       {clients && clients.length > 0 ? (
         <ul className={LIST_PANEL}>

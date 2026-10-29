@@ -257,13 +257,15 @@ body {
   z-index: 1;
 }
 
-/* Mounted inside #root's stacking context; -1 keeps it under in-flow content. */
+/* Mounted inside #root's stacking context; -1 keeps it under in-flow content.
+   Spans the full page height (set from script), so long pages have no seam. */
 .hark-dither {
-  position: fixed;
-  inset: 0;
+  position: absolute;
+  top: 0;
+  left: 0;
   z-index: -1;
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  min-height: 100vh;
   image-rendering: pixelated;
   pointer-events: none;
 }

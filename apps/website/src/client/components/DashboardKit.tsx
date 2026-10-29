@@ -2,7 +2,7 @@ import type { AppDto, OncallPersonDto } from "@hark/contracts";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { signOut, useSession } from "../lib/auth";
-import { Brand, PAGE_COLUMN } from "./SiteChrome";
+import { Brand, SITE_FRAME } from "./SiteChrome";
 import { closeButton } from "./ui";
 
 /**
@@ -55,7 +55,7 @@ export function InlineCode({ children }: { children: React.ReactNode }) {
 
 export function EmptyState({ title, children }: { title: string; children?: React.ReactNode }) {
   return (
-    <div className="rounded-3xl border border-dashed border-line-strong px-6 py-10 text-center">
+    <div className="rounded-3xl border border-line bg-white/[0.03] px-6 py-9 text-center">
       <p className="font-medium text-white">{title}</p>
       {children ? <p className="mx-auto mt-1.5 max-w-sm text-ink-muted">{children}</p> : null}
     </div>
@@ -424,44 +424,106 @@ export function Modal({
   );
 }
 
-/** Header shared by the dashboard and team pages. `children` go before the avatar. */
+/**
+ * Header shared by the dashboard and team pages. Same frame, mark and link
+ * positions as the public `SiteHeader`, with an account menu in place of the
+ * "Open dashboard" link, so moving between the site and the dashboard never
+ * shifts. `children` go before the account menu.
+ */
 export function DashboardHeader({ children }: { children?: React.ReactNode }) {
-  const { data: session } = useSession();
-  const navigate = useNavigate();
   return (
-    <header className={`${PAGE_COLUMN} flex h-16 items-center justify-between gap-4`}>
+    <header className={`${SITE_FRAME} flex h-16 items-center justify-between`}>
       <Brand />
-      <div className="flex min-w-0 items-center gap-[18px] text-[15px]">
-        {session ? (
-          <span className="hidden max-w-56 truncate text-ink-faint md:inline">
-            {session.user.email}
-          </span>
-        ) : null}
-        <Link
-          className="hidden text-ink-muted transition-colors hover:text-white sm:inline"
-          to="/docs"
-        >
+      <nav
+        aria-label="Primary"
+        className="flex items-center gap-4 text-[14px] sm:gap-[22px] sm:text-[15px]"
+      >
+        <Link className="text-ink-muted transition-colors duration-150 hover:text-white" to="/docs">
           Docs
         </Link>
-        <button
-          type="button"
-          onClick={() => void signOut().then(() => navigate("/"))}
-          className="text-ink-muted transition-colors hover:text-white"
+        <Link
+          className="text-ink-muted transition-colors duration-150 hover:text-white"
+          to="/pricing"
         >
-          Sign out
-        </button>
+          Pricing
+        </Link>
         {children}
-        {session?.user.image ? (
+        <AccountMenu />
+      </nav>
+    </header>
+  );
+}
+
+/** Avatar button that opens a small glass menu with the account email and Sign out. */
+function AccountMenu() {
+  const { data: session } = useSession();
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const menuId = useId();
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  if (!session) return null;
+  const { user } = session;
+  const label = user.name || user.email;
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <button
+        aria-controls={menuId}
+        aria-expanded={open}
+        aria-label={`Account: ${user.email}`}
+        className="flex items-center rounded-full transition-[filter] hover:brightness-110"
+        onClick={() => setOpen((value) => !value)}
+        type="button"
+      >
+        {user.image ? (
           <img
-            src={session.user.image}
             alt=""
             className="size-8 shrink-0 rounded-full ring-1 ring-white/20"
             referrerPolicy="no-referrer"
-            title={session.user.email}
+            src={user.image}
           />
-        ) : null}
-      </div>
-    </header>
+        ) : (
+          <PersonAvatar person={{ name: label, image: null }} size="md" />
+        )}
+      </button>
+      {open ? (
+        <div
+          className="hark-glass hark-glass-strong absolute top-[calc(100%+12px)] right-0 z-50 w-64 rounded-3xl p-2"
+          id={menuId}
+        >
+          <div className="px-3 pt-2 pb-2.5">
+            {user.name ? <p className="truncate font-medium text-white">{user.name}</p> : null}
+            <p className="truncate text-sm text-ink-faint">{user.email}</p>
+          </div>
+          <div className="border-t border-line pt-1.5">
+            <button
+              className="flex h-10 w-full items-center rounded-2xl px-3 text-left text-[15px] text-ink transition-colors hover:bg-surface-hover hover:text-white"
+              onClick={() => void signOut().then(() => navigate("/"))}
+              type="button"
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

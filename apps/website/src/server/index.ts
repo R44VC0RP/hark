@@ -92,7 +92,19 @@ if (existsSync(clientDir)) {
   // Client-routed private pages reuse the noindex dashboard shell.
   if (existsSync(resolve(clientDir, "dashboard/index.html"))) {
     // `/join` without a code shows the invite page's invalid-link state.
-    for (const path of ["/dashboard/teams/:teamId", "/join", "/join/:code", "/oauth/consent"]) {
+    const privateRoutes = [
+      "/dashboard/notifications",
+      "/dashboard/agents",
+      "/dashboard/apps",
+      "/dashboard/teams",
+      "/dashboard/teams/:teamId",
+      "/dashboard/devices",
+      "/dashboard/billing",
+      "/join",
+      "/join/:code",
+      "/oauth/consent",
+    ];
+    for (const path of privateRoutes) {
       app.get(path, shell("./dist/client/dashboard/index.html"));
     }
   }

@@ -21,6 +21,7 @@ import type {
   OncallPageDto,
   OncallSettingsDto,
   OncallSettingsUpdateInput,
+  OncallShiftDto,
   PricingPlansDto,
   ServiceCreatedResponse,
   ServiceCreateInput,
@@ -81,6 +82,15 @@ const id = encodeURIComponent;
 export interface OncallPageListResponse {
   pages: OncallPageDto[];
   nextCursor: string | null;
+}
+
+/** `GET /api/oncall/me`: the viewer's upcoming shifts and the open pages that notified them. */
+export interface OncallMeResponse {
+  shifts: Array<
+    OncallShiftDto & { groupId: string; groupName: string; teamId: string; teamName: string }
+  >;
+  pages: OncallPageDto[];
+  settings: OncallSettingsDto;
 }
 
 export const api = {
@@ -179,6 +189,7 @@ export const api = {
   updateOncallGroup: (groupId: string, input: OncallGroupUpdateInput) =>
     send<{ group: OncallGroupDto }>(`/api/oncall/${id(groupId)}`, "PATCH", input),
   deleteOncallGroup: (groupId: string) => send<unknown>(`/api/oncall/${id(groupId)}`, "DELETE"),
+  getMyOncall: () => request<OncallMeResponse>("/api/oncall/me"),
   /** The signed-in person's paging preferences; they apply in every group. */
   getOncallSettings: () => request<{ settings: OncallSettingsDto }>("/api/oncall/settings"),
   updateOncallSettings: (input: OncallSettingsUpdateInput) =>
