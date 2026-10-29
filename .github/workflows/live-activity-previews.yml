@@ -27,6 +27,11 @@ env:
   SERVE_SIM_REPO: https://github.com/R44VC0RP/serve-sim.git
   SERVE_SIM_SHA: 9ec40cfb5c5c2e618f0a686c66453bbd99b5ef92
 
+defaults:
+  run:
+    # -eo pipefail, so a failing script fails its step even when piped.
+    shell: bash
+
 jobs:
   capture:
     name: Capture before and after
@@ -85,12 +90,19 @@ jobs:
       - name: Build the app
         if: steps.affected.outputs.styles != ''
         id: build
-        run: echo "app=$(scripts/live-activity-previews/build-app.sh "$RUNNER_TEMP/derived" | tail -1)" >> "$GITHUB_OUTPUT"
+        run: |
+          app="$(scripts/live-activity-previews/build-app.sh "$RUNNER_TEMP/derived" | tail -1)"
+          echo "app=$app" >> "$GITHUB_OUTPUT"
 
       - name: Boot the simulator
         if: steps.affected.outputs.styles != ''
         id: sim
-        run: echo "udid=$(scripts/live-activity-previews/setup-sim.sh "${{ steps.build.outputs.app }}" | tail -1)" >> "$GITHUB_OUTPUT"
+        env:
+          APP: ${{ steps.build.outputs.app }}
+        run: |
+          udid="$(scripts/live-activity-previews/setup-sim.sh "$APP" | tail -1)"
+          [ -n "$udid" ]
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
 
       - name: Capture
         if: steps.affected.outputs.styles != ''
