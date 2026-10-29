@@ -11,7 +11,7 @@ export function Docs() {
     /* `hark-docs` scopes the smooth anchor scrolling in index.css to this page. */
     <div className="hark-docs flex min-h-dvh flex-col">
       <div className="sticky top-0 z-30 border-b border-line bg-paper/85 backdrop-blur-md">
-        <SiteHeader className={DOCS_FRAME} current="docs" />
+        <SiteHeader current="docs" />
       </div>
 
       <div className={`${DOCS_FRAME} flex flex-1 flex-col lg:flex-row lg:gap-14`}>

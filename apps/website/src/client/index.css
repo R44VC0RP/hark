@@ -771,10 +771,10 @@ address {
 /* Landing: one headline, one phone, one moment at a time                     */
 /* -------------------------------------------------------------------------- */
 
-/* The landing fits the viewport, so it never needs the reserved scrollbar. */
+/* The landing fits the viewport. It keeps the reserved scrollbar gutter that
+   every page has, so the header doesn't move when switching pages. */
 :root:has(.hark-landing) {
   overflow-y: auto;
-  scrollbar-gutter: auto;
   /* One screen, nothing to scroll to: no rubber-band bounce. */
   overscroll-behavior: none;
 }

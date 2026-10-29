@@ -78,7 +78,7 @@ function Hint() {
 export function Landing() {
   return (
     <div className="hark-landing flex h-dvh flex-col overflow-hidden">
-      <SiteHeader className={LANDING_COLUMN} />
+      <SiteHeader />
       <main className={`${LANDING_COLUMN} flex min-h-0 flex-1 flex-col`}>
         <Focus cta={<Cta />} hint={<Hint />} />
       </main>

@@ -19,6 +19,12 @@ export const IOS_DOWNLOAD_URL = APP_STORE_URL;
 /** Shared page column: left-aligned content in a 48rem measure. */
 export const PAGE_COLUMN = "mx-auto w-full max-w-3xl px-6";
 
+/**
+ * The public site's header frame. Every public page uses the same one, so
+ * the logo and links stay exactly in place when moving between pages.
+ */
+export const SITE_FRAME = "mx-auto w-full max-w-6xl px-6";
+
 const navLink = "text-ink-muted transition-colors duration-150 hover:text-white";
 
 export function Brand() {
@@ -42,17 +48,14 @@ type NavPage = "docs" | "pricing";
  */
 export function SiteHeader({
   current,
-  className = PAGE_COLUMN,
   signInCallbackURL,
 }: {
   current?: NavPage;
-  /** Width/padding of the header row; defaults to the page column. */
-  className?: string;
   signInCallbackURL?: string;
 }) {
   const { data: session } = useSession();
   return (
-    <header className={`${className} flex h-16 items-center justify-between`}>
+    <header className={`${SITE_FRAME} flex h-16 items-center justify-between`}>
       <Brand />
       <nav
         aria-label="Primary"
