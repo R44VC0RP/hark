@@ -12,21 +12,25 @@ const DEEP = [1, 46, 37] as const;
 /** CSS pixels per dither cell; the canvas is scaled up with `pixelated`. */
 const CELL = 3;
 
-function draw(canvas: HTMLCanvasElement) {
+function draw(canvas: HTMLCanvasElement, width: number, height: number) {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
-  const w = Math.ceil(window.innerWidth / CELL);
-  const h = Math.ceil(window.innerHeight / CELL);
+  const w = Math.ceil(width / CELL);
+  const h = Math.ceil(height / CELL);
   canvas.width = w;
   canvas.height = h;
+  canvas.style.height = `${h * CELL}px`;
+  // The glow is sized to the first screen; the shade sits at the page's end.
+  const view = Math.max(1, Math.ceil(window.innerHeight / CELL));
   const image = ctx.createImageData(w, h);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const nx = x / w;
-      const ny = y / h;
+      const ny = y / view;
+      const fromEnd = (h - y) / view;
       // A soft glow from the top left and shade towards the bottom right.
       const glow = Math.max(0, 1 - Math.hypot(nx - 0.08, ny + 0.05) / 0.95);
-      const shade = Math.max(0, 1 - Math.hypot(nx - 1, ny - 1.05) / 0.9);
+      const shade = Math.max(0, 1 - Math.hypot(nx - 1, 1 - fromEnd - 1.05) / 0.9);
       const t = ((BAYER[(y % 8) * 8 + (x % 8)] ?? 0) + 0.5) / 64;
       const c = glow * 0.45 > t ? LIGHT : shade * 0.4 > t ? DEEP : BASE;
       const i = (y * w + x) * 4;
@@ -41,8 +45,9 @@ function draw(canvas: HTMLCanvasElement) {
 
 /**
  * The site-wide backdrop: Hark green, ordered-dithered into a lighter glow at
- * the top left and a deeper shade at the bottom right. Static, so it never
- * competes with content; it only redraws when the viewport size changes.
+ * the top left and a deeper shade at the bottom right. It spans the whole
+ * page, so long pages never run out of texture; it only redraws when the
+ * page's size changes.
  */
 export function DitherBackground() {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -50,21 +55,36 @@ export function DitherBackground() {
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas) return;
-    draw(canvas);
-    let frame = 0;
-    const onResize = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => draw(canvas));
+    const page = canvas.closest<HTMLElement>("#root") ?? document.body;
+    let size = "";
+    const redraw = () => {
+      const width = page.clientWidth || window.innerWidth;
+      const height = Math.max(window.innerHeight, page.offsetHeight);
+      // Redraw only when the page's size changes by a dither cell or more.
+      const next = `${Math.ceil(width / CELL)}x${Math.ceil(height / CELL)}x${window.innerHeight}`;
+      if (next === size) return;
+      size = next;
+      draw(canvas, width, height);
     };
-    window.addEventListener("resize", onResize);
+    redraw();
+    let frame = 0;
+    const schedule = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(redraw);
+    };
+    const observer = new ResizeObserver(schedule);
+    observer.observe(page);
+    window.addEventListener("resize", schedule);
     return () => {
       cancelAnimationFrame(frame);
-      window.removeEventListener("resize", onResize);
+      observer.disconnect();
+      window.removeEventListener("resize", schedule);
     };
   }, []);
 
   return (
-    <div aria-hidden="true">
+    // Clipped to #root's box, so the canvas never makes the page taller.
+    <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
       <canvas className="hark-dither" ref={ref} />
     </div>
   );
