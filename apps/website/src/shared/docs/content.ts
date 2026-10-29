@@ -104,7 +104,7 @@ export const AGENT_PRIMER: string[] = [
   "Hark puts an agent's messages on its person's iPhone: notifications, approval / yes-no / text-reply prompts you can wait on, Live Activities, web apps that open signed in inside the Hark app, and team on-call paging. The person needs the Hark iPhone app and an account at https://hark.fyi.",
   "Fastest paths, pick one:",
   "- MCP: add `https://hark.fyi/mcp` (Streamable HTTP) to your MCP client; it signs in with OAuth in the browser, no token to paste. Every agent API operation is a tool.",
-  '- CLI: `npx harkctl auth login` (browser device authorization; Node.js 22+), then e.g. `harkctl notify "Deploy finished"` or `harkctl notify ask "Ship it?" --approval --wait`.',
+  '- CLI: `npm install -g harkctl` then `harkctl auth login` (browser device authorization; Node.js 22+), then e.g. `harkctl notify "Deploy finished"` or `harkctl notify ask "Ship it?" --approval --wait`.',
   "- REST: a scoped agent token (`Authorization: Bearer hark_…`) against `https://hark.fyi/api/agent`, described by the OpenAPI document at https://hark.fyi/api/agent/openapi.json. Webhook services (`POST https://hark.fyi/hooks/whk_…`) need no token beyond the secret URL.",
   "- Skill: `npx skills add R44VC0RP/hark --skill hark` installs the Hark agent skill.",
   `Pricing: free for personal use (one active iPhone, ${FREE_NOTIFICATIONS.toLocaleString("en-US")} notifications a month, 60 requests/minute per service and 300 per account), with prompts, response callbacks, Live Activities and web apps included. Teams pay $${TEAM_SEAT_PRICE_MONTHLY} per seat per month, every member including the owner: without the Team plan, adding people, sharing apps into the team, creating on-call groups and paging return \`402\` (code \`seat_limit\`). Only the owner can start it, from the team page on hark.fyi; agents cannot start checkout. Hark Pro is no longer sold; \`deviceIds\` / \`--device\` routing works only for existing Pro accounts and returns \`402\` elsewhere, so omit it.`,
@@ -960,12 +960,12 @@ curl -X POST ${EXAMPLE_ENDPOINT}/events/evt_Cxns2IdbF4H0TJYq/cancel`,
         blocks: [
           {
             kind: "p",
-            text: "Run it straight from npm with `npx harkctl`, or install it globally with `npm install -g harkctl`. Signing in uses a browser device-authorization flow — no tokens on the command line, ever.",
+            text: "Install it globally with `npm install -g harkctl` (pin a version, e.g. `harkctl@0.8.0`, in scripts and CI). Signing in uses a browser device-authorization flow — no tokens on the command line, ever.",
           },
           {
             kind: "code",
             language: "bash",
-            code: "npx harkctl auth login",
+            code: "npm install -g harkctl\nharkctl auth login",
           },
           {
             kind: "steps",

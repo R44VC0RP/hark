@@ -33,7 +33,8 @@ Prefer MCP? The same operations are available as tools from Hark's remote MCP se
 Start a browser authorization flow and approve the requested scopes with your signed-in Hark account:
 
 ```sh
-npx harkctl@0.8.0 auth login
+npm install -g harkctl@0.8.0
+harkctl auth login
 harkctl auth status
 harkctl notify "Deploy finished ✅" --title "Deploy bot" --image https://example.com/bot.png \
   --url https://example.com/runs/1
