@@ -5,46 +5,71 @@ import type {
   DeviceDto,
   EventDto,
   LiveActivityDto,
+  OAuthClientGrantDto,
   ServiceCreatedResponse,
   ServiceDto,
   TeamDto,
 } from "@hark/contracts";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router";
-import { AppDownloadBanner } from "../components/AppDownloadBanner";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, Outlet, useNavigate } from "react-router";
 import { AppsSection } from "../components/AppsSection";
 import { useConfirm } from "../components/ConfirmDialog";
 import { CopyField } from "../components/CopyField";
 import {
+  Badge,
   DashboardHeader,
   EmptyState,
   InlineCode,
   LIST_PANEL,
   relativeTime,
+  SECTION,
+  SectionHeading,
+  TeamMark,
 } from "../components/DashboardKit";
+import {
+  ActivityItem,
+  CopyLine,
+  curlExample,
+  numberFormat,
+  UsageMeter,
+} from "../components/DashboardParts";
+import { DASHBOARD_COLUMN, DashboardTabs } from "../components/DashboardTabs";
 import { McpClientsSection } from "../components/McpClientsSection";
-import { Brand, PAGE_COLUMN } from "../components/SiteChrome";
+import { SiteFooter } from "../components/SiteChrome";
 import { TeamsSection } from "../components/TeamsSection";
 import {
   closeButton,
-  primaryButton,
   primaryButtonSmall,
   rowButton,
   rowDangerButton,
   secondaryButton,
 } from "../components/ui";
-import { api, isMissingRoute } from "../lib/api";
+import { api, isMissingRoute, type OncallMeResponse } from "../lib/api";
 import { useSession } from "../lib/auth";
+import {
+  DashboardContext,
+  type DashboardData,
+  notificationUsage,
+  openPages,
+  useDashboard,
+} from "../lib/dashboard";
+import { oauthApi } from "../lib/oauth-api";
+import { TEAM_SEAT_PRICE_MONTHLY, teamSummary } from "../lib/teams";
 
-const numberFormat = new Intl.NumberFormat("en-US");
+/**
+ * Tab bodies drop the top rule of their first section and set its heading at
+ * page-title size; each tab also carries a visually hidden h1.
+ */
+const TAB_BODY =
+  "[&>section:first-of-type]:mt-0 [&>section:first-of-type]:border-t-0 [&>section:first-of-type]:pt-0 [&>section:first-of-type_h2:first-of-type]:text-[28px] [&>section:first-of-type_h2:first-of-type]:leading-[1.15] [&>section:first-of-type_h2:first-of-type]:tracking-[-0.015em]";
 
-function curlExample(webhookUrl: string): string {
-  return [
-    `curl -X POST ${webhookUrl} \\`,
-    `  -H 'Content-Type: application/json' \\`,
-    `  -H 'Idempotency-Key: unique-event-id' \\`,
-    `  -d '{ "body": "Deploy finished ✅" }'`,
-  ].join("\n");
+export function TabPage({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className={TAB_BODY}>
+      <h1 className="sr-only">{title}</h1>
+      {children}
+    </div>
+  );
 }
 
 function agentPrompt(webhookUrl: string, devices: DeviceDto[], deviceRouting: boolean): string {
@@ -129,7 +154,11 @@ function agentPrompt(webhookUrl: string, devices: DeviceDto[], deviceRouting: bo
   ].join("\n");
 }
 
-export function Dashboard() {
+/**
+ * `/dashboard/*`: the site header, a sticky tab bar and the current tab. Loads
+ * the account's data once and shares it with every tab through context.
+ */
+export function DashboardLayout() {
   const { data: session, isPending } = useSession();
   const navigate = useNavigate();
 
@@ -139,11 +168,11 @@ export function Dashboard() {
   const [devices, setDevices] = useState<DeviceDto[] | null>(null);
   const [apiTokens, setApiTokens] = useState<ApiTokenDto[] | null>(null);
   const [apps, setApps] = useState<AppDto[] | null>(null);
-  /** `"unsupported"` when the server predates teams; the section stays hidden. */
   const [teams, setTeams] = useState<TeamDto[] | "unsupported" | null>(null);
   const [teamsError, setTeamsError] = useState<string | null>(null);
   const [billing, setBilling] = useState<BillingDto | null>(null);
-  const [planOpen, setPlanOpen] = useState(false);
+  const [oncall, setOncall] = useState<OncallMeResponse | null>(null);
+  const [mcpClients, setMcpClients] = useState<OAuthClientGrantDto[] | null>(null);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<ServiceDto | null>(null);
   const [reveal, setReveal] = useState<
@@ -173,17 +202,32 @@ export function Dashboard() {
     } catch {
       setError("Could not load your dashboard data. Please refresh and try again.");
     }
+    try {
+      setMcpClients((await oauthApi.listClients()).clients);
+    } catch {
+      setMcpClients((current) => current ?? []);
+    }
+  }, []);
+
+  const refreshOncall = useCallback(async () => {
+    try {
+      setOncall(await api.getMyOncall());
+    } catch {
+      // Older servers have no /api/oncall/me; the overview just shows no pages.
+    }
   }, []);
 
   const refreshTeams = useCallback(async () => {
     try {
-      setTeams((await api.listTeams()).teams);
+      const { teams: next } = await api.listTeams();
+      setTeams(next);
       setTeamsError(null);
+      if (next.length > 0) void refreshOncall();
     } catch (err) {
       if (isMissingRoute(err)) setTeams("unsupported");
       else setTeamsError("Could not load your teams.");
     }
-  }, []);
+  }, [refreshOncall]);
 
   const refreshActivity = useCallback(async () => {
     try {
@@ -219,19 +263,73 @@ export function Dashboard() {
     }
   }, [session, isPending, navigate, refresh, refreshTeams]);
 
+  const inTeams = Array.isArray(teams) && teams.length > 0;
   useEffect(() => {
     if (!session) return;
-    const interval = window.setInterval(() => void refreshActivity(), 10_000);
+    const interval = window.setInterval(() => {
+      void refreshActivity();
+      if (inTeams) void refreshOncall();
+    }, 10_000);
     return () => window.clearInterval(interval);
-  }, [session, refreshActivity]);
+  }, [session, refreshActivity, refreshOncall, inTeams]);
 
-  if (isPending || !session) {
+  const user = session?.user;
+  const context = useMemo<DashboardData | null>(
+    () =>
+      user
+        ? {
+            user,
+            services,
+            events,
+            liveActivities,
+            devices,
+            apiTokens,
+            apps,
+            teams,
+            teamsError,
+            billing,
+            oncall,
+            mcpClients,
+            refresh,
+            refreshActivity,
+            refreshOncall,
+            setApps,
+            setTeams,
+            setApiTokens,
+            setMcpClients,
+            createService: () => setCreating(true),
+            editService: setEditing,
+            revealRotated: (response) => {
+              setReveal({ ...response, kind: "rotated" });
+              void refresh();
+            },
+          }
+        : null,
+    [
+      user,
+      services,
+      events,
+      liveActivities,
+      devices,
+      apiTokens,
+      apps,
+      teams,
+      teamsError,
+      billing,
+      oncall,
+      mcpClients,
+      refresh,
+      refreshActivity,
+      refreshOncall,
+    ],
+  );
+
+  if (isPending || !context) {
     return (
       <div className="flex min-h-dvh flex-col">
-        <header className={`${PAGE_COLUMN} flex h-16 items-center`}>
-          <Brand />
-        </header>
-        <main className={`${PAGE_COLUMN} flex-1 pt-8`}>
+        <DashboardHeader />
+        <DashboardTabs />
+        <main className={`${DASHBOARD_COLUMN} flex-1 pt-10`}>
           <p className="text-ink-faint" role="status">
             Loading your dashboard…
           </p>
@@ -240,64 +338,48 @@ export function Dashboard() {
     );
   }
 
-  const activeDeviceCount = devices?.filter((device) => device.active).length ?? null;
-  const deliveryDeviceCount =
-    activeDeviceCount === null || billing?.limits.devices === null
-      ? activeDeviceCount
-      : Math.min(activeDeviceCount, billing?.limits.devices ?? activeDeviceCount);
+  const pageCount = openPages(oncall).filter((page) => page.status === "triggered").length;
+  const setup = setupProgress(context);
 
   return (
-    <div className="flex min-h-dvh flex-col">
-      <DashboardHeader>
-        {billing?.plan === "pro" ? (
-          <button type="button" onClick={() => setPlanOpen(true)} className={primaryButtonSmall}>
-            Pro
-          </button>
-        ) : null}
-      </DashboardHeader>
+    <DashboardContext.Provider value={context}>
+      <div className="flex min-h-dvh flex-col">
+        <DashboardHeader />
+        <DashboardTabs
+          badges={{
+            ...(setup && setup.done < setup.total
+              ? { overview: { label: `${setup.done}/${setup.total}`, tone: "quiet" as const } }
+              : {}),
+            ...(pageCount > 0
+              ? { teams: { label: String(pageCount), tone: "danger" as const } }
+              : {}),
+          }}
+          hidden={teams === "unsupported" ? ["teams"] : []}
+        />
 
-      <main className={`${PAGE_COLUMN} flex-1 pt-6 pb-16`}>
-        <AppDownloadBanner />
+        <main className={`${DASHBOARD_COLUMN} flex-1 pt-9 pb-20 sm:pt-12`}>
+          {error ? (
+            <div
+              className="mb-6 rounded-2xl border border-danger-line bg-danger-soft px-4 py-3 text-sm text-danger"
+              role="alert"
+            >
+              {error}
+            </div>
+          ) : null}
 
-        <div className="mb-5 flex items-end justify-between gap-4">
-          <div className="min-w-0">
-            <h1 className="text-[28px] leading-[1.15] font-medium tracking-[-0.015em] text-white">
-              Services
-            </h1>
-            <p className="mt-1.5 text-ink-muted">
-              {deliveryDeviceCount === null
-                ? "Each service gets a secret webhook URL."
-                : deliveryDeviceCount === 0
-                  ? "No iPhone registered yet — sign in inside the Hark app to receive notifications."
-                  : `Delivering to ${deliveryDeviceCount} registered ${deliveryDeviceCount === 1 ? "iPhone" : "iPhones"}.`}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setCreating(true)}
-            className={`${primaryButtonSmall} shrink-0`}
-          >
-            New service
-          </button>
-        </div>
+          {reveal ? (
+            <WebhookReveal
+              deviceRouting={billing?.features.deviceRouting ?? false}
+              devices={devices?.filter((device) => device.active) ?? []}
+              reveal={reveal}
+              onDismiss={() => setReveal(null)}
+            />
+          ) : null}
 
-        {error ? (
-          <div
-            className="mb-6 rounded-2xl border border-danger-line bg-danger-soft px-4 py-3 text-sm text-danger"
-            role="alert"
-          >
-            {error}
-          </div>
-        ) : null}
+          <Outlet />
+        </main>
 
-        {reveal ? (
-          <WebhookReveal
-            deviceRouting={billing?.features.deviceRouting ?? false}
-            devices={devices?.filter((device) => device.active) ?? []}
-            reveal={reveal}
-            onDismiss={() => setReveal(null)}
-          />
-        ) : null}
+        <SiteFooter className={DASHBOARD_COLUMN} />
 
         {creating ? (
           <ServiceModal
@@ -320,53 +402,425 @@ export function Dashboard() {
             }}
           />
         ) : null}
+      </div>
+    </DashboardContext.Provider>
+  );
+}
 
-        {planOpen && billing ? (
-          <LegacyProModal billing={billing} onClose={() => setPlanOpen(false)} />
-        ) : null}
+/** Setup checklist progress, or `null` while the data it needs is loading. */
+export function setupProgress(data: DashboardData) {
+  const { devices, services, apiTokens, mcpClients, events } = data;
+  if (devices === null || services === null || apiTokens === null || events === null) return null;
+  const hasDevice = devices.length > 0;
+  const steps = {
+    app: hasDevice,
+    signIn: hasDevice,
+    agent:
+      services.length > 0 ||
+      apiTokens.some((token) => token.revokedAt === null) ||
+      (mcpClients?.length ?? 0) > 0,
+    test: events.length > 0,
+  };
+  const done = Object.values(steps).filter(Boolean).length;
+  return { steps, done, total: 4 };
+}
 
-        <ServiceList
-          services={services}
-          tokens={apiTokens}
-          onEdit={setEditing}
-          onRotated={(response) => {
-            setReveal({ ...response, kind: "rotated" });
-            void refresh();
-          }}
-          onDeleted={() => void refresh()}
-          onTokenRevoked={(id) =>
-            setApiTokens((current) => current?.filter((token) => token.id !== id) ?? current)
+// ---------------------------------------------------------------------------
+// Tabs
+// ---------------------------------------------------------------------------
+
+export function NotificationsTab() {
+  const { services, devices, billing, liveActivities, events, refreshActivity, createService } =
+    useDashboard();
+  const activeDeviceCount = devices?.filter((device) => device.active).length ?? null;
+  const deliveryDeviceCount =
+    activeDeviceCount === null || billing?.limits.devices === null
+      ? activeDeviceCount
+      : Math.min(activeDeviceCount, billing?.limits.devices ?? activeDeviceCount);
+
+  return (
+    <TabPage title="Notifications">
+      <section aria-labelledby="services-heading" className={SECTION}>
+        <SectionHeading
+          id="services-heading"
+          title="Services"
+          description={
+            deliveryDeviceCount === null
+              ? "Each service gets a secret webhook URL."
+              : deliveryDeviceCount === 0
+                ? "No iPhone registered yet — sign in inside the Hark app to receive notifications."
+                : `Each service gets a secret webhook URL. Delivering to ${deliveryDeviceCount} registered ${deliveryDeviceCount === 1 ? "iPhone" : "iPhones"}.`
+          }
+          action={
+            <button type="button" onClick={createService} className={primaryButtonSmall}>
+              New service
+            </button>
           }
         />
+        <ServiceList services={services} />
+      </section>
 
-        <Devices devices={devices} billing={billing} onRemoved={() => void refresh()} />
-        <McpClientsSection />
+      <LiveActivities activities={liveActivities} />
 
-        {teams !== "unsupported" ? (
-          <TeamsSection
-            error={teamsError}
-            onCreated={(team) =>
-              setTeams((current) => [...(Array.isArray(current) ? current : []), team])
-            }
-            teams={teams}
-          />
+      <ActivityLog events={events} onRefresh={refreshActivity} />
+    </TabPage>
+  );
+}
+
+export function AgentsTab() {
+  const { apiTokens, setApiTokens, setMcpClients } = useDashboard();
+  return (
+    <TabPage title="Agents">
+      <ConnectAgentSection />
+      <McpClientsSection onChange={setMcpClients} />
+      <AgentTokens
+        tokens={apiTokens}
+        onRevoked={(id) =>
+          setApiTokens((current) => current?.filter((token) => token.id !== id) ?? current)
+        }
+      />
+    </TabPage>
+  );
+}
+
+export function AppsTab() {
+  const { apps, setApps, teams, user } = useDashboard();
+  return (
+    <TabPage title="Apps">
+      <AppsSection
+        apps={apps}
+        onChanged={(next) =>
+          setApps((current) => current?.map((app) => (app.id === next.id ? next : app)) ?? null)
+        }
+        onRemoved={(id) => setApps((current) => current?.filter((app) => app.id !== id) ?? null)}
+        teams={Array.isArray(teams) ? teams : null}
+        viewerName={user.name}
+      />
+    </TabPage>
+  );
+}
+
+export function TeamsTab() {
+  const { teams, teamsError, setTeams } = useDashboard();
+  return (
+    <TabPage title="Teams">
+      {teams === "unsupported" ? (
+        <EmptyState title="Teams aren't available on this server." />
+      ) : (
+        <TeamsSection
+          error={teamsError}
+          onCreated={(team) =>
+            setTeams((current) => [...(Array.isArray(current) ? current : []), team])
+          }
+          teams={teams}
+        />
+      )}
+    </TabPage>
+  );
+}
+
+export function DevicesTab() {
+  const { devices, billing, refresh } = useDashboard();
+  return (
+    <TabPage title="Devices">
+      <Devices devices={devices} billing={billing} onRemoved={() => void refresh()} />
+    </TabPage>
+  );
+}
+
+export function BillingTab() {
+  const { billing, teams } = useDashboard();
+  return (
+    <TabPage title="Billing">
+      <PlanSection billing={billing} />
+      {Array.isArray(teams) ? <TeamBillingSection teams={teams} /> : null}
+    </TabPage>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Agents
+// ---------------------------------------------------------------------------
+
+function ConnectAgentSection() {
+  const mcpUrl = `${window.location.origin}/mcp`;
+  return (
+    <section aria-labelledby="connect-heading" className={SECTION}>
+      <SectionHeading
+        id="connect-heading"
+        title="Agents"
+        description="Let Claude Code, OpenCode, Cursor or any agent send you notifications, ask for approvals and run Live Activities."
+      />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="hark-glass flex flex-col rounded-3xl p-5">
+          <h3 className="font-medium text-white">MCP server</h3>
+          <p className="mt-1 mb-4 flex-1 text-sm text-ink-muted">
+            Add this URL as a remote MCP server. Hark asks for your approval here first.
+          </p>
+          <CopyLine label="MCP server URL" value={mcpUrl} />
+        </div>
+        <div className="hark-glass flex flex-col rounded-3xl p-5">
+          <h3 className="font-medium text-white">Command line</h3>
+          <p className="mt-1 mb-4 flex-1 text-sm text-ink-muted">
+            Install <InlineCode>harkctl</InlineCode>, then sign in once from your terminal.
+          </p>
+          <div className="space-y-2">
+            <CopyLine label="install command" value="npm install -g harkctl" />
+            <CopyLine label="sign-in command" value="harkctl auth login" />
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function AgentTokens({
+  tokens,
+  onRevoked,
+}: {
+  tokens: ApiTokenDto[] | null;
+  onRevoked: (id: string) => void;
+}) {
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const { confirm, dialog } = useConfirm();
+  const activeTokens = tokens?.filter((token) => token.revokedAt === null) ?? [];
+
+  const revoke = async (token: ApiTokenDto) => {
+    const confirmed = await confirm({
+      title: "Revoke agent connection",
+      message: `Revoke “${token.name}”? Its token stops working immediately and the agent must sign in again.`,
+      confirmLabel: "Revoke",
+      destructive: true,
+    });
+    if (!confirmed) return;
+    setBusyId(token.id);
+    setError(null);
+    try {
+      await api.revokeApiToken(token.id);
+      onRevoked(token.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not revoke this connection");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <section aria-labelledby="tokens-heading" className={SECTION}>
+      <SectionHeading
+        id="tokens-heading"
+        title="Agent tokens"
+        description={
+          <>
+            Created by <InlineCode>harkctl auth login</InlineCode>. Revoke one to sign that agent
+            out.
+          </>
+        }
+      />
+      {tokens === null ? <p className="py-4 text-ink-faint">Loading tokens…</p> : null}
+      {tokens !== null && activeTokens.length === 0 ? (
+        <EmptyState title="No agent tokens">
+          Run <InlineCode>harkctl auth login</InlineCode> and approve it to add one.
+        </EmptyState>
+      ) : null}
+      {activeTokens.length > 0 ? (
+        <ul className={LIST_PANEL}>
+          {activeTokens.map((token) => (
+            <li key={token.id} className="flex items-center gap-3 py-3.5">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-panel font-mono text-xs text-mint ring-1 ring-white/15">
+                ❯_
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-medium text-white">{token.name}</p>
+                <p className="truncate text-[13px] text-ink-faint" title={token.scopes.join(", ")}>
+                  {token.prefix}… · {token.scopes.length}{" "}
+                  {token.scopes.length === 1 ? "scope" : "scopes"} · last used{" "}
+                  {token.lastUsedAt ? relativeTime(token.lastUsedAt) : "never"}
+                  {token.expiresAt
+                    ? ` · expires ${new Date(token.expiresAt).toLocaleDateString()}`
+                    : ""}
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={busyId === token.id}
+                onClick={() => void revoke(token)}
+                className={`${rowDangerButton} shrink-0`}
+              >
+                Revoke
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {error ? (
+        <p className="mt-3 text-sm text-danger" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {dialog}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Billing
+// ---------------------------------------------------------------------------
+
+function PlanSection({ billing }: { billing: BillingDto | null }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const usage = notificationUsage(billing);
+
+  const openPortal = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      window.location.assign((await api.openBillingPortal()).url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not open billing");
+      setBusy(false);
+    }
+  };
+
+  if (!billing) {
+    return (
+      <section aria-labelledby="plan-heading" className={SECTION}>
+        <SectionHeading id="plan-heading" title="Plan" />
+        <p className="py-4 text-ink-faint">Loading plan…</p>
+      </section>
+    );
+  }
+
+  const { limits } = billing;
+  const pro = billing.plan === "pro";
+  const rows = [
+    limits.devices === null
+      ? "Unlimited active iPhones"
+      : `${limits.devices} active iPhone${limits.devices === 1 ? "" : "s"}`,
+    ...(billing.features.deviceRouting ? ["Route notifications to specific devices"] : []),
+    `${numberFormat.format(limits.notificationsPerMonth)} notifications per month`,
+    `${numberFormat.format(limits.servicePerMinute)} requests per minute per service`,
+    `${numberFormat.format(limits.accountPerMinute)} requests per minute per account`,
+  ];
+
+  return (
+    <section aria-labelledby="plan-heading" className={SECTION}>
+      <SectionHeading
+        id="plan-heading"
+        title="Billing"
+        description="Your personal plan. Teams are billed separately, per team."
+      />
+      <div className="hark-glass rounded-3xl p-5 sm:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-sm text-ink-faint">Current plan</p>
+            <p className="mt-0.5 flex items-center gap-2 text-[22px] leading-tight font-medium text-white">
+              {pro ? "Hark Pro" : "Free"}
+              {pro ? <Badge tone="outline">Legacy</Badge> : <Badge tone="ok">Personal use</Badge>}
+            </p>
+            <p className="mt-1 text-[15px] text-ink-muted">
+              {pro
+                ? "Hark Pro is no longer sold. Your plan keeps working as long as you stay subscribed."
+                : "Free for personal use, no card needed."}
+            </p>
+          </div>
+          {pro ? (
+            <button
+              type="button"
+              disabled={busy || !billing.configured}
+              onClick={() => void openPortal()}
+              className={primaryButtonSmall}
+            >
+              {busy ? "Opening…" : billing.configured ? "Manage billing" : "Billing unavailable"}
+            </button>
+          ) : (
+            <Link className={secondaryButton} to="/pricing">
+              Compare plans
+            </Link>
+          )}
+        </div>
+
+        {usage ? (
+          <div className="mt-6 border-t border-line pt-5">
+            <p className="mb-2 text-sm text-ink-faint">Notifications this month</p>
+            <UsageMeter {...usage} />
+          </div>
         ) : null}
 
-        <AppsSection
-          apps={apps}
-          onChanged={(next) =>
-            setApps((current) => current?.map((app) => (app.id === next.id ? next : app)) ?? null)
-          }
-          onRemoved={(id) => setApps((current) => current?.filter((app) => app.id !== id) ?? null)}
-          teams={Array.isArray(teams) ? teams : null}
-          viewerName={session.user.name}
-        />
+        <ul className="mt-6 grid gap-x-6 gap-y-2.5 border-t border-line pt-5 sm:grid-cols-2">
+          {rows.map((row) => (
+            <li className="flex gap-2 text-sm leading-snug text-ink" key={row}>
+              <span
+                className="mt-[7px] size-1.5 shrink-0 rounded-full bg-mint"
+                aria-hidden="true"
+              />
+              <span>{row}</span>
+            </li>
+          ))}
+        </ul>
+        {error ? (
+          <p className="mt-3 text-sm text-danger" role="alert">
+            {error}
+          </p>
+        ) : null}
+      </div>
+    </section>
+  );
+}
 
-        <LiveActivities activities={liveActivities} />
-
-        <ActivityLog events={events} onRefresh={refreshActivity} />
-      </main>
-    </div>
+function TeamBillingSection({ teams }: { teams: TeamDto[] }) {
+  return (
+    <section aria-labelledby="team-billing-heading" className={SECTION}>
+      <SectionHeading
+        id="team-billing-heading"
+        title="Team billing"
+        description={`The Team plan is $${TEAM_SEAT_PRICE_MONTHLY} per seat per month, every member including the owner. Manage it from each team's page.`}
+      />
+      {teams.length === 0 ? (
+        <EmptyState title="You're not in any teams">
+          <Link className="hark-link" to="/dashboard/teams">
+            Create a team
+          </Link>{" "}
+          to share apps and page whoever's on call.
+        </EmptyState>
+      ) : (
+        <ul className={LIST_PANEL}>
+          {teams.map((team) => (
+            <li key={team.id}>
+              <Link
+                className="group -mx-4 flex items-center gap-3 px-4 py-3.5 transition-colors hover:bg-white/4 sm:-mx-5 sm:px-5"
+                to={`/dashboard/teams/${team.id}`}
+              >
+                <TeamMark name={team.name} />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-2">
+                    <span className="truncate font-medium text-white">{team.name}</span>
+                    {team.plan === "team" ? (
+                      <Badge tone="ok">Team plan</Badge>
+                    ) : (
+                      <Badge tone="outline">No plan</Badge>
+                    )}
+                  </span>
+                  <span className="block truncate text-[13px] text-ink-faint">
+                    {team.plan === "team"
+                      ? `${team.seats.billable} billable ${team.seats.billable === 1 ? "seat" : "seats"} · $${numberFormat.format(team.seats.billable * TEAM_SEAT_PRICE_MONTHLY)}/month`
+                      : teamSummary(team)}
+                  </span>
+                </span>
+                <span
+                  aria-hidden="true"
+                  className="shrink-0 text-ink-muted transition-transform group-hover:translate-x-0.5"
+                >
+                  →
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -429,236 +883,6 @@ function WebhookReveal({
           {agentPromptCopied ? "Agent prompt copied" : "Copy agent prompt"}
         </button>
       </div>
-    </section>
-  );
-}
-
-/** Hark Pro is no longer sold; existing subscribers keep it and its billing portal. */
-function LegacyProModal({ billing, onClose }: { billing: BillingDto; onClose: () => void }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [closing, setClosing] = useState(false);
-
-  const close = useCallback(() => {
-    if (closing || busy) return;
-    setClosing(true);
-    window.setTimeout(onClose, 120);
-  }, [busy, closing, onClose]);
-
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [close]);
-
-  const openPortal = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      window.location.assign((await api.openBillingPortal()).url);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not open billing");
-      setBusy(false);
-    }
-  };
-
-  const { limits } = billing;
-  const rows = [
-    limits.devices === null
-      ? "Unlimited active iPhones"
-      : `${limits.devices} active iPhone${limits.devices === 1 ? "" : "s"}`,
-    ...(billing.features.deviceRouting ? ["Route notifications to specific devices"] : []),
-    limits.notificationsPerMonth === null
-      ? "Unlimited notifications"
-      : `${numberFormat.format(limits.notificationsPerMonth)} notifications per month`,
-    `${numberFormat.format(limits.servicePerMinute)} requests per minute per service`,
-    `${numberFormat.format(limits.accountPerMinute)} requests per minute per account`,
-  ];
-
-  return (
-    <div className={`hark-modal-backdrop ${closing ? "is-closing" : ""}`}>
-      <button
-        aria-label="Close plan dialog"
-        className="hark-modal-dismiss"
-        disabled={busy}
-        onClick={close}
-        type="button"
-      />
-      <section
-        aria-labelledby="plan-title"
-        aria-modal="true"
-        className="hark-modal-panel hark-glass hark-glass-strong"
-        role="dialog"
-      >
-        <div className="flex items-start justify-between gap-6">
-          <div>
-            <h2 id="plan-title" className="text-[22px] leading-[1.2] font-medium text-white">
-              You're on Hark Pro (legacy)
-            </h2>
-            <p className="mt-1.5 text-[15px] text-ink-muted">
-              Hark Pro is no longer sold. Your plan keeps working as long as you stay subscribed.
-            </p>
-          </div>
-          <button
-            aria-label="Close"
-            className={closeButton}
-            disabled={busy}
-            onClick={close}
-            type="button"
-          >
-            ×
-          </button>
-        </div>
-
-        <ul className="mt-5 space-y-2.5 rounded-2xl border border-line bg-panel p-4">
-          {rows.map((row) => (
-            <li className="flex gap-2 text-sm leading-snug text-ink" key={row}>
-              <span
-                className="mt-[7px] size-1.5 shrink-0 rounded-full bg-mint"
-                aria-hidden="true"
-              />
-              <span>{row}</span>
-            </li>
-          ))}
-        </ul>
-
-        {error ? (
-          <p className="mt-3 text-sm text-danger" role="alert">
-            {error}
-          </p>
-        ) : null}
-
-        <div className="mt-5 flex justify-end">
-          <button
-            type="button"
-            disabled={busy || !billing.configured}
-            onClick={() => void openPortal()}
-            className={primaryButton}
-          >
-            {busy ? "Opening…" : billing.configured ? "Manage billing" : "Billing unavailable"}
-          </button>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function Devices({
-  devices,
-  billing,
-  onRemoved,
-}: {
-  devices: DeviceDto[] | null;
-  billing: BillingDto | null;
-  onRemoved: () => void;
-}) {
-  const activeDevices = devices?.filter((device) => device.active) ?? [];
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const { confirm, dialog } = useConfirm();
-
-  const remove = async (device: DeviceDto) => {
-    const confirmed = await confirm({
-      title: "Remove iPhone",
-      message: `Remove ${device.deviceName ?? "this iPhone"} from Hark? It stops receiving notifications until it signs in from the app again.`,
-      confirmLabel: "Remove",
-      destructive: true,
-    });
-    if (!confirmed) return;
-    setBusyId(device.id);
-    setError(null);
-    try {
-      await api.removeDevice(device.id);
-      onRemoved();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not remove this device");
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  return (
-    <section className="mt-10 border-t border-line pt-8" aria-labelledby="devices-heading">
-      <div className="mb-5">
-        <h2
-          id="devices-heading"
-          className="text-[22px] leading-[1.2] font-medium tracking-[-0.01em] text-white"
-        >
-          Devices
-        </h2>
-        <p className="mt-1.5 text-ink-muted">
-          {billing?.features.deviceRouting ? (
-            <>
-              Omit <InlineCode>deviceIds</InlineCode> to notify all active devices, or pass IDs to
-              route a webhook to specific ones.
-            </>
-          ) : (
-            "Webhooks, prompts and Live Activities go to your active iPhone."
-          )}
-        </p>
-      </div>
-      {devices === null ? <p className="py-4 text-ink-faint">Loading devices…</p> : null}
-      {devices?.length === 0 ? <EmptyState title="No iPhones registered yet." /> : null}
-      {devices && devices.length > 0 ? (
-        <ul className={LIST_PANEL}>
-          {devices.map((device) => (
-            <li className="flex items-center justify-between gap-4 py-3.5" key={device.id}>
-              <div className="min-w-0">
-                <p className="truncate font-medium text-white">
-                  {device.deviceName ?? "iPhone"}
-                  {!device.active ? (
-                    <span className="ml-2 text-sm font-normal text-ink-faint">Inactive</span>
-                  ) : null}
-                </p>
-                <p className="truncate font-mono text-xs text-ink-faint">{device.id}</p>
-                <p className="mt-0.5 text-[13px] text-ink-faint">
-                  {device.liveActivitiesCapable
-                    ? `Live Activities ready · ${device.liveActivityTokenEnvironment} · refreshed ${new Date(
-                        device.liveActivityTokenUpdatedAt ?? device.lastSeenAt,
-                      ).toLocaleString()}`
-                    : "Live Activities token not registered"}
-                </p>
-              </div>
-              <div className="flex shrink-0 gap-2">
-                <button
-                  type="button"
-                  onClick={() => void navigator.clipboard.writeText(device.id)}
-                  className={rowButton}
-                >
-                  Copy ID
-                </button>
-                <button
-                  type="button"
-                  disabled={busyId === device.id}
-                  onClick={() => void remove(device)}
-                  className={rowDangerButton}
-                >
-                  Remove
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {billing?.plan === "free" && activeDevices.length >= 1 ? (
-        <p className="mt-3 text-sm text-ink-faint">
-          Free includes one active iPhone. Remove this one before signing in on another. Joining a
-          team doesn't change this limit.
-        </p>
-      ) : null}
-      {error ? (
-        <p className="mt-3 text-sm text-danger" role="alert">
-          {error}
-        </p>
-      ) : null}
-      {dialog}
     </section>
   );
 }
@@ -838,17 +1062,130 @@ function ServiceModal({
   );
 }
 
+function Devices({
+  devices,
+  billing,
+  onRemoved,
+}: {
+  devices: DeviceDto[] | null;
+  billing: BillingDto | null;
+  onRemoved: () => void;
+}) {
+  const activeDevices = devices?.filter((device) => device.active) ?? [];
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const { confirm, dialog } = useConfirm();
+
+  const remove = async (device: DeviceDto) => {
+    const confirmed = await confirm({
+      title: "Remove iPhone",
+      message: `Remove ${device.deviceName ?? "this iPhone"} from Hark? It stops receiving notifications until it signs in from the app again.`,
+      confirmLabel: "Remove",
+      destructive: true,
+    });
+    if (!confirmed) return;
+    setBusyId(device.id);
+    setError(null);
+    try {
+      await api.removeDevice(device.id);
+      onRemoved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not remove this device");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <section className={SECTION} aria-labelledby="devices-heading">
+      <SectionHeading
+        id="devices-heading"
+        title="Devices"
+        description={
+          billing?.features.deviceRouting ? (
+            <>
+              Omit <InlineCode>deviceIds</InlineCode> to notify all active devices, or pass IDs to
+              route a webhook to specific ones.
+            </>
+          ) : (
+            "Webhooks, prompts and Live Activities go to your active iPhone."
+          )
+        }
+      />
+      {devices === null ? <p className="py-4 text-ink-faint">Loading devices…</p> : null}
+      {devices?.length === 0 ? (
+        <EmptyState title="No iPhones registered yet">
+          Install Hark from the App Store and sign in with this account.
+        </EmptyState>
+      ) : null}
+      {devices && devices.length > 0 ? (
+        <ul className={LIST_PANEL}>
+          {devices.map((device) => (
+            <li
+              className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2.5 py-3.5"
+              key={device.id}
+            >
+              <div className="min-w-0 flex-1">
+                <p className="flex items-center gap-2 font-medium text-white">
+                  <span className="truncate">{device.deviceName ?? "iPhone"}</span>
+                  {device.active ? (
+                    <Badge tone="ok">Active</Badge>
+                  ) : (
+                    <Badge tone="outline">Inactive</Badge>
+                  )}
+                </p>
+                <p className="truncate font-mono text-xs text-ink-faint">{device.id}</p>
+                <p className="mt-0.5 text-[13px] text-ink-faint">
+                  {device.liveActivitiesCapable
+                    ? `Live Activities ready · ${device.liveActivityTokenEnvironment} · refreshed ${new Date(
+                        device.liveActivityTokenUpdatedAt ?? device.lastSeenAt,
+                      ).toLocaleString()}`
+                    : "Live Activities token not registered"}
+                </p>
+              </div>
+              <div className="flex shrink-0 gap-2">
+                <button
+                  type="button"
+                  onClick={() => void navigator.clipboard.writeText(device.id)}
+                  className={rowButton}
+                >
+                  Copy ID
+                </button>
+                <button
+                  type="button"
+                  disabled={busyId === device.id}
+                  onClick={() => void remove(device)}
+                  className={rowDangerButton}
+                >
+                  Remove
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {billing?.plan === "free" && activeDevices.length >= 1 ? (
+        <p className="mt-3 text-sm text-ink-faint">
+          Free includes one active iPhone. Remove this one before signing in on another. Joining a
+          team doesn't change this limit.
+        </p>
+      ) : null}
+      {error ? (
+        <p className="mt-3 text-sm text-danger" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {dialog}
+    </section>
+  );
+}
+
 function LiveActivities({ activities }: { activities: LiveActivityDto[] | null }) {
   if (activities === null || activities.length === 0) return null;
   return (
-    <section className="mt-10 border-t border-line pt-8" aria-labelledby="live-activities-heading">
-      <h2
-        id="live-activities-heading"
-        className="text-[22px] leading-[1.2] font-medium tracking-[-0.01em] text-white"
-      >
-        Live Activities
-      </h2>
-      <ul className={`${LIST_PANEL} mt-5`}>
+    <section className={SECTION} aria-labelledby="live-activities-heading">
+      <SectionHeading id="live-activities-heading" title="Live Activities" />
+      <ul className={LIST_PANEL}>
         {activities.map((activity) => (
           <li className="flex items-center justify-between gap-4 py-3.5" key={activity.id}>
             <div className="min-w-0">
@@ -873,54 +1210,27 @@ function ActivityLog({
   onRefresh: () => Promise<void>;
 }) {
   return (
-    <section className="mt-10 border-t border-line pt-8" aria-labelledby="activity-heading">
-      <div className="mb-5 flex items-end justify-between gap-4">
-        <div>
-          <h2
-            id="activity-heading"
-            className="text-[22px] leading-[1.2] font-medium tracking-[-0.01em] text-white"
-          >
-            Activity
-          </h2>
-          <p className="mt-1.5 text-ink-muted">Latest webhook delivery attempts.</p>
-        </div>
-        <button type="button" onClick={() => void onRefresh()} className={rowButton}>
-          Refresh
-        </button>
-      </div>
-
+    <section className={SECTION} aria-labelledby="activity-heading">
+      <SectionHeading
+        id="activity-heading"
+        title="Activity"
+        description="Latest webhook delivery attempts."
+        action={
+          <button type="button" onClick={() => void onRefresh()} className={rowButton}>
+            Refresh
+          </button>
+        }
+      />
       {events === null ? <p className="py-4 text-ink-faint">Loading activity…</p> : null}
-      {events?.length === 0 ? <EmptyState title="No webhook activity yet." /> : null}
+      {events?.length === 0 ? (
+        <EmptyState title="No webhook activity yet">
+          Deliveries show up here as soon as a service receives its first request.
+        </EmptyState>
+      ) : null}
       {events && events.length > 0 ? (
         <ol className={LIST_PANEL}>
           {events.map((activityEvent) => (
-            <li className="flex gap-3 py-3.5" key={activityEvent.id}>
-              <ActivityAvatar activityEvent={activityEvent} />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-baseline justify-between gap-4">
-                  <p className="truncate leading-5 font-medium text-white">
-                    {activityEvent.serviceTitle} · {activityEvent.title}
-                  </p>
-                  <time
-                    className="shrink-0 text-[13px] text-ink-faint"
-                    dateTime={activityEvent.createdAt}
-                    title={new Date(activityEvent.createdAt).toLocaleString()}
-                  >
-                    {new Date(activityEvent.createdAt).toLocaleTimeString([], {
-                      hour: "numeric",
-                      minute: "2-digit",
-                    })}
-                  </time>
-                </div>
-                <p className="mt-0.5 truncate text-sm leading-5 text-ink-muted">
-                  {activityEvent.body}
-                </p>
-                <p className="mt-0.5 text-[13px] leading-5 text-ink-faint">
-                  {activityLabel(activityEvent)}
-                  {activityEvent.error ? ` · ${activityEvent.error}` : ""}
-                </p>
-              </div>
-            </li>
+            <ActivityItem activityEvent={activityEvent} key={activityEvent.id} />
           ))}
         </ol>
       ) : null}
@@ -928,82 +1238,16 @@ function ActivityLog({
   );
 }
 
-function StatusDot({ status }: { status: string }) {
-  const color =
-    status === "accepted" || status === "delivered"
-      ? "bg-mint"
-      : status === "withdrawn"
-        ? "bg-info"
-        : status === "failed"
-          ? "bg-danger-strong"
-          : status === "partial" || status === "withdraw_partial"
-            ? "bg-warn"
-            : status === "processing"
-              ? "bg-info"
-              : "bg-idle";
-  return <span className={`${color} size-2 rounded-full`} aria-hidden="true" />;
-}
-
-function ActivityAvatar({ activityEvent }: { activityEvent: EventDto }) {
-  return (
-    <span className="relative size-9 shrink-0">
-      {activityEvent.imageUrl ? (
-        <img
-          alt=""
-          className="size-9 rounded-full object-cover ring-1 ring-white/15"
-          src={activityEvent.imageUrl}
-        />
-      ) : (
-        <span className="grid size-9 place-items-center rounded-full bg-white/12 text-sm font-medium text-white">
-          {activityEvent.serviceTitle.slice(0, 1).toUpperCase()}
-        </span>
-      )}
-      <span className="absolute -right-0.5 -bottom-0.5 grid size-3.5 place-items-center rounded-full bg-paper">
-        <StatusDot status={activityEvent.status} />
-      </span>
-    </span>
-  );
-}
-
-function activityLabel(activityEvent: EventDto): string {
-  if (activityEvent.status === "accepted" || activityEvent.status === "delivered") {
-    return `Accepted for ${activityEvent.deliveredCount} ${activityEvent.deliveredCount === 1 ? "device" : "devices"}`;
-  }
-  if (activityEvent.status === "withdrawn") return "Withdrawal requested";
-  if (activityEvent.status === "withdraw_partial") return "Withdrawal partially accepted";
-  if (activityEvent.status === "partial") {
-    return `Partially accepted for ${activityEvent.deliveredCount} devices`;
-  }
-  if (activityEvent.status === "no_devices") return "No active devices";
-  if (activityEvent.status === "processing") return "Processing";
-  return "Failed";
-}
-
-function ServiceList({
-  services,
-  tokens,
-  onEdit,
-  onRotated,
-  onDeleted,
-  onTokenRevoked,
-}: {
-  services: ServiceDto[] | null;
-  tokens: ApiTokenDto[] | null;
-  onEdit: (service: ServiceDto) => void;
-  onRotated: (response: ServiceCreatedResponse) => void;
-  onDeleted: () => void;
-  onTokenRevoked: (id: string) => void;
-}) {
+function ServiceList({ services }: { services: ServiceDto[] | null }) {
+  const { editService, revealRotated, refresh } = useDashboard();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [tokenError, setTokenError] = useState<string | null>(null);
   const { confirm, dialog } = useConfirm();
-  const activeTokens = tokens?.filter((token) => token.revokedAt === null) ?? [];
 
   if (services === null) {
     return <p className="py-4 text-ink-faint">Loading services…</p>;
   }
-  if (services.length === 0 && activeTokens.length === 0) {
+  if (services.length === 0) {
     return (
       <EmptyState title="No services yet">
         Create your first service to get a secret webhook URL you can POST to from CI, cron jobs, or
@@ -1011,26 +1255,6 @@ function ServiceList({
       </EmptyState>
     );
   }
-
-  const revokeToken = async (token: ApiTokenDto) => {
-    const confirmed = await confirm({
-      title: "Revoke agent connection",
-      message: `Revoke “${token.name}”? Its token stops working immediately and the agent must sign in again.`,
-      confirmLabel: "Revoke",
-      destructive: true,
-    });
-    if (!confirmed) return;
-    setBusyId(token.id);
-    setTokenError(null);
-    try {
-      await api.revokeApiToken(token.id);
-      onTokenRevoked(token.id);
-    } catch (err) {
-      setTokenError(err instanceof Error ? err.message : "Could not revoke this connection");
-    } finally {
-      setBusyId(null);
-    }
-  };
 
   const rotate = async (svc: ServiceDto) => {
     const confirmed = await confirm({
@@ -1041,7 +1265,7 @@ function ServiceList({
     if (!confirmed) return;
     setBusyId(svc.id);
     try {
-      onRotated(await api.rotateServiceToken(svc.id));
+      revealRotated(await api.rotateServiceToken(svc.id));
     } finally {
       setBusyId(null);
     }
@@ -1058,7 +1282,7 @@ function ServiceList({
     setBusyId(svc.id);
     try {
       await api.deleteService(svc.id);
-      onDeleted();
+      void refresh();
     } finally {
       setBusyId(null);
     }
@@ -1118,7 +1342,7 @@ function ServiceList({
               <button
                 type="button"
                 disabled={busyId === svc.id}
-                onClick={() => onEdit(svc)}
+                onClick={() => editService(svc)}
                 className={rowButton}
               >
                 Edit
@@ -1142,45 +1366,7 @@ function ServiceList({
             </div>
           </li>
         ))}
-        {activeTokens.map((token) => (
-          <li key={token.id} className="flex items-center gap-3 py-3.5">
-            <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-panel font-mono text-xs text-mint ring-1 ring-white/15">
-              ❯_
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="flex items-center gap-2 font-medium text-white">
-                <span className="truncate">{token.name}</span>
-                <span className="shrink-0 rounded-full bg-white/12 px-2 py-0.5 text-xs leading-4 font-normal text-ink">
-                  Agent
-                </span>
-              </p>
-              <p className="truncate text-[13px] text-ink-faint" title={token.scopes.join(", ")}>
-                {token.prefix}… · {token.scopes.length}{" "}
-                {token.scopes.length === 1 ? "scope" : "scopes"} · last used{" "}
-                {token.lastUsedAt ? relativeTime(token.lastUsedAt) : "never"}
-                {token.expiresAt
-                  ? ` · expires ${new Date(token.expiresAt).toLocaleDateString()}`
-                  : ""}
-              </p>
-            </div>
-            <div className="flex shrink-0 flex-wrap justify-end gap-2">
-              <button
-                type="button"
-                disabled={busyId === token.id}
-                onClick={() => void revokeToken(token)}
-                className={rowDangerButton}
-              >
-                Revoke
-              </button>
-            </div>
-          </li>
-        ))}
       </ul>
-      {tokenError ? (
-        <p className="mt-3 text-sm text-danger" role="alert">
-          {tokenError}
-        </p>
-      ) : null}
       {dialog}
     </>
   );

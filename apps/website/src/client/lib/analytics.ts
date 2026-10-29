@@ -27,12 +27,18 @@ function storedId(key: string, session = false): string {
 /** Dynamic routes whose segments identify a person, a team or an invite code. */
 const DYNAMIC_ROUTES: Array<[RegExp, string]> = [
   [/^\/join(\/|$)/, "/join/:code"],
-  [/^\/dashboard\/teams(\/|$)/, "/dashboard/teams/:teamId"],
+  [/^\/dashboard\/teams\/[^/]/, "/dashboard/teams/:teamId"],
   [/^\/web(\/|$)/, "/web/:id"],
 ];
 const STATIC_ROUTES = new Set([
   "/",
   "/dashboard",
+  "/dashboard/notifications",
+  "/dashboard/agents",
+  "/dashboard/apps",
+  "/dashboard/teams",
+  "/dashboard/devices",
+  "/dashboard/billing",
   "/cli/authorize",
   "/docs",
   "/pricing",

@@ -3,7 +3,6 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import {
   AppIcon,
-  DashboardHeader,
   ErrorText,
   errorMessage,
   Field,
@@ -14,7 +13,6 @@ import {
   SectionHeading,
   TeamMark,
 } from "../components/DashboardKit";
-import { Brand, PAGE_COLUMN } from "../components/SiteChrome";
 import { LeaveOrDelete, MembersSection, SeatsPanel } from "../components/team/Members";
 import { OncallSection } from "../components/team/Oncall";
 import { PagesSection } from "../components/team/Pages";
@@ -32,7 +30,7 @@ type LoadState =
 /** `/dashboard/teams/:teamId`: members, seats, on-call groups and pages for one team. */
 export function TeamPage() {
   const { teamId = "" } = useParams();
-  const { data: session, isPending } = useSession();
+  const { data: session } = useSession();
   const navigate = useNavigate();
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [renaming, setRenaming] = useState(false);
@@ -57,12 +55,8 @@ export function TeamPage() {
   }, [teamId]);
 
   useEffect(() => {
-    if (!isPending && !session) {
-      navigate("/", { replace: true });
-      return;
-    }
     if (session) void load();
-  }, [session, isPending, navigate, load]);
+  }, [session, load]);
 
   // After team checkout the seat count can lag Stripe's webhook by a moment.
   useEffect(() => {
@@ -88,139 +82,124 @@ export function TeamPage() {
     };
   }, [session, activating, load]);
 
-  if (isPending || !session) {
-    return (
-      <div className="flex min-h-dvh flex-col">
-        <header className={`${PAGE_COLUMN} flex h-16 items-center`}>
-          <Brand />
-        </header>
-        <main className={`${PAGE_COLUMN} flex-1 pt-8`}>
-          <p className="text-ink-faint" role="status">
-            Loading…
-          </p>
-        </main>
-      </div>
-    );
-  }
+  // The dashboard layout signs out visitors and shows its own loading state.
+  if (!session) return null;
 
   return (
-    <div className="flex min-h-dvh flex-col">
-      <DashboardHeader />
-      <main className={`${PAGE_COLUMN} flex-1 pt-6 pb-16`}>
-        <Link
-          className="group mb-5 inline-flex items-center gap-1.5 text-[15px] text-ink-muted transition-colors hover:text-white"
-          to="/dashboard"
+    <>
+      <Link
+        className="group mb-6 inline-flex items-center gap-1.5 text-[15px] text-ink-muted transition-colors hover:text-white"
+        to="/dashboard/teams"
+      >
+        <span
+          aria-hidden="true"
+          className="inline-block transition-transform group-hover:-translate-x-0.5"
         >
-          <span
-            aria-hidden="true"
-            className="inline-block transition-transform group-hover:-translate-x-0.5"
-          >
-            ←
-          </span>
-          Dashboard
-        </Link>
+          ←
+        </span>
+        All teams
+      </Link>
 
-        {state.kind === "loading" ? (
-          <p className="text-ink-faint" role="status">
-            Loading team…
+      {state.kind === "loading" ? (
+        <p className="text-ink-faint" role="status">
+          Loading team…
+        </p>
+      ) : null}
+
+      {state.kind === "missing" ? (
+        <div>
+          <h1 className="text-[28px] leading-[1.15] font-medium tracking-[-0.015em] text-white">
+            Team not found
+          </h1>
+          <p className="mt-2 max-w-[30rem] text-ink-muted">
+            It may have been deleted, or you're no longer a member. Ask a team admin for a new
+            invite.
           </p>
-        ) : null}
+          <Link className={`${primaryButton} mt-6`} to="/dashboard/teams">
+            Back to teams
+          </Link>
+        </div>
+      ) : null}
 
-        {state.kind === "missing" ? (
-          <div>
-            <h1 className="text-[28px] leading-[1.15] font-medium tracking-[-0.015em] text-white">
-              Team not found
-            </h1>
-            <p className="mt-2 max-w-[30rem] text-ink-muted">
-              It may have been deleted, or you're no longer a member. Ask a team admin for a new
-              invite.
-            </p>
-            <Link className={`${primaryButton} mt-6`} to="/dashboard">
-              Back to dashboard
-            </Link>
-          </div>
-        ) : null}
+      {state.kind === "error" ? (
+        <div
+          className="rounded-2xl border border-danger-line bg-danger-soft px-4 py-3 text-sm text-danger"
+          role="alert"
+        >
+          {state.message}{" "}
+          <button className="underline" onClick={() => void load()} type="button">
+            Try again
+          </button>
+        </div>
+      ) : null}
 
-        {state.kind === "error" ? (
-          <div
-            className="rounded-2xl border border-danger-line bg-danger-soft px-4 py-3 text-sm text-danger"
-            role="alert"
-          >
-            {state.message}{" "}
-            <button className="underline" onClick={() => void load()} type="button">
-              Try again
-            </button>
-          </div>
-        ) : null}
-
-        {state.kind === "ready" ? (
-          <>
-            <div className="mb-6 flex items-start justify-between gap-4">
-              <div className="flex min-w-0 items-center gap-3.5">
-                <TeamMark name={state.team.name} size="lg" />
-                <div className="min-w-0">
-                  <h1 className="truncate text-[28px] leading-[1.15] font-medium tracking-[-0.015em] text-white">
-                    {state.team.name}
-                  </h1>
-                  <p className="mt-1 text-[15px] text-ink-muted">{teamSummary(state.team)}</p>
-                </div>
+      {state.kind === "ready" ? (
+        <>
+          <div className="mb-6 flex items-start justify-between gap-4">
+            <div className="flex min-w-0 items-center gap-3.5">
+              <TeamMark name={state.team.name} size="lg" />
+              <div className="min-w-0">
+                <h1 className="truncate text-[28px] leading-[1.15] font-medium tracking-[-0.015em] text-white">
+                  {state.team.name}
+                </h1>
+                <p className="mt-1 text-[15px] text-ink-muted">{teamSummary(state.team)}</p>
               </div>
-              {canManage(state.team.role) ? (
-                <button
-                  className={`${rowButton} mt-1 shrink-0`}
-                  onClick={() => setRenaming(true)}
-                  type="button"
-                >
-                  Rename
-                </button>
-              ) : null}
             </div>
+            {canManage(state.team.role) ? (
+              <button
+                className={`${rowButton} mt-1 shrink-0`}
+                onClick={() => setRenaming(true)}
+                type="button"
+              >
+                Rename
+              </button>
+            ) : null}
+          </div>
 
-            <SeatsPanel activating={activating} team={state.team} />
+          <SeatsPanel activating={activating} team={state.team} />
 
-            <MembersSection
-              members={state.members}
-              onChanged={async () => {
-                await load();
+          <MembersSection
+            members={state.members}
+            onChanged={async () => {
+              await load();
+            }}
+            team={state.team}
+            viewerId={session.user.id}
+          />
+
+          <OncallSection
+            members={state.members}
+            onPaged={() => setPagesKey((value) => value + 1)}
+            team={state.team}
+            viewerName={session.user.name || session.user.email}
+          />
+
+          <PagesSection refreshKey={pagesKey} teamId={state.team.id} />
+
+          <TeamApps teamId={state.team.id} />
+
+          <LeaveOrDelete
+            onLeft={() => navigate("/dashboard/teams", { replace: true })}
+            team={state.team}
+          />
+
+          {renaming ? (
+            <RenameModal
+              onClose={() => setRenaming(false)}
+              onRenamed={(team) => {
+                setRenaming(false);
+                setState((current) =>
+                  current.kind === "ready"
+                    ? { ...current, team: { ...current.team, ...team } }
+                    : current,
+                );
               }}
               team={state.team}
-              viewerId={session.user.id}
             />
-
-            <OncallSection
-              members={state.members}
-              onPaged={() => setPagesKey((value) => value + 1)}
-              team={state.team}
-              viewerName={session.user.name || session.user.email}
-            />
-
-            <PagesSection refreshKey={pagesKey} teamId={state.team.id} />
-
-            <TeamApps teamId={state.team.id} />
-
-            <LeaveOrDelete
-              onLeft={() => navigate("/dashboard", { replace: true })}
-              team={state.team}
-            />
-
-            {renaming ? (
-              <RenameModal
-                onClose={() => setRenaming(false)}
-                onRenamed={(team) => {
-                  setRenaming(false);
-                  setState((current) =>
-                    current.kind === "ready"
-                      ? { ...current, team: { ...current.team, ...team } }
-                      : current,
-                  );
-                }}
-                team={state.team}
-              />
-            ) : null}
-          </>
-        ) : null}
-      </main>
-    </div>
+          ) : null}
+        </>
+      ) : null}
+    </>
   );
 }
 
@@ -254,7 +233,7 @@ function TeamApps({ teamId }: { teamId: string }) {
         description={
           <>
             Everyone on the team can open these in Hark, signed in as themselves. Share one from{" "}
-            <Link className="hark-link" to="/dashboard">
+            <Link className="hark-link" to="/dashboard/apps">
               your apps
             </Link>
             .

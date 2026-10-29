@@ -261,7 +261,7 @@ export function AppsSection({
               grouped ? (
                 <div key={group.key}>
                   <AppGroupHeading group={group} />
-                  <p className="rounded-3xl border border-dashed border-line-strong px-5 py-4 text-[15px] text-ink-muted">
+                  <p className="rounded-3xl border border-line bg-white/[0.03] px-5 py-4 text-[15px] text-ink-muted">
                     No personal apps. Apps your agents add without a team land here.
                   </p>
                 </div>
