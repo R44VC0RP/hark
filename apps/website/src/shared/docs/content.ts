@@ -960,7 +960,7 @@ curl -X POST ${EXAMPLE_ENDPOINT}/events/evt_Cxns2IdbF4H0TJYq/cancel`,
         blocks: [
           {
             kind: "p",
-            text: "Install it globally with `npm install -g harkctl` (pin a version, e.g. `harkctl@0.8.0`, in scripts and CI). Signing in uses a browser device-authorization flow — no tokens on the command line, ever.",
+            text: "Install it globally with `npm install -g harkctl` (pin a version, e.g. `harkctl@0.8.1`, in scripts and CI). Signing in uses a browser device-authorization flow — no tokens on the command line, ever.",
           },
           {
             kind: "code",

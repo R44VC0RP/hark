@@ -19,7 +19,7 @@ external system needs a stable URL it can call later.
 
 - Use Node.js 22 or newer.
 - Use only a project-installed or user-installed `harkctl` that the user already trusts. Version
-  `0.8.0` is reviewed for this skill. Never download packages, run `npx`/`pnpm dlx`, install or
+  `0.8.1` is reviewed for this skill. Never download packages, run `npx`/`pnpm dlx`, install or
   upgrade the CLI, or execute a newly installed binary as part of this skill. If `harkctl` is not
   available, stop and ask the user to install and review an exact version separately.
 - Treat Hark tokens and webhook URLs as secrets. Never commit, print, summarize, or paste them into

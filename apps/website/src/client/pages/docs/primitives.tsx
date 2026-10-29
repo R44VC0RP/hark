@@ -71,10 +71,22 @@ export function Note({ children }: { children: React.ReactNode }) {
   );
 }
 
-function TableShell({ caption, children }: { caption: string; children: React.ReactNode }) {
+/**
+ * `compact` tables (short values, like the plan limits) fit a phone without
+ * a minimum width; wide reference tables keep one and scroll sideways.
+ */
+function TableShell({
+  caption,
+  compact = false,
+  children,
+}: {
+  caption: string;
+  compact?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-lg text-left text-sm">
+      <table className={`w-full text-left text-sm ${compact ? "" : "min-w-lg"}`}>
         <caption className="sr-only">{caption}</caption>
         {children}
       </table>
@@ -428,16 +440,18 @@ export function StylePreviews({ styles }: { styles: DocStylePreview[] }) {
 
 export function PlanTable({ caption, rows }: { caption: string; rows: DocPlanRow[] }) {
   return (
-    <TableShell caption={caption}>
+    <TableShell caption={caption} compact>
       <HeadRow headers={["Limit", "Free", "Legacy Pro"]} />
       <tbody className="divide-y divide-line border-y border-line">
         {rows.map((row) => (
           <tr key={row.limit}>
-            <th className="py-3 pr-5 text-sm font-normal text-ink-muted" scope="row">
+            <th className="py-3 pr-4 text-sm font-normal text-ink-muted" scope="row">
               {row.limit}
             </th>
-            <td className="py-3 pr-5 font-mono text-[13px] text-white">{row.free}</td>
-            <td className="py-3 font-mono text-[13px] text-white">{row.pro}</td>
+            <td className="py-3 pr-4 font-mono text-[13px] whitespace-nowrap text-white">
+              {row.free}
+            </td>
+            <td className="py-3 font-mono text-[13px] whitespace-nowrap text-white">{row.pro}</td>
           </tr>
         ))}
       </tbody>
