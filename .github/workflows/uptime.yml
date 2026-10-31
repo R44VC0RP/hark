@@ -1,0 +1,38 @@
+name: Uptime
+
+# Checks production from outside AWS every 5 minutes. A failed run is the
+# alert: GitHub emails whoever last changed this schedule. (Server errors
+# while the site is up reach the operator's phone through OPS_WEBHOOK_URL.)
+# GitHub may start scheduled runs late and pauses them after 60 days without
+# repository activity.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check hark.fyi and the legacy host
+        run: |
+          failed=0
+          for url in https://hark.fyi/api/health https://hark.ryan.ceo/api/health https://hark.fyi/; do
+            # Three tries 20 s apart, so one slow request or a deploy restart is not an outage.
+            ok=0
+            for attempt in 1 2 3; do
+              code=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 15 "$url" || true)
+              if [ "$code" = "200" ]; then ok=1; break; fi
+              echo "$url attempt $attempt: HTTP $code"
+              if [ "$attempt" -lt 3 ]; then sleep 20; fi
+            done
+            if [ "$ok" = 1 ]; then echo "$url ok"; else echo "::error::$url is down (last HTTP $code)"; failed=1; fi
+          done
+          exit "$failed"
