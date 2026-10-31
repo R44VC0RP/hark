@@ -10,6 +10,7 @@ import type {
   InboxProjectsDto,
   ServiceCreatedResponse,
 } from "@hark/contracts";
+import { eq } from "drizzle-orm";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 process.env.NODE_ENV = "test";
@@ -646,5 +647,35 @@ describe("agent token management", () => {
       scopes: ["tokens:manage"],
     });
     expect(response.status).toBe(404);
+  });
+});
+
+describe("agent feedback", () => {
+  it("stores reports from any token and limits them per account", async () => {
+    const created = await call("POST", "/api/agent/feedback", FOREIGN, {
+      message: "notify returned 500",
+      context: "harkctl notify --stdin",
+    });
+    expect(created.status).toBe(201);
+    const body = (await created.json()) as { feedback: { id: string; kind: string } };
+    expect(body.feedback.kind).toBe("bug");
+    const [row] = await db
+      .select()
+      .from(schema.feedback)
+      .where(eq(schema.feedback.id, body.feedback.id));
+    expect(row).toMatchObject({ message: "notify returned 500", tokenId: "tok_foreign" });
+
+    expect((await call("POST", "/api/agent/feedback", FOREIGN, { message: " " })).status).toBe(400);
+    expect((await call("POST", "/api/agent/feedback", null, { message: "hi" })).status).toBe(401);
+
+    for (let index = 0; index < 4; index += 1) {
+      const more = await call("POST", "/api/agent/feedback", FOREIGN, {
+        message: `report ${index}`,
+      });
+      expect(more.status).toBe(201);
+    }
+    const limited = await call("POST", "/api/agent/feedback", FOREIGN, { message: "one too many" });
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toMatchObject({ code: "rate_limited" });
   });
 });

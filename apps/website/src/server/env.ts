@@ -47,6 +47,11 @@ const envSchema = z.object({
    */
   UNLIMITED_TEAM_OWNER_EMAILS: z.string().optional(),
   /**
+   * Optional Hark webhook URL (a service on the operator's account) that gets
+   * server errors and agent feedback (lib/ops.ts). Unset sends nothing.
+   */
+  OPS_WEBHOOK_URL: z.preprocess((value) => (value === "" ? undefined : value), z.url().optional()),
+  /**
    * Header carrying the real client IP, set (and overwritten) by a trusted edge.
    * Leave unset when the edge does not provide one: client-supplied forwarded
    * headers are spoofable and would let a caller reset its own rate-limit bucket.

@@ -60,6 +60,7 @@ import {
   type Shift,
   upcomingShifts,
 } from "./oncall-schedule";
+import { reportServerError } from "./ops";
 import {
   buildPageClaimedPushMessages,
   buildPagePushMessages,
@@ -740,6 +741,7 @@ export async function processDueRings(now = new Date()): Promise<void> {
       await ringOnce(ring.pageId, ring.userId, ring.ringCount, ring.nextRingAt, now.getTime());
     } catch (error) {
       console.error("[oncall] Repeat alert failed", error);
+      reportServerError("On-call repeat alert", error);
     }
   }
 }
@@ -1595,6 +1597,7 @@ export function processDueEscalations(now = new Date()): Promise<void> {
         await escalatePage(id, false);
       } catch (error) {
         console.error("[oncall] Escalation failed", error);
+        reportServerError("On-call escalation", error);
       }
     }
   })().finally(() => {
@@ -1612,7 +1615,10 @@ function processOncallWork(): Promise<void> {
     await processDueEscalations();
     await processDueRings();
   })()
-    .catch((error: unknown) => console.error("[oncall] Worker tick failed", error))
+    .catch((error: unknown) => {
+      console.error("[oncall] Worker tick failed", error);
+      reportServerError("On-call worker", error);
+    })
     .finally(() => {
       ringing = null;
     });

@@ -173,6 +173,8 @@ export function parseArgs(argv) {
     "escalation-mode",
     "escalation-loops",
     "escalation-final",
+    "kind",
+    "context",
     "urgency",
   ]);
   const booleanFlags = new Set([
@@ -729,6 +731,7 @@ function help() {
   harkctl pages get <page_id> [--timeline]
   harkctl pages resolve <page_id> [--note <text>]
   harkctl billing
+  harkctl feedback <message> [--kind <bug|feature|question|other>] [--context <text>]
   harkctl tokens list
   harkctl tokens revoke <token_id>
 
@@ -795,6 +798,9 @@ prints who was paged at each level, who escalated, and who claimed and resolved 
 Default logins exclude events:read (activity feed) and tokens:manage (tokens list/revoke);
 request them with --scope. No command creates tokens: new tokens always need a signed-in
 human (harkctl auth login).
+
+feedback sends a bug report or request about Hark itself to the Hark team (--kind defaults
+to bug). Put the command and the exact error in --context; never include secrets.
 
 Authentication: run harkctl auth login, or set HARK_TOKEN for an advanced manual setup.
 Tokens are never accepted as command arguments.`;
@@ -1327,6 +1333,23 @@ export async function execute(argv, env = process.env, overrides = {}) {
         exitCode: 0,
       };
     }
+  }
+  if (group === "feedback") {
+    const message = positionals.slice(1).join(" ").trim();
+    if (!message) throw new UsageError("feedback requires a message");
+    const kinds = ["bug", "feature", "question", "other"];
+    if (options.kind !== undefined && !kinds.includes(options.kind)) {
+      throw new UsageError(`--kind must be one of ${kinds.join(", ")}`);
+    }
+    const body = await request(config, "/api/agent/feedback", {
+      method: "POST",
+      body: JSON.stringify({
+        message,
+        ...(options.kind ? { kind: options.kind } : {}),
+        ...(options.context ? { context: options.context } : {}),
+      }),
+    });
+    return { body, exitCode: 0 };
   }
   if (group === "billing" && action === undefined) {
     return { body: await scopedRequest(config, "/api/agent/billing"), exitCode: 0 };

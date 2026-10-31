@@ -1749,3 +1749,29 @@ test("--stdin accepts only the command's own fields and https urls", async () =>
   });
   assert.equal(allowed.status, 6);
 });
+
+test("feedback sends a report to the Hark team", async () => {
+  await withMockServer(
+    () =>
+      Response.json(
+        { feedback: { id: "fb_1", kind: "feature", createdAt: "t0" }, message: "Sent" },
+        { status: 201 },
+      ),
+    async (requests) => {
+      const result = await execute(
+        ["feedback", "Add", "a", "dark", "mode", "--kind", "feature", "--context", "dashboard"],
+        AGENT_ENV,
+      );
+      assert.equal(result.exitCode, 0);
+      assert.deepEqual(requests, [
+        {
+          path: "/api/agent/feedback",
+          method: "POST",
+          body: { message: "Add a dark mode", kind: "feature", context: "dashboard" },
+        },
+      ]);
+    },
+  );
+  await assert.rejects(execute(["feedback"], AGENT_ENV), /requires a message/);
+  await assert.rejects(execute(["feedback", "x", "--kind", "rant"], AGENT_ENV), /--kind must be/);
+});

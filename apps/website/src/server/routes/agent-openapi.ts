@@ -6,6 +6,9 @@ import {
   appShareSchema,
   appUpdateSchema,
   CRITICAL_ALERT_STATES,
+  FEEDBACK_LIMIT_PER_DAY,
+  FEEDBACK_LIMIT_PER_HOUR,
+  feedbackCreateSchema,
   INBOX_ACTIVITY_KINDS,
   INBOX_PAGE_MAX_LIMIT,
   INTERACTION_KINDS,
@@ -1092,6 +1095,19 @@ export const agentOperations: Record<string, Partial<Record<AgentMethod, AgentOp
       response: ref("Billing"),
       description:
         "`pro` is legacy Hark Pro (no longer sold); everyone else is `free`. `features.deviceRouting` says whether `deviceIds` is accepted. Team seats are billed to each team and never change these personal limits. Checkout and the billing portal are session-only.",
+    },
+  },
+  "/feedback": {
+    post: {
+      summary: "Report a Hark bug or send feedback to the Hark team",
+      scopes: [],
+      request: feedbackCreateSchema,
+      status: 201,
+      response: object({
+        feedback: object({ id: str, kind: str, createdAt: str }),
+        message: str,
+      }),
+      description: `For problems with Hark itself (errors, wrong or confusing behaviour, docs that do not match, missing features), not with the user's own apps. Put what happened in \`message\` and the tool or command, the request and the exact error text in \`context\`. Never include secrets, tokens, webhook URLs or other people's personal data. The Hark team reads every report; there is no reply through the API, so tell the user they can also email support@hark.fyi. Limited to ${FEEDBACK_LIMIT_PER_HOUR} an hour and ${FEEDBACK_LIMIT_PER_DAY} a day per account (\`429\`, code \`rate_limited\`).`,
     },
   },
 };

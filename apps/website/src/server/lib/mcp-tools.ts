@@ -300,6 +300,15 @@ export const MCP_TOOLS: McpToolSpec[] = [
     },
   },
   { name: "billing_get", title: "Plan and usage", operation: "GET /billing", kind: "read" },
+  {
+    name: "feedback_submit",
+    title: "Report an issue to the Hark team",
+    operation: "POST /feedback",
+    kind: "write",
+    openWorld: true,
+    guidance:
+      "Use it when a Hark tool fails unexpectedly or Hark does not do what its docs say. Tell the user what you are sending first, and send it only with their go-ahead or when they asked you to report it.",
+  },
 
   // Inbox
   {

@@ -2165,3 +2165,23 @@ export interface ApiError {
 
 /** `code` sent when an inbox resource is confirmed absent for this account. */
 export const API_ERROR_CODE_NOT_FOUND = "not_found" as const;
+
+// ---------------------------------------------------------------------------
+// Feedback to the Hark team (bug reports and requests from agents)
+// ---------------------------------------------------------------------------
+
+export const FEEDBACK_KINDS = ["bug", "feature", "question", "other"] as const;
+export type FeedbackKind = (typeof FEEDBACK_KINDS)[number];
+
+/** Per account: at most this many reports an hour and a day. */
+export const FEEDBACK_LIMIT_PER_HOUR = 5;
+export const FEEDBACK_LIMIT_PER_DAY = 20;
+
+export const feedbackCreateSchema = z.object({
+  kind: z.enum(FEEDBACK_KINDS).default("bug"),
+  /** What happened, or what is wanted, in plain words. */
+  message: z.string().trim().min(1).max(4000),
+  /** The tool or command, request, error text and anything else that helps reproduce it. */
+  context: z.string().trim().min(1).max(4000).optional(),
+});
+export type FeedbackCreate = z.infer<typeof feedbackCreateSchema>;

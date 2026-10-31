@@ -109,7 +109,7 @@ export const AGENT_PRIMER: string[] = [
   "- Skill: `npx skills add R44VC0RP/hark --skill hark` installs the Hark agent skill.",
   `Pricing: free for personal use (one active iPhone, ${FREE_NOTIFICATIONS.toLocaleString("en-US")} notifications a month, 60 requests/minute per service and 300 per account), with prompts, response callbacks, Live Activities and web apps included. Teams pay $${TEAM_SEAT_PRICE_MONTHLY} per seat per month, every member including the owner: without the Team plan, adding people, sharing apps into the team, creating on-call groups and paging return \`402\` (code \`seat_limit\`). Only the owner can start it, from the team page on hark.fyi; agents cannot start checkout. Hark Pro is no longer sold; \`deviceIds\` / \`--device\` routing works only for existing Pro accounts and returns \`402\` elsewhere, so omit it.`,
   "Human-only (no tool or route can do these): answering prompts, approving web app sign-in, accepting team invites, acknowledging or escalating pages, creating API tokens, registering devices, and starting checkout or the billing portal.",
-  `Problems: open an issue at ${ISSUES_URL} or email ${SUPPORT_EMAIL}. Never include a token or webhook URL.`,
+  `Problems: report a Hark bug or request straight to the Hark team with the \`feedback_submit\` MCP tool, \`harkctl feedback "<what happened>" --context "<command and error>"\` or \`POST /api/agent/feedback\` (any agent token), with the user's go-ahead. Or open an issue at ${ISSUES_URL} or email ${SUPPORT_EMAIL}. Never include a token or webhook URL.`,
 ];
 
 export const DOC_CONTENT: DocSection[] = [
@@ -960,7 +960,7 @@ curl -X POST ${EXAMPLE_ENDPOINT}/events/evt_Cxns2IdbF4H0TJYq/cancel`,
         blocks: [
           {
             kind: "p",
-            text: "Install it globally with `npm install -g harkctl` (pin a version, e.g. `harkctl@0.8.1`, in scripts and CI). Signing in uses a browser device-authorization flow — no tokens on the command line, ever.",
+            text: "Install it globally with `npm install -g harkctl` (pin a version, e.g. `harkctl@0.8.2`, in scripts and CI). Signing in uses a browser device-authorization flow — no tokens on the command line, ever.",
           },
           {
             kind: "code",
@@ -1919,6 +1919,12 @@ harkctl oncall settings set --ring-until-ack on --ring-interval group`,
                 detail: "Plan, limits, and remaining usage. `billing:read`.",
               },
               {
+                method: "POST",
+                path: "/api/agent/feedback",
+                detail:
+                  "Report a Hark bug or send a request to the Hark team: `kind` (`bug`, `feature`, `question`, `other`), `message`, optional `context`. Any agent token; 5 an hour and 20 a day per account.",
+              },
+              {
                 method: "GET",
                 path: "/api/agent/tokens",
                 detail: "The account's tokens, never their secrets. `tokens:manage`.",
@@ -1940,6 +1946,7 @@ harkctl notify withdraw anot_...
 harkctl services rotate svc_...
 harkctl apps update app_... --name "Ops board"
 harkctl billing
+harkctl feedback "notify returns 500 for a 7,000-character body" --context "harkctl 0.8.2, notify --stdin"
 harkctl tokens list   # needs --scope tokens:manage at login`,
           },
         ],

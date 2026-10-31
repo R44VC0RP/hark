@@ -23,6 +23,7 @@ harkctl
 ├─ page         <group_id> <title>                page whoever is on call
 ├─ pages        list · get · resolve
 ├─ billing
+├─ feedback     <message>                         report a Hark problem to the Hark team
 └─ tokens       list · revoke
 ```
 
@@ -33,7 +34,7 @@ Prefer MCP? The same operations are available as tools from Hark's remote MCP se
 Start a browser authorization flow and approve the requested scopes with your signed-in Hark account:
 
 ```sh
-npm install -g harkctl@0.8.1
+npm install -g harkctl@0.8.2
 harkctl auth login
 harkctl auth status
 harkctl notify "Deploy finished ✅" --title "Deploy bot" --image https://example.com/bot.png \
@@ -185,6 +186,13 @@ billing portal stay in the dashboard.
 revokes one; both need the opt-in `tokens:manage` scope. There is no command that creates a token:
 a token that could mint tokens could grant itself any scope, so new tokens always need a signed-in
 human (`harkctl auth login`).
+
+## feedback
+
+`feedback <message> [--kind <bug|feature|question|other>] [--context <text>]` sends a bug report
+or request about Hark itself to the Hark team (`--kind` defaults to `bug`). Put the command and
+the exact error in `--context`, and never include tokens or webhook URLs. Any login can send it,
+up to 5 an hour and 20 a day; you can also email support@hark.fyi.
 
 ## apps
 

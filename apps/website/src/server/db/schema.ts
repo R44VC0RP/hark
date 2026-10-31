@@ -1092,3 +1092,23 @@ export const oauthConsent = sqliteTable(
     index("oauth_consent_user_idx").on(table.userId),
   ],
 );
+
+/** Bug reports and requests sent to the Hark team with an agent token (POST /api/agent/feedback). */
+export const feedback = sqliteTable(
+  "feedback",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    /** The token that sent it; kept as plain text so revoking the token keeps the report. */
+    tokenId: text("token_id"),
+    /** The sending token's name or OAuth client, e.g. `harkctl` or `Claude Code`. */
+    client: text("client"),
+    kind: text("kind").notNull(),
+    message: text("message").notNull(),
+    context: text("context"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("feedback_user_created_at_idx").on(table.userId, table.createdAt)],
+);

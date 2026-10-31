@@ -4,6 +4,7 @@ import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
 import { secureHeaders } from "hono/secure-headers";
 import { auth } from "./auth";
+import { reportServerError } from "./lib/ops";
 import { canonicalOrigin, isLegacyRequest } from "./lib/origins";
 import { INTERNAL_AGENT_TOKEN } from "./middleware";
 import { activitiesAgentRoute, activitiesSessionRoute } from "./routes/activities";
@@ -19,6 +20,7 @@ import { deviceAuthorizationRoute } from "./routes/device-authorization";
 import { devicesAgentRoute, devicesRoute } from "./routes/devices";
 import { docsTextRoute } from "./routes/docs";
 import { eventsRoute } from "./routes/events";
+import { feedbackAgentRoute } from "./routes/feedback";
 import { hooksRoute } from "./routes/hooks";
 import { inboxAgentRoute, inboxRoute } from "./routes/inbox";
 import {
@@ -272,6 +274,7 @@ app.route("/api/agent/activity-feed", activityFeedAgentRoute);
 app.route("/api/agent/apps", appsAgentRoute);
 app.route("/api/agent/billing", billingAgentRoute);
 app.route("/api/agent/devices", devicesAgentRoute);
+app.route("/api/agent/feedback", feedbackAgentRoute);
 app.route("/api/agent/inbox", inboxAgentRoute);
 app.route("/api/agent/oncall", oncallAgentRoute);
 app.route("/api/agent/pages", pagesAgentRoute);
@@ -324,5 +327,6 @@ app.onError((err, c) => {
   // Middleware rejections (for example the body-size limit) carry their own status.
   if (err instanceof HTTPException) return err.getResponse();
   console.error(err);
+  reportServerError(`${c.req.method} ${redactLogPath(c.req.path)} 500`, err);
   return c.json({ error: "Internal server error" }, 500);
 });
