@@ -34,6 +34,14 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    # journald keeps the logs when a deploy replaces the container (json-file
+    # logs are deleted with it). Read them with
+    #   journalctl CONTAINER_NAME=hark-hark-1 --since "1 hour ago"
+    # docker logs and compose logs keep working too.
+    logging:
+      driver: journald
+      options:
+        tag: hark
     restart: unless-stopped
 
   cloudflared:
