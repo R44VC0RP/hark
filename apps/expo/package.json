@@ -18,7 +18,7 @@
     "@expo/metro-runtime": "~57.0.8",
     "@expo/ui": "~57.0.9",
     "@hark/contracts": "workspace:*",
-    "better-auth": "^1.6.25",
+    "better-auth": "^1.7.7",
     "expo": "~57.0.11",
     "expo-alternate-app-icons": "^8.0.0",
     "expo-apple-authentication": "~57.0.1",
