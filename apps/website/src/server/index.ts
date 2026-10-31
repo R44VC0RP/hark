@@ -103,6 +103,7 @@ if (existsSync(clientDir)) {
       "/join",
       "/join/:code",
       "/oauth/consent",
+      "/unsubscribe",
     ];
     for (const path of privateRoutes) {
       app.get(path, shell("./dist/client/dashboard/index.html"));

@@ -79,6 +79,13 @@ function send<T>(path: string, method: "POST" | "PATCH" | "DELETE", body?: unkno
 
 const id = encodeURIComponent;
 
+/** A product-email subscription, looked up by the signed link from an email. */
+export interface EmailSubscription {
+  /** Masked, e.g. `r***@gmail.com`. */
+  email: string;
+  unsubscribed: boolean;
+}
+
 export interface OncallPageListResponse {
   pages: OncallPageDto[];
   nextCursor: string | null;
@@ -170,6 +177,13 @@ export const api = {
     send<TeamInviteCreateResponse>(`/api/teams/${id(teamId)}/invites`, "POST", input),
   revokeTeamInvite: (teamId: string, inviteId: string) =>
     send<unknown>(`/api/teams/${id(teamId)}/invites/${id(inviteId)}`, "DELETE"),
+  getEmailSubscription: (query: string) =>
+    request<EmailSubscription>(`/api/email/subscription?${query}`),
+  setEmailSubscription: (query: string, subscribed: boolean) =>
+    send<EmailSubscription>(
+      `/api/email/${subscribed ? "resubscribe" : "unsubscribe"}?${query}`,
+      "POST",
+    ),
   getTeamInvite: (code: string) => request<TeamInvitePreviewDto>(`/api/team-invites/${id(code)}`),
   acceptTeamInvite: (code: string) =>
     send<TeamJoinResponse>(`/api/team-invites/${id(code)}/accept`, "POST"),

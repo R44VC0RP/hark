@@ -19,6 +19,7 @@ import { billingAgentRoute, billingRoute } from "./routes/billing";
 import { deviceAuthorizationRoute } from "./routes/device-authorization";
 import { devicesAgentRoute, devicesRoute } from "./routes/devices";
 import { docsTextRoute } from "./routes/docs";
+import { emailRoute } from "./routes/email";
 import { eventsRoute } from "./routes/events";
 import { feedbackAgentRoute } from "./routes/feedback";
 import { hooksRoute } from "./routes/hooks";
@@ -298,6 +299,7 @@ app.route("/api/pages", pagesSessionRoute);
 app.route("/api/page-responses", pageResponsesRoute);
 app.route("/api/devices", devicesRoute);
 app.route("/api/events", eventsRoute);
+app.route("/api/email", emailRoute);
 app.route("/hooks", activityHooksRoute);
 app.route("/hooks", hooksRoute);
 

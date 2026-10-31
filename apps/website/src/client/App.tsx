@@ -22,6 +22,7 @@ import { NotFound } from "./pages/NotFound";
 import { OAuthConsent } from "./pages/OAuthConsent";
 import { Pricing } from "./pages/Pricing";
 import { TeamPage } from "./pages/Team";
+import { Unsubscribe } from "./pages/Unsubscribe";
 
 export function App() {
   return (
@@ -51,6 +52,7 @@ export function App() {
         <Route path="/privacy" element={<Privacy />} />
         <Route path="/terms" element={<Terms />} />
         <Route path="/oauth/consent" element={<OAuthConsent />} />
+        <Route path="/unsubscribe" element={<Unsubscribe />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </>

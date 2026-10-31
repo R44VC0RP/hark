@@ -1112,3 +1112,11 @@ export const feedback = sqliteTable(
   },
   (table) => [index("feedback_user_created_at_idx").on(table.userId, table.createdAt)],
 );
+
+/** Accounts that opted out of product emails (announcements). A row means unsubscribed. */
+export const emailUnsubscribe = sqliteTable("email_unsubscribe", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});
