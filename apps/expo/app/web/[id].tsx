@@ -4,12 +4,22 @@ import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
 import { SymbolView } from "expo-symbols";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ComponentProps,
+  type ReactNode,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActionSheetIOS,
   ActivityIndicator,
   Alert,
   Animated,
+  findNodeHandle,
   Linking,
   Pressable,
   ScrollView,
@@ -25,6 +35,7 @@ import { AppIcon } from "../../src/components/app-icon";
 import { ApiError, api } from "../../src/lib/api";
 import { isHttpUrl, openExternalLink } from "../../src/lib/inbox-body";
 import { previewApps } from "../../src/lib/inbox-preview";
+import { deviceNoun, readableColumn, useLayout, useSidebar } from "../../src/lib/layout";
 import { colors, fonts, tightTracking } from "../../src/lib/theme";
 import {
   buildBridgeScript,
@@ -71,6 +82,11 @@ export default function WebAppScreen() {
   const [phase, setPhase] = useState<Phase>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [canGoBack, setCanGoBack] = useState(false);
+  const [canGoForward, setCanGoForward] = useState(false);
+  // iPad-sized windows get a toolbar instead of the hidden two-finger menu.
+  const { regular: toolbar } = useLayout();
+  const sidebar = useSidebar();
+  const menuButton = useRef<View>(null);
   const [stripColor, setStripColor] = useState("#FFFFFF");
   const [reloadKey, setReloadKey] = useState(0);
   // Safari's rule: a page that sets viewport-fit=cover draws under the status
@@ -269,7 +285,7 @@ export default function WebAppScreen() {
     if (!app) return;
     Alert.alert(
       `Stop signing in to ${app.name}?`,
-      `Hark will stop sending passes to ${new URL(app.origin).host}. Its saved data on this iPhone is cleared too.`,
+      `Hark will stop sending passes to ${new URL(app.origin).host}. Its saved data on this ${deviceNoun} is cleared too.`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -301,8 +317,11 @@ export default function WebAppScreen() {
       "Stop signing in",
       "Cancel",
     ];
+    const anchor = menuButton.current ? findNodeHandle(menuButton.current) : null;
     ActionSheetIOS.showActionSheetWithOptions(
       {
+        // On iPad the sheet is a popover pointing at the toolbar's menu button.
+        ...(anchor ? { anchor } : {}),
         title: app.name,
         message: `Signed in with Hark on ${new URL(app.origin).host}`,
         options,
@@ -365,7 +384,25 @@ export default function WebAppScreen() {
   return (
     <View style={[styles.container, { backgroundColor: stripColor }]}>
       <StatusBar style={isDarkColor(stripColor) ? "light" : "dark"} />
-      {edgeToEdge ? (
+      {toolbar ? (
+        <WebToolbar
+          app={app}
+          canGoBack={canGoBack}
+          canGoForward={canGoForward}
+          color={stripColor}
+          menuButton={menuButton}
+          onBack={() => webView.current?.goBack()}
+          onClose={sidebar.docked ? undefined : close}
+          onForward={() => webView.current?.goForward()}
+          onInfo={() => router.push({ pathname: "/apps/[id]", params: { id: app.id } })}
+          onMenu={showMenu}
+          onReload={() => webView.current?.reload()}
+          onSafari={() => void Linking.openURL(currentUrl.current ?? app.url).catch(() => {})}
+          onToggleSidebar={sidebar.fits ? sidebar.toggle : undefined}
+          sidebarOpen={sidebar.docked}
+          top={insets.top}
+        />
+      ) : edgeToEdge ? (
         // Edge to edge, nothing native may sit on the page: the menu button is
         // for VoiceOver only (an action on an element that takes no touches).
         // Everyone else opens the menu with a two-finger hold on the page.
@@ -416,6 +453,7 @@ export default function WebAppScreen() {
         onNavigationStateChange={(state) => {
           currentUrl.current = state.url;
           setCanGoBack(state.canGoBack);
+          setCanGoForward(state.canGoForward);
         }}
         onOpenWindow={(event) => {
           const target = event.nativeEvent.targetUrl;
@@ -433,8 +471,141 @@ export default function WebAppScreen() {
         style={[styles.webView, { backgroundColor: stripColor }]}
         webviewDebuggingEnabled={__DEV__}
       />
-      <HoldHint top={insets.top} />
+      {toolbar ? null : <HoldHint top={insets.top} />}
     </View>
+  );
+}
+
+/**
+ * The iPad toolbar over a web app: history, reload, which site you're signed
+ * in to, and Hark's actions, tinted to the page's own theme color.
+ */
+function WebToolbar({
+  app,
+  color,
+  top,
+  canGoBack,
+  canGoForward,
+  sidebarOpen,
+  menuButton,
+  onBack,
+  onForward,
+  onReload,
+  onSafari,
+  onInfo,
+  onMenu,
+  onClose,
+  onToggleSidebar,
+}: {
+  app: AppDto;
+  color: string;
+  top: number;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  sidebarOpen: boolean;
+  menuButton: RefObject<View | null>;
+  onBack: () => void;
+  onForward: () => void;
+  onReload: () => void;
+  onSafari: () => void;
+  onInfo: () => void;
+  onMenu: () => void;
+  onClose?: () => void;
+  onToggleSidebar?: () => void;
+}) {
+  const dark = isDarkColor(color);
+  const ink = dark ? "#FFFFFF" : colors.ink;
+  const faint = dark ? "rgba(255, 255, 255, 0.62)" : colors.muted;
+  const host = new URL(app.origin).host;
+  return (
+    <View
+      style={[
+        styles.toolbar,
+        { paddingTop: top, backgroundColor: color },
+        dark ? styles.toolbarDark : styles.toolbarLight,
+      ]}
+    >
+      <View style={styles.toolbarSide}>
+        {onToggleSidebar ? (
+          <ToolbarButton
+            color={ink}
+            icon="sidebar.left"
+            label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+            onPress={onToggleSidebar}
+          />
+        ) : null}
+        {onClose ? (
+          <ToolbarButton color={ink} icon="xmark" label="Back to Hark" onPress={onClose} />
+        ) : null}
+        <ToolbarButton
+          color={ink}
+          disabled={!canGoBack}
+          icon="chevron.left"
+          label="Back"
+          onPress={onBack}
+        />
+        <ToolbarButton
+          color={ink}
+          disabled={!canGoForward}
+          icon="chevron.right"
+          label="Forward"
+          onPress={onForward}
+        />
+        <ToolbarButton color={ink} icon="arrow.clockwise" label="Reload" onPress={onReload} />
+      </View>
+      <View
+        accessible
+        accessibilityLabel={`${app.name}, signed in on ${host}`}
+        style={styles.toolbarTitle}
+      >
+        <AppIcon iconUrl={app.iconUrl} name={app.name} size={22} />
+        <Text numberOfLines={1} style={[styles.toolbarName, { color: ink }]}>
+          {app.name}
+        </Text>
+        <Text numberOfLines={1} style={[styles.toolbarHost, { color: faint }]}>
+          {host}
+        </Text>
+      </View>
+      <View style={[styles.toolbarSide, styles.toolbarSideEnd]}>
+        <ToolbarButton color={ink} icon="safari" label="Open in Safari" onPress={onSafari} />
+        <ToolbarButton color={ink} icon="info.circle" label="App info" onPress={onInfo} />
+        <View collapsable={false} ref={menuButton}>
+          <ToolbarButton color={ink} icon="ellipsis.circle" label="Hark menu" onPress={onMenu} />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function ToolbarButton({
+  icon,
+  label,
+  color,
+  disabled,
+  onPress,
+}: {
+  icon: ComponentProps<typeof SymbolView>["name"];
+  label: string;
+  color: string;
+  disabled?: boolean;
+  onPress: () => void;
+}): ReactNode {
+  return (
+    <Pressable
+      accessibilityLabel={label}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: Boolean(disabled) }}
+      disabled={disabled}
+      hitSlop={4}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.toolbarButton,
+        disabled && styles.toolbarButtonDisabled,
+        pressed && styles.toolbarButtonPressed,
+      ]}
+    >
+      <SymbolView name={icon} size={18} tintColor={color} weight="medium" />
+    </Pressable>
   );
 }
 
@@ -581,6 +752,62 @@ const styles = StyleSheet.create({
   webView: {
     flex: 1,
   },
+  toolbar: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    paddingHorizontal: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  toolbarLight: {
+    borderBottomColor: "rgba(23, 23, 19, 0.12)",
+  },
+  toolbarDark: {
+    borderBottomColor: "rgba(255, 255, 255, 0.14)",
+  },
+  toolbarSide: {
+    minWidth: 220,
+    height: 52,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+  },
+  toolbarSideEnd: {
+    justifyContent: "flex-end",
+  },
+  toolbarTitle: {
+    minWidth: 0,
+    height: 52,
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  toolbarName: {
+    flexShrink: 1,
+    fontFamily: fonts.semibold,
+    fontSize: 15,
+    letterSpacing: tightTracking(15),
+  },
+  toolbarHost: {
+    flexShrink: 2,
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    letterSpacing: tightTracking(13),
+  },
+  toolbarButton: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 20,
+  },
+  toolbarButtonDisabled: {
+    opacity: 0.3,
+  },
+  toolbarButtonPressed: {
+    backgroundColor: "rgba(127, 127, 127, 0.18)",
+  },
   menuOverlay: {
     position: "absolute",
     top: 0,
@@ -613,7 +840,8 @@ const styles = StyleSheet.create({
     letterSpacing: tightTracking(13),
   },
   centerActions: {
-    alignSelf: "stretch",
+    width: "100%",
+    maxWidth: 400,
     gap: 4,
     marginTop: 18,
   },
@@ -648,6 +876,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.paper,
   },
   consentHeader: {
+    ...readableColumn,
+    maxWidth: 560,
     minHeight: 52,
     justifyContent: "center",
     paddingHorizontal: 16,
@@ -661,6 +891,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#F2F1ED",
   },
   consentScroll: {
+    ...readableColumn,
+    maxWidth: 560,
     paddingHorizontal: 24,
     paddingTop: 20,
     paddingBottom: 24,
@@ -736,6 +968,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   consentActions: {
+    ...readableColumn,
+    maxWidth: 560,
     gap: 4,
     paddingHorizontal: 24,
   },

@@ -20,6 +20,7 @@ import { AppIcon } from "../../src/components/app-icon";
 import { api } from "../../src/lib/api";
 import { useSession } from "../../src/lib/auth";
 import { previewApps, previewTeams, previewViewer } from "../../src/lib/inbox-preview";
+import { readableColumn } from "../../src/lib/layout";
 import { colors, fonts, tightTracking } from "../../src/lib/theme";
 import { cacheApps, cachedApp } from "../../src/lib/web-apps";
 
@@ -382,6 +383,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.paper,
   },
   header: {
+    ...readableColumn,
     minHeight: 56,
     flexDirection: "row",
     alignItems: "center",
@@ -409,6 +411,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   scroll: {
+    ...readableColumn,
     paddingHorizontal: 24,
     paddingBottom: 64,
   },

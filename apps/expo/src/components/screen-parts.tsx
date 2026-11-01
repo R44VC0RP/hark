@@ -1,10 +1,51 @@
 import { TEAM_SEAT_PRICE_MONTHLY } from "@hark/contracts";
-import { useRouter } from "expo-router";
+import { usePathname, useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import type { ReactNode } from "react";
 import { Image, Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { readableColumn, useSidebar } from "../lib/layout";
 import { initialOf, TEAM_BILLING_URL } from "../lib/teams";
 import { colors, fonts, tightTracking } from "../lib/theme";
+
+/** Screens the iPad sidebar switches between; with it open they have no Back. */
+const SECTION_ROOTS = ["/inbox", "/oncall", "/teams", "/settings"];
+
+/**
+ * A header's leading buttons: Back, except on a section's own screen while
+ * the iPad sidebar is open (the sidebar is the way out), plus a button that
+ * brings the sidebar back when it's been hidden.
+ */
+export function HeaderLeading({ onBack }: { onBack: () => void }) {
+  const sidebar = useSidebar();
+  const pathname = usePathname();
+  const showBack = !(sidebar.docked && SECTION_ROOTS.includes(pathname));
+  const showToggle = sidebar.fits && !sidebar.open;
+  return (
+    <View style={ui.headerLeading}>
+      {showToggle ? (
+        <Pressable
+          accessibilityLabel="Show sidebar"
+          accessibilityRole="button"
+          onPress={sidebar.toggle}
+          style={({ pressed }) => [ui.iconButton, pressed && ui.iconButtonPressed]}
+        >
+          <SymbolView name="sidebar.left" size={18} tintColor={colors.muted} />
+        </Pressable>
+      ) : null}
+      {showBack ? (
+        <Pressable
+          accessibilityLabel="Back"
+          accessibilityRole="button"
+          onPress={onBack}
+          style={({ pressed }) => [ui.iconButton, pressed && ui.iconButtonPressed]}
+        >
+          <SymbolView name="chevron.left" size={18} tintColor={colors.ink} weight="semibold" />
+        </Pressable>
+      ) : null}
+      {showToggle || showBack ? null : <View style={ui.iconButton} />}
+    </View>
+  );
+}
 
 /** Back button, centered title and an optional trailing action, as in Settings. */
 export function ScreenHeader({
@@ -19,14 +60,9 @@ export function ScreenHeader({
   const router = useRouter();
   return (
     <View style={ui.header}>
-      <Pressable
-        accessibilityLabel="Back"
-        accessibilityRole="button"
-        onPress={() => (router.canGoBack() ? router.back() : router.replace(fallback))}
-        style={({ pressed }) => [ui.iconButton, pressed && ui.iconButtonPressed]}
-      >
-        <SymbolView name="chevron.left" size={18} tintColor={colors.ink} weight="semibold" />
-      </Pressable>
+      <HeaderLeading
+        onBack={() => (router.canGoBack() ? router.back() : router.replace(fallback))}
+      />
       {title ? (
         <Text accessibilityRole="header" numberOfLines={1} style={ui.headerTitle}>
           {title}
@@ -182,10 +218,12 @@ export const ui = StyleSheet.create({
     backgroundColor: colors.paper,
   },
   scroll: {
+    ...readableColumn,
     paddingHorizontal: 24,
     paddingBottom: 64,
   },
   header: {
+    ...readableColumn,
     minHeight: 56,
     flexDirection: "row",
     alignItems: "center",
@@ -201,6 +239,10 @@ export const ui = StyleSheet.create({
     fontSize: 17,
     textAlign: "center",
     letterSpacing: tightTracking(17),
+  },
+  headerLeading: {
+    flexDirection: "row",
+    alignItems: "center",
   },
   iconButton: {
     width: 44,

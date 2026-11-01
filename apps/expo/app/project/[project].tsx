@@ -18,6 +18,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { api } from "../../src/lib/api";
 import { useSession } from "../../src/lib/auth";
 import { previewNotifications, previewProjects } from "../../src/lib/inbox-preview";
+import { readableColumn } from "../../src/lib/layout";
 import {
   canMarkAllRead,
   loadedUnreadCount,
@@ -326,6 +327,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.paper,
   },
   header: {
+    ...readableColumn,
     minHeight: 56,
     flexDirection: "row",
     alignItems: "center",
@@ -392,6 +394,7 @@ const styles = StyleSheet.create({
     paddingVertical: 20,
   },
   list: {
+    ...readableColumn,
     paddingHorizontal: 24,
     paddingBottom: 48,
   },

@@ -28,6 +28,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { HeaderLeading } from "../src/components/screen-parts";
 import { ApiError, api } from "../src/lib/api";
 import { useSession } from "../src/lib/auth";
 import {
@@ -38,6 +39,7 @@ import {
 } from "../src/lib/inbox-preview";
 import { createFocusRefreshPolicy, createRefreshSequence } from "../src/lib/inbox-refresh";
 import { DEVICE_ID_KEY, submitInteractionResponse } from "../src/lib/interactions";
+import { readableColumn } from "../src/lib/layout";
 import { colors, fonts, tightTracking } from "../src/lib/theme";
 
 type ActivityFilter = "all" | InboxActivityKind;
@@ -280,14 +282,9 @@ export default function InboxScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.brandRow}>
-            <Pressable
-              accessibilityLabel="Back to apps"
-              accessibilityRole="button"
-              onPress={() => (router.canGoBack() ? router.back() : router.replace("/apps"))}
-              style={({ pressed }) => [styles.settingsButton, pressed && styles.iconButtonPressed]}
-            >
-              <SymbolView name="chevron.left" size={18} tintColor={colors.ink} weight="semibold" />
-            </Pressable>
+            <HeaderLeading
+              onBack={() => (router.canGoBack() ? router.back() : router.replace("/apps"))}
+            />
             <Text style={styles.brand}>Inbox</Text>
             <View style={styles.settingsButton} />
           </View>
@@ -1072,6 +1069,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.paper,
   },
   scroll: {
+    ...readableColumn,
     paddingHorizontal: 24,
     paddingBottom: 48,
   },

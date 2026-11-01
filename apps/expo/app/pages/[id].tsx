@@ -19,6 +19,7 @@ import { ApiError, api } from "../../src/lib/api";
 import { useSession } from "../../src/lib/auth";
 import { openTopLevelDestination } from "../../src/lib/inbox-body";
 import { previewPages, previewViewer } from "../../src/lib/inbox-preview";
+import { readableColumn } from "../../src/lib/layout";
 import { dismissNotificationsForPage } from "../../src/lib/notification-withdrawals";
 import {
   escalationLabel,
@@ -439,6 +440,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   actions: {
+    ...readableColumn,
     gap: 10,
     paddingHorizontal: 24,
     paddingTop: 12,

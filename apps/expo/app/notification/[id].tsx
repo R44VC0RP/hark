@@ -24,6 +24,7 @@ import {
   openTopLevelDestination,
 } from "../../src/lib/inbox-body";
 import { previewNotificationDetail } from "../../src/lib/inbox-preview";
+import { readableColumn } from "../../src/lib/layout";
 import { colors, fonts, tightTracking } from "../../src/lib/theme";
 
 export default function NotificationDetailScreen() {
@@ -320,6 +321,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.paper,
   },
   header: {
+    ...readableColumn,
     minHeight: 56,
     flexDirection: "row",
     alignItems: "center",
@@ -371,6 +373,7 @@ const styles = StyleSheet.create({
     letterSpacing: tightTracking(13),
   },
   scroll: {
+    ...readableColumn,
     paddingHorizontal: 24,
     paddingBottom: 64,
   },

@@ -7,6 +7,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { trackAppEvent } from "../src/lib/analytics";
 import { signInWithApple } from "../src/lib/apple-auth";
 import { authClient, useSession } from "../src/lib/auth";
+import { readableColumn } from "../src/lib/layout";
 import { colors, fonts, tightTracking } from "../src/lib/theme";
 
 export default function SignInScreen() {
@@ -111,6 +112,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.paper,
   },
   header: {
+    ...readableColumn,
     minHeight: 64,
     flexDirection: "row",
     alignItems: "center",
@@ -129,6 +131,8 @@ const styles = StyleSheet.create({
     letterSpacing: tightTracking(18),
   },
   hero: {
+    ...readableColumn,
+    maxWidth: 480,
     flex: 1,
     alignItems: "flex-start",
     justifyContent: "center",
@@ -151,6 +155,8 @@ const styles = StyleSheet.create({
     letterSpacing: tightTracking(16),
   },
   footer: {
+    ...readableColumn,
+    maxWidth: 480,
     paddingBottom: 16,
     gap: 10,
   },

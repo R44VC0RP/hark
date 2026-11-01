@@ -22,11 +22,13 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { HeaderLeading } from "../src/components/screen-parts";
 import { api } from "../src/lib/api";
 import { type AppIconOption, appIconLabel, appIconOptions } from "../src/lib/app-icons";
 import { authClient, useSession } from "../src/lib/auth";
 import { previewTeams } from "../src/lib/inbox-preview";
 import { clearInteractionResponses, DEVICE_ID_KEY } from "../src/lib/interactions";
+import { deviceNoun, isPad, readableColumn } from "../src/lib/layout";
 import { isUnsupportedRoute } from "../src/lib/teams";
 import { colors, fonts, tightTracking } from "../src/lib/theme";
 import { clearAllWebsiteData } from "../src/lib/website-data";
@@ -166,14 +168,9 @@ export default function SettingsScreen() {
       <StatusBar style="dark" />
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.header}>
-          <Pressable
-            accessibilityLabel="Back"
-            accessibilityRole="button"
-            onPress={() => router.back()}
-            style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
-          >
-            <SymbolView name="chevron.left" size={18} tintColor={colors.ink} weight="semibold" />
-          </Pressable>
+          <HeaderLeading
+            onBack={() => (router.canGoBack() ? router.back() : router.replace("/apps"))}
+          />
           <Text style={styles.headerTitle}>Settings</Text>
           <View style={styles.iconButton} />
         </View>
@@ -187,8 +184,8 @@ export default function SettingsScreen() {
           onPress={notificationsAllowed === false ? () => void Linking.openSettings() : undefined}
         />
         <SettingsRow
-          icon="iphone"
-          label="This iPhone"
+          icon={isPad ? "ipad" : "iphone"}
+          label={`This ${deviceNoun}`}
           value={registered === null ? "Checking…" : registered ? "Registered" : "Not registered"}
           onPress={registered === false ? () => router.replace("/home") : undefined}
         />
@@ -196,11 +193,13 @@ export default function SettingsScreen() {
           icon="waveform.path.ecg"
           label="Live Activities"
           value={
-            liveActivitiesCapable === null
-              ? "Checking…"
-              : liveActivitiesCapable
-                ? "Available"
-                : "Not available"
+            isPad
+              ? "iPhone only"
+              : liveActivitiesCapable === null
+                ? "Checking…"
+                : liveActivitiesCapable
+                  ? "Available"
+                  : "Not available"
           }
         />
         <SettingsRow
@@ -309,7 +308,7 @@ function SettingsRow({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.paper },
-  scroll: { paddingHorizontal: 24, paddingBottom: 48 },
+  scroll: { ...readableColumn, paddingHorizontal: 24, paddingBottom: 48 },
   header: {
     minHeight: 64,
     flexDirection: "row",

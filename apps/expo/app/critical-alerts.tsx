@@ -11,6 +11,7 @@ import {
   readCriticalAlertState,
   requestCriticalAlerts,
 } from "../src/lib/critical-alerts";
+import { deviceNoun } from "../src/lib/layout";
 import { colors, fonts, tightTracking } from "../src/lib/theme";
 
 /**
@@ -50,8 +51,8 @@ export default function CriticalAlertsScreen() {
         </View>
         <Text style={styles.title}>Never sleep through a page</Text>
         <Text style={ui.body}>
-          Critical Alerts let on-call pages ring at full volume even when your iPhone is on silent
-          or in a Focus like Sleep or Do Not Disturb.
+          Critical Alerts let on-call pages ring at full volume even when your {deviceNoun} is on
+          silent or in a Focus like Sleep or Do Not Disturb.
         </Text>
         <Text style={ui.body}>
           Hark only uses them for on-call pages sent to you. Every other notification keeps your

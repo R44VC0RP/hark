@@ -28,6 +28,7 @@ import {
   flushInteractionResponses,
   registerInteractionCategories,
 } from "../src/lib/interactions";
+import { deviceNoun, isPad, readableColumn } from "../src/lib/layout";
 import { refreshLiveActivityTokenSync } from "../src/lib/live-activities";
 import { colors, fonts, tightTracking } from "../src/lib/theme";
 import { clearAllWebsiteData } from "../src/lib/website-data";
@@ -91,7 +92,7 @@ export default function HomeScreen() {
     setLastError(null);
     try {
       if (!Device.isDevice) {
-        throw new Error("Push notifications require a physical iPhone.");
+        throw new Error(`Push notifications require a physical ${deviceNoun}.`);
       }
       const projectId =
         (Constants.expoConfig?.extra?.eas as { projectId?: string } | undefined)?.projectId ??
@@ -116,7 +117,7 @@ export default function HomeScreen() {
         platform: "ios",
         deviceName: Device.deviceName ?? undefined,
         interactionSchemaVersion: 1,
-        ...(Number.parseFloat(String(Platform.Version)) >= 17
+        ...(!isPad && Number.parseFloat(String(Platform.Version)) >= 17
           ? { liveActivityInteractionVersion: 1 as const }
           : {}),
         ...(criticalAlerts ? { criticalAlerts } : {}),
@@ -276,8 +277,8 @@ export default function HomeScreen() {
 
         <Text style={styles.greeting}>
           {ready
-            ? "This iPhone is ready to receive notifications."
-            : "Two steps and this iPhone starts receiving your webhooks."}
+            ? `This ${deviceNoun} is ready to receive notifications.`
+            : `Two steps and this ${deviceNoun} starts receiving your webhooks.`}
         </Text>
 
         {ready ? (
@@ -307,7 +308,7 @@ export default function HomeScreen() {
               body={
                 registration === "registered"
                   ? "This device is registered and ready when notifications are enabled."
-                  : "Links this iPhone to your account so your services can reach it."
+                  : `Links this ${deviceNoun} to your account so your services can reach it.`
               }
               actionLabel={
                 registration === "registered"
@@ -495,7 +496,7 @@ function activityStatus(activityEvent: EventDto): string {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.paper },
-  scroll: { paddingHorizontal: 24, paddingBottom: 48, gap: 14 },
+  scroll: { ...readableColumn, paddingHorizontal: 24, paddingBottom: 48, gap: 14 },
   header: {
     minHeight: 64,
     flexDirection: "row",

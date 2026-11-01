@@ -22,7 +22,7 @@ export default ({ config: _config }: ConfigContext): ExpoConfig => ({
     bundleIdentifier: "ceo.ryan.hark",
     usesAppleSignIn: true,
     icon: "./assets/icon.png",
-    supportsTablet: false,
+    supportsTablet: true,
     // Communication Notifications + SiriKit. `aps-environment` is managed by
     // EAS capability sync but included so bare prebuilds get push entitlements.
     entitlements: {
@@ -37,6 +37,14 @@ export default ({ config: _config }: ConfigContext): ExpoConfig => ({
     infoPlist: {
       ITSAppUsesNonExemptEncryption: false,
       NSUserActivityTypes: ["INSendMessageIntent"],
+      // iPhone stays portrait; iPad turns with the device and runs in Split
+      // View, Slide Over and Stage Manager, which need every orientation.
+      "UISupportedInterfaceOrientations~ipad": [
+        "UIInterfaceOrientationPortrait",
+        "UIInterfaceOrientationPortraitUpsideDown",
+        "UIInterfaceOrientationLandscapeLeft",
+        "UIInterfaceOrientationLandscapeRight",
+      ],
     },
   },
   plugins: [
