@@ -12,7 +12,7 @@ const criticalAlerts = process.env.HARK_CRITICAL_ALERTS === "1";
 export default ({ config: _config }: ConfigContext): ExpoConfig => ({
   name: "Hark",
   slug: "hark",
-  version: "1.3",
+  version: "1.4",
   icon: "./assets/icon.png",
   scheme: "hark",
   orientation: "portrait",
