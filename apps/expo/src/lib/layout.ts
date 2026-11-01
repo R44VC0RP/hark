@@ -82,3 +82,16 @@ export function SidebarProvider({ enabled, children }: { enabled: boolean; child
 export function useSidebar(): SidebarState {
   return useContext(SidebarContext);
 }
+
+/**
+ * Trackpad or mouse hover on iPad, for a highlight like UIKit's pointer
+ * effect. Spread `hoverProps` on a Pressable and style with `hovered`.
+ */
+export function useHover() {
+  const [hovered, setHovered] = useState(false);
+  const hoverProps = useMemo(
+    () => ({ onHoverIn: () => setHovered(true), onHoverOut: () => setHovered(false) }),
+    [],
+  );
+  return { hovered, hoverProps };
+}

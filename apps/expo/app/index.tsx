@@ -113,6 +113,7 @@ const styles = StyleSheet.create({
   },
   header: {
     ...readableColumn,
+    maxWidth: 480,
     minHeight: 64,
     flexDirection: "row",
     alignItems: "center",

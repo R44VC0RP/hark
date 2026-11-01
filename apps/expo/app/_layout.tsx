@@ -11,7 +11,7 @@ import * as SecureStore from "expo-secure-store";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
 import { AppState, Pressable, StyleSheet, View } from "react-native";
-import { Sidebar } from "../src/components/sidebar";
+import { KeyboardShortcuts, Sidebar } from "../src/components/sidebar";
 import { trackAppEvent } from "../src/lib/analytics";
 import { useSession } from "../src/lib/auth";
 import {
@@ -123,9 +123,11 @@ export default function RootLayout() {
   // The iPad sidebar belongs to the signed-in app, not sign-in or setup.
   const simulatorPreview = __DEV__ && !Device.isDevice;
   const sidebarRoute = !["/", "/home", "/la-lab"].includes(pathname);
+  const inApp = Boolean(session || simulatorPreview) && sidebarRoute;
 
   return (
-    <SidebarProvider enabled={Boolean(session || simulatorPreview) && sidebarRoute}>
+    <SidebarProvider enabled={inApp}>
+      {inApp ? <KeyboardShortcuts /> : null}
       <Shell />
     </SidebarProvider>
   );

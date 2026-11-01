@@ -1,6 +1,6 @@
 import { API_ERROR_CODE_CONSENT_REQUIRED, type AppDto } from "@hark/contracts";
 import * as Device from "expo-device";
-import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
 import { SymbolView } from "expo-symbols";
@@ -35,7 +35,8 @@ import { AppIcon } from "../../src/components/app-icon";
 import { ApiError, api } from "../../src/lib/api";
 import { isHttpUrl, openExternalLink } from "../../src/lib/inbox-body";
 import { previewApps } from "../../src/lib/inbox-preview";
-import { deviceNoun, readableColumn, useLayout, useSidebar } from "../../src/lib/layout";
+import { onKeyCommand } from "../../src/lib/key-commands";
+import { deviceNoun, readableColumn, useHover, useLayout, useSidebar } from "../../src/lib/layout";
 import { colors, fonts, tightTracking } from "../../src/lib/theme";
 import {
   buildBridgeScript,
@@ -150,6 +151,21 @@ export default function WebAppScreen() {
   useEffect(() => {
     void start();
   }, [start]);
+
+  // ⌘R, ⌘[, ⌘] and ⌘W from a hardware keyboard, while this app is in front.
+  useFocusEffect(
+    useCallback(() => {
+      const subscriptions = [
+        onKeyCommand("reload", () => webView.current?.reload()),
+        onKeyCommand("back", () => webView.current?.goBack()),
+        onKeyCommand("forward", () => webView.current?.goForward()),
+        onKeyCommand("close", close),
+      ];
+      return () => {
+        for (const unsubscribe of subscriptions) unsubscribe();
+      };
+    }, [close]),
+  );
 
   // The left-edge swipe walks back through the page's history first and only
   // returns to Hark once the web view is on its first page.
@@ -590,8 +606,10 @@ function ToolbarButton({
   disabled?: boolean;
   onPress: () => void;
 }): ReactNode {
+  const { hovered, hoverProps } = useHover();
   return (
     <Pressable
+      {...hoverProps}
       accessibilityLabel={label}
       accessibilityRole="button"
       accessibilityState={{ disabled: Boolean(disabled) }}
@@ -600,6 +618,7 @@ function ToolbarButton({
       onPress={onPress}
       style={({ pressed }) => [
         styles.toolbarButton,
+        hovered && !disabled && styles.toolbarButtonPressed,
         disabled && styles.toolbarButtonDisabled,
         pressed && styles.toolbarButtonPressed,
       ]}

@@ -6,8 +6,14 @@ import { type SFSymbol, SymbolView } from "expo-symbols";
 import { useCallback, useEffect, useRef } from "react";
 import { AppState, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { loadDirectory, publishDirectory, useDirectory } from "../lib/app-directory";
-import { SIDEBAR_WIDTH, useSidebar } from "../lib/layout";
+import {
+  type Directory,
+  loadDirectory,
+  publishDirectory,
+  useDirectory,
+} from "../lib/app-directory";
+import { type KeyModifier, onKeyCommand, setKeyCommands } from "../lib/key-commands";
+import { SIDEBAR_WIDTH, useHover, useSidebar } from "../lib/layout";
 import { currentShift, groupAppsByTeam, onPageClaimed, pagesNeedingResponse } from "../lib/teams";
 import { colors, fonts, tightTracking } from "../lib/theme";
 import { AppIcon } from "./app-icon";
@@ -34,16 +40,134 @@ function locate(pathname: string): { section: Section | null; appId: string | nu
 }
 
 /**
+ * Switches to a sidebar destination. From the launcher a destination stacks
+ * on it; from anywhere else it replaces the current screen, so the stack
+ * never grows past two and Back always leads to the launcher. A sidebar that
+ * slid over the content closes.
+ */
+export function useSidebarNavigation() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const { dismiss } = useSidebar();
+  return (href: Href, target: string) => {
+    dismiss();
+    if (pathname === target) return;
+    if (target === "/apps") {
+      router.dismissTo("/apps");
+      return;
+    }
+    if (pathname === "/apps") router.push(href);
+    else router.replace(href);
+  };
+}
+
+/** Web apps in sidebar order: your own, then each team's. */
+export function orderedApps(directory: Directory | null): AppDto[] {
+  if (!directory) return [];
+  const grouped = groupAppsByTeam(directory.apps, directory.teams ?? []);
+  return [...grouped.personal, ...grouped.teams.flatMap((team) => team.apps)];
+}
+
+/**
+ * iPad keyboard shortcuts (hold ⌘ to see them): ⌘0 apps, ⌘1–9 the first
+ * nine web apps, ⇧⌘I inbox, ⌘, settings, ⌃⌘S the sidebar; inside a web app
+ * also ⌘R, ⌘[ and ⌘] and ⌘W (handled by that screen).
+ */
+export function KeyboardShortcuts() {
+  const pathname = usePathname();
+  const directory = useDirectory();
+  const sidebar = useSidebar();
+  const go = useSidebarNavigation();
+  const apps = orderedApps(directory).slice(0, 9);
+  const inWebApp = pathname.startsWith("/web/");
+  const appKey = apps.map((app) => `${app.id}:${app.name}`).join("|");
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: appKey stands in for apps.
+  useEffect(() => {
+    setKeyCommands([
+      { id: "apps", input: "0", modifiers: ["command"], title: "Apps" },
+      ...apps.map((app, index) => ({
+        id: `app:${app.id}`,
+        input: String(index + 1),
+        modifiers: ["command"] as KeyModifier[],
+        title: app.name,
+      })),
+      { id: "inbox", input: "i", modifiers: ["command", "shift"], title: "Inbox" },
+      { id: "settings", input: ",", modifiers: ["command"], title: "Settings" },
+      ...(sidebar.fits
+        ? [
+            {
+              id: "sidebar",
+              input: "s",
+              modifiers: ["command", "control"] as KeyModifier[],
+              title: sidebar.open ? "Hide Sidebar" : "Show Sidebar",
+            },
+          ]
+        : []),
+      ...(inWebApp
+        ? [
+            { id: "reload", input: "r", modifiers: ["command"] as KeyModifier[], title: "Reload" },
+            { id: "back", input: "[", modifiers: ["command"] as KeyModifier[], title: "Back" },
+            {
+              id: "forward",
+              input: "]",
+              modifiers: ["command"] as KeyModifier[],
+              title: "Forward",
+            },
+            {
+              id: "close",
+              input: "w",
+              modifiers: ["command"] as KeyModifier[],
+              title: "Close App",
+            },
+          ]
+        : []),
+    ]);
+  }, [appKey, inWebApp, sidebar.fits, sidebar.open]);
+
+  const goRef = useRef(go);
+  goRef.current = go;
+  const toggleRef = useRef(sidebar.toggle);
+  toggleRef.current = sidebar.toggle;
+  const via = { via: "sidebar" };
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: appKey stands in for apps.
+  useEffect(() => {
+    const subscriptions = [
+      onKeyCommand("apps", () => goRef.current("/apps", "/apps")),
+      onKeyCommand("inbox", () => goRef.current({ pathname: "/inbox", params: via }, "/inbox")),
+      onKeyCommand("settings", () =>
+        goRef.current({ pathname: "/settings", params: via }, "/settings"),
+      ),
+      onKeyCommand("sidebar", () => toggleRef.current()),
+      ...apps.map((app) =>
+        onKeyCommand(`app:${app.id}`, () =>
+          goRef.current(
+            { pathname: "/web/[id]", params: { id: app.id, ...via } },
+            `/web/${app.id}`,
+          ),
+        ),
+      ),
+    ];
+    return () => {
+      for (const unsubscribe of subscriptions) unsubscribe();
+    };
+  }, [appKey]);
+
+  return null;
+}
+
+/**
  * The iPad sidebar: Hark's sections and every web app, one tap away from
  * anywhere. Switching swaps the screen in place instead of stacking it, so
  * Back always leads to the launcher.
  */
 export function Sidebar() {
   const insets = useSafeAreaInsets();
-  const router = useRouter();
   const pathname = usePathname();
   const directory = useDirectory();
-  const { toggle, dismiss, docked } = useSidebar();
+  const { toggle, docked } = useSidebar();
+  const go = useSidebarNavigation();
   const simulatorPreview = __DEV__ && !Device.isDevice;
   const lastRefresh = useRef(0);
 
@@ -78,18 +202,6 @@ export function Sidebar() {
 
   const { section, appId } = locate(pathname);
 
-  const go = (href: Href, target: string) => {
-    dismiss();
-    if (pathname === target) return;
-    if (target === "/apps") {
-      router.dismissTo("/apps");
-      return;
-    }
-    // From the launcher a destination stacks on it; from anywhere else it
-    // replaces the current screen, so the stack never grows past two.
-    if (pathname === "/apps") router.push(href);
-    else router.replace(href);
-  };
   const via = { via: "sidebar" };
 
   const apps = directory?.apps ?? [];
@@ -102,29 +214,14 @@ export function Sidebar() {
 
   const appRows = (items: AppDto[]) =>
     items.map((app) => (
-      <Pressable
-        accessibilityHint="Opens the app"
-        accessibilityLabel={app.name}
-        accessibilityRole="button"
-        accessibilityState={{ selected: app.id === appId }}
+      <AppRow
+        active={app.id === appId}
+        app={app}
         key={app.id}
         onPress={() =>
           go({ pathname: "/web/[id]", params: { id: app.id, ...via } }, `/web/${app.id}`)
         }
-        style={({ pressed }) => [
-          styles.row,
-          app.id === appId && styles.rowActive,
-          pressed && styles.rowPressed,
-        ]}
-      >
-        <AppIcon iconUrl={app.iconUrl} name={app.name} size={26} />
-        <Text
-          numberOfLines={1}
-          style={[styles.rowLabel, app.id === appId && styles.rowLabelActive]}
-        >
-          {app.name}
-        </Text>
-      </Pressable>
+      />
     ));
 
   return (
@@ -153,6 +250,7 @@ export function Sidebar() {
         {firstPage ? (
           <Pressable
             accessibilityHint={needYou.length === 1 ? "Opens the page" : "Shows your open pages"}
+            accessibilityLabel={`${needYou.length === 1 ? "A page needs you" : `${needYou.length} pages need you`}. ${firstPage.groupName}, ${firstPage.title}`}
             accessibilityRole="button"
             onPress={() =>
               needYou.length === 1
@@ -243,6 +341,31 @@ export function Sidebar() {
   );
 }
 
+function AppRow({ app, active, onPress }: { app: AppDto; active: boolean; onPress: () => void }) {
+  const { hovered, hoverProps } = useHover();
+  return (
+    <Pressable
+      {...hoverProps}
+      accessibilityHint="Opens the app"
+      accessibilityLabel={app.name}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.row,
+        hovered && styles.rowHovered,
+        active && styles.rowActive,
+        pressed && styles.rowPressed,
+      ]}
+    >
+      <AppIcon iconUrl={app.iconUrl} name={app.name} size={26} />
+      <Text numberOfLines={1} style={[styles.rowLabel, active && styles.rowLabelActive]}>
+        {app.name}
+      </Text>
+    </Pressable>
+  );
+}
+
 function NavRow({
   icon,
   label,
@@ -258,14 +381,17 @@ function NavRow({
   detail?: string;
   onPress: () => void;
 }) {
+  const { hovered, hoverProps } = useHover();
   return (
     <Pressable
+      {...hoverProps}
       accessibilityLabel={badge ? `${label}, ${badge}` : label}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
       onPress={onPress}
       style={({ pressed }) => [
         styles.row,
+        hovered && styles.rowHovered,
         active && styles.rowActive,
         pressed && styles.rowPressed,
       ]}
@@ -343,6 +469,9 @@ const styles = StyleSheet.create({
     gap: 11,
     paddingHorizontal: 10,
     borderRadius: 10,
+  },
+  rowHovered: {
+    backgroundColor: "#E9E7E1",
   },
   rowActive: {
     backgroundColor: colors.accentSoft,

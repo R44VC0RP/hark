@@ -17,6 +17,7 @@ import {
 import { ApiError, api } from "../../src/lib/api";
 import { useSession } from "../../src/lib/auth";
 import { PREVIEW_TEAM_ID, previewInvite } from "../../src/lib/inbox-preview";
+import { readableColumn } from "../../src/lib/layout";
 import {
   isSeatLimitError,
   memberCountLabel,
@@ -90,7 +91,7 @@ export default function JoinTeamScreen() {
       <ScreenHeader />
       {!invite ? (
         loadError ? (
-          <View style={{ paddingHorizontal: 24, gap: 16 }}>
+          <View style={[readableColumn, { paddingHorizontal: 24, gap: 16 }]}>
             <Text style={ui.title}>Invite unavailable</Text>
             <Text style={ui.muted}>{loadError}</Text>
           </View>
@@ -98,7 +99,12 @@ export default function JoinTeamScreen() {
           <ActivityIndicator color={colors.accent} style={ui.loading} />
         )
       ) : (
-        <View style={{ flex: 1, justifyContent: "space-between", paddingHorizontal: 24 }}>
+        <View
+          style={[
+            readableColumn,
+            { flex: 1, justifyContent: "space-between", paddingHorizontal: 24 },
+          ]}
+        >
           <View>
             <View style={{ alignItems: "flex-start", gap: 16, paddingTop: 16 }}>
               <PersonAvatar name={invite.teamName} size={60} />
