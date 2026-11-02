@@ -238,6 +238,17 @@ async function recordDelivery(
   const now = new Date();
   const invalid = isInvalidApnsTokenReason(result.reason);
   db.transaction((tx) => {
+    // The push was in flight outside this transaction. If the delivery has
+    // since left the active set (a newer Live Activity replaced it, or it
+    // ended or expired), keep that status: reviving it would clash with the
+    // device's new active delivery (one active task per device).
+    const current = tx
+      .select({ status: liveActivityDelivery.status })
+      .from(liveActivityDelivery)
+      .where(eq(liveActivityDelivery.id, delivery.id))
+      .get();
+    const settled =
+      current !== undefined && !["pending", "accepted", "active"].includes(current.status);
     tx.insert(liveActivityDeliveryAttempt)
       .values({
         id: newId("laa"),
@@ -258,11 +269,13 @@ async function recordDelivery(
         status:
           eventName === "end"
             ? "ended"
-            : result.accepted
-              ? "accepted"
-              : eventName === "start"
-                ? "failed"
-                : delivery.status,
+            : settled
+              ? current.status
+              : result.accepted
+                ? "accepted"
+                : eventName === "start"
+                  ? "failed"
+                  : delivery.status,
         lastEvent: eventName,
         lastSequence: sequence,
         lastApnsStatus: result.status || null,
@@ -270,7 +283,7 @@ async function recordDelivery(
         lastApnsId: result.apnsId,
         lastAttemptAt: now,
         updatedAt: now,
-        endedAt: eventName === "end" ? now : null,
+        ...(eventName === "end" ? { endedAt: now } : settled ? {} : { endedAt: null }),
         ...(invalid ? { updateTokenCiphertext: null, updateTokenUpdatedAt: null } : {}),
       })
       .where(eq(liveActivityDelivery.id, delivery.id))

@@ -370,6 +370,13 @@ export const hooksRoute = new Hono()
           const replay = replayResponse(existing);
           return c.json(replay.body, replay.status);
         }
+        // A concurrent request with the same key but another payload won.
+        if (existing) {
+          return c.json<WebhookResponse>(
+            { ok: false, error: "Idempotency-Key was already used with a different payload" },
+            409,
+          );
+        }
       }
       throw error;
     }

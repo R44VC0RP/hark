@@ -5,7 +5,11 @@ process.env.DATABASE_URL = ":memory:";
 
 const authState = vi.hoisted(() => ({ userId: "activity_user_1" as string | null }));
 const apnsCalls = vi.hoisted(() => [] as Array<Record<string, unknown>>);
-const apnsState = vi.hoisted(() => ({ rejectEvent: null as string | null }));
+const apnsState = vi.hoisted(() => ({
+  rejectEvent: null as string | null,
+  /** Runs while a push is in flight, to simulate concurrent requests. */
+  duringPush: null as null | ((input: Record<string, unknown>) => void),
+}));
 const billingState = vi.hoisted(() => ({ pro: true, serviceRate: 1000, accountRate: 1000 }));
 
 vi.mock("../auth", () => ({
@@ -54,6 +58,7 @@ vi.mock("../lib/apns", () => ({
     priority: number,
   ) => {
     apnsCalls.push({ token, environment, input, priority });
+    apnsState.duringPush?.(input);
     if (input.event === apnsState.rejectEvent) {
       return { status: 503, apnsId: null, reason: "Unavailable", accepted: false };
     }
@@ -180,6 +185,7 @@ beforeEach(async () => {
   billingState.accountRate = 1000;
   apnsCalls.length = 0;
   apnsState.rejectEvent = null;
+  apnsState.duringPush = null;
   await db.delete(schema.liveActivity);
   const { eq } = await import("drizzle-orm");
   await db
@@ -512,6 +518,57 @@ describe("Live Activity agent routes", () => {
       .where(eq(schema.liveActivityDelivery.activityId, firstBody.activity.id))
       .get();
     expect(oldDelivery).toMatchObject({ status: "ended", lastEvent: "end" });
+  });
+
+  it("does not revive a delivery that a newer activity replaced mid-push", async () => {
+    const { eq } = await import("drizzle-orm");
+    const first = await start({
+      title: "Racing run",
+      status: "Running",
+      deviceIds: ["activity_dev_1"],
+    });
+    const firstBody = (await first.json()) as { activity: { id: string } };
+    expect(
+      (await registerUpdateToken(firstBody.activity.id, "native-racing", "cd".repeat(32))).status,
+    ).toBe(200);
+    const oldDelivery = db
+      .select()
+      .from(schema.liveActivityDelivery)
+      .where(eq(schema.liveActivityDelivery.activityId, firstBody.activity.id))
+      .get();
+    if (!oldDelivery) throw new Error("missing delivery");
+
+    // While the update push is in flight, a newer activity takes the device:
+    // the old delivery ends and another active one appears.
+    apnsState.duringPush = (input) => {
+      if (input.event !== "update") return;
+      apnsState.duringPush = null;
+      const now = new Date();
+      db.update(schema.liveActivityDelivery)
+        .set({ status: "ended", endedAt: now, updatedAt: now })
+        .where(eq(schema.liveActivityDelivery.id, oldDelivery.id))
+        .run();
+      db.insert(schema.liveActivityDelivery)
+        .values({
+          ...oldDelivery,
+          id: "lad_newer",
+          status: "pending",
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+    };
+    const response = await agent(`/${firstBody.activity.id}`, WRITE_SECRET, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "Still running" }),
+    });
+    expect(response.status).toBe(200);
+    const after = db
+      .select()
+      .from(schema.liveActivityDelivery)
+      .where(eq(schema.liveActivityDelivery.id, oldDelivery.id))
+      .get();
+    expect(after).toMatchObject({ status: "ended", lastEvent: "update" });
   });
 
   it("reuses a key after the keyed activity ends", async () => {
