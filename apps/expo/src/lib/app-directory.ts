@@ -44,7 +44,32 @@ let inflight: Promise<Directory> | null = null;
 /** The follow-up load requested while `inflight` runs. */
 let queued: Promise<Directory> | null = null;
 let lastRefreshAt = 0;
+/** Loads started so far; numbers each load. */
+let loadsStarted = 0;
 const listeners = new Set<() => void>();
+
+/**
+ * A read-state change the counts already show (`changeUnreadCount`). Loads
+ * started before the server made the change don't include it yet, so it is
+ * added on top of them until a load that started after it arrives.
+ */
+interface UnreadChange {
+  delta: number;
+  /** The first load that includes it; `Infinity` while its request runs. */
+  includedFrom: number;
+}
+const unreadChanges = new Set<UnreadChange>();
+
+function unreadNotYetLoaded(): number {
+  let total = 0;
+  for (const change of unreadChanges) total += change.delta;
+  return total;
+}
+
+/** The app icon badge: the same number as the Inbox tab badge. */
+function setAppBadge(directory: Directory): void {
+  void Notifications.setBadgeCountAsync(directory.waiting + directory.unread).catch(() => {});
+}
 
 function subscribe(listener: () => void) {
   listeners.add(listener);
@@ -75,8 +100,43 @@ export function publishDirectory(directory: Directory): void {
  */
 export function publishInboxCounts(counts: { unread: number; waiting: number }): void {
   if (!current) return;
-  if (current.unread === counts.unread && current.waiting === counts.waiting) return;
-  publishDirectory({ ...current, ...counts });
+  // The Inbox may have loaded before a read-state change reached the server:
+  // its unread count waits for the directory load that includes the change.
+  const unread = unreadChanges.size > 0 ? current.unread : counts.unread;
+  if (current.unread === unread && current.waiting === counts.waiting) return;
+  publishDirectory({ ...current, unread, waiting: counts.waiting });
+}
+
+/**
+ * Shows a read-state change (read, unread, mark all as read) in the Inbox tab
+ * badge and the app icon badge at once, and keeps showing it until a load
+ * that includes it: `request` makes the change on the server, and if it
+ * fails the counts go back. Every screen that changes read state uses this,
+ * so the badges never wait for the next poll.
+ */
+export function changeUnreadCount<T>(delta: number, request: Promise<T>): Promise<T> {
+  const change: UnreadChange = { delta, includedFrom: Number.POSITIVE_INFINITY };
+  unreadChanges.add(change);
+  shiftUnread(delta);
+  return request.then(
+    (result) => {
+      change.includedFrom = loadsStarted + 1;
+      void refreshDirectory().catch(() => {});
+      return result;
+    },
+    (error: unknown) => {
+      unreadChanges.delete(change);
+      shiftUnread(-delta);
+      throw error;
+    },
+  );
+}
+
+function shiftUnread(delta: number): void {
+  if (!current || delta === 0) return;
+  const next = { ...current, unread: Math.max(0, current.unread + delta) };
+  publishDirectory(next);
+  setAppBadge(next);
 }
 
 export function useDirectory(): Directory | null {
@@ -88,18 +148,26 @@ export function useDirectoryLoadFailed(): boolean {
   return useSyncExternalStore(subscribe, () => failed);
 }
 
-/** Loads a fresh snapshot (demo data in the simulator) without publishing it. */
-export async function loadDirectory(preview: boolean): Promise<Directory> {
+/**
+ * Loads a fresh snapshot (demo data in the simulator) without publishing it.
+ * `countsLoaded` is false when the inbox counts couldn't be loaded (they read 0).
+ */
+async function loadDirectory(
+  preview: boolean,
+): Promise<{ directory: Directory; countsLoaded: boolean }> {
   if (preview) {
     // Keep consent granted earlier in this preview session.
     const apps = previewApps.map((app) => cachedApp(app.id) ?? app);
     cacheApps(apps);
     return {
-      apps,
-      teams: [...previewTeams],
-      oncall: previewOncallMe,
-      unread: previewProjects.totalUnread,
-      waiting: previewPending.length,
+      directory: {
+        apps,
+        teams: [...previewTeams],
+        oncall: previewOncallMe,
+        unread: previewProjects.totalUnread,
+        waiting: previewPending.length,
+      },
+      countsLoaded: false,
     };
   }
   const [appResult, pendingResult, projectResult, teamResult, oncallResult] = await Promise.all([
@@ -111,18 +179,15 @@ export async function loadDirectory(preview: boolean): Promise<Directory> {
     api.getMyOncall().catch(() => null),
   ]);
   cacheApps(appResult.apps);
-  const waiting = pendingResult?.interactions.length ?? 0;
-  const unread = projectResult?.totalUnread ?? 0;
-  // Same badge rule as the inbox: pending requests plus unread notifications.
-  if (pendingResult && projectResult) {
-    void Notifications.setBadgeCountAsync(waiting + unread).catch(() => {});
-  }
   return {
-    apps: appResult.apps,
-    teams: teamResult?.teams ?? null,
-    oncall: oncallResult,
-    unread,
-    waiting,
+    directory: {
+      apps: appResult.apps,
+      teams: teamResult?.teams ?? null,
+      oncall: oncallResult,
+      unread: projectResult?.totalUnread ?? 0,
+      waiting: pendingResult?.interactions.length ?? 0,
+    },
+    countsLoaded: pendingResult !== null && projectResult !== null,
   };
 }
 
@@ -150,9 +215,19 @@ export function refreshDirectory(): Promise<Directory> {
 
 function startLoad(): Promise<Directory> {
   lastRefreshAt = Date.now();
+  const loadNumber = ++loadsStarted;
   const task = loadDirectory(simulatorPreview)
-    .then((directory) => {
+    .then(({ directory: loaded, countsLoaded }) => {
+      for (const change of unreadChanges) {
+        if (change.includedFrom <= loadNumber) unreadChanges.delete(change);
+      }
+      const directory = {
+        ...loaded,
+        unread: Math.max(0, loaded.unread + unreadNotYetLoaded()),
+      };
       publishDirectory(directory);
+      // Same badge rule as the Inbox: pending requests plus unread notifications.
+      if (countsLoaded) setAppBadge(directory);
       return directory;
     })
     .catch((error: unknown) => {

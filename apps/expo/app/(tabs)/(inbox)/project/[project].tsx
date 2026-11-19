@@ -9,6 +9,7 @@ import {
   NotificationRow,
 } from "../../../../src/components/notification-row";
 import { api } from "../../../../src/lib/api";
+import { changeUnreadCount } from "../../../../src/lib/app-directory";
 import { useSession } from "../../../../src/lib/auth";
 import { haptic } from "../../../../src/lib/haptics";
 import { openTopLevelDestination } from "../../../../src/lib/inbox-body";
@@ -151,7 +152,10 @@ export default function ProjectScreen() {
         // The snapshot token marks every unread row the last load observed —
         // including older rows beyond the first page — while notifications
         // arriving mid-tap stay unread even on timestamp ties.
-        await api.markAllNotificationsRead({ readThrough, project: projectParam });
+        await changeUnreadCount(
+          -(summaryUnread ?? loadedUnreadCount(items)),
+          api.markAllNotificationsRead({ readThrough, project: projectParam }),
+        );
       }
       setItems((current) => markLoadedItemsRead(current, new Date().toISOString()));
       setSummaryUnread(0);
@@ -177,9 +181,9 @@ export default function ProjectScreen() {
       if (markRead) {
         readAt = simulatorPreview
           ? new Date().toISOString()
-          : (await api.markNotificationRead(item.id)).readAt;
+          : (await changeUnreadCount(-1, api.markNotificationRead(item.id))).readAt;
       } else if (!simulatorPreview) {
-        await api.markNotificationUnread(item.id);
+        await changeUnreadCount(1, api.markNotificationUnread(item.id));
       }
       setItems((current) =>
         current.map((candidate) =>
