@@ -26,7 +26,7 @@ import {
   registerInteractionCategories,
 } from "../src/lib/interactions";
 import { startLiveActivityTokenSync } from "../src/lib/live-activities";
-import { setCurrentPath } from "../src/lib/navigation";
+import { setCurrentPath, useNavigationForLinks } from "../src/lib/navigation";
 import { PENDING_JOIN_CODE_KEY } from "../src/lib/teams";
 import { useStackedRows } from "../src/ui/list";
 import { navigationTheme, palette, sheetOptions, stackScreenOptions } from "../src/ui/tokens";
@@ -62,6 +62,7 @@ export default function RootLayout() {
   });
 
   const navigatorReady = fontsLoaded || Boolean(fontError);
+  useNavigationForLinks();
   const largeText = useStackedRows();
   useEffect(() => {
     if (navigatorReady) void SplashScreen.hideAsync();

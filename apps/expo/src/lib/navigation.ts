@@ -1,4 +1,6 @@
-import { type Href, router } from "expo-router";
+import { type Href, router, useNavigationContainerRef } from "expo-router";
+import { CommonActions } from "expo-router/react-navigation";
+import { useEffect } from "react";
 
 /**
  * Navigation helpers shared by every screen (DESIGN.md 5.0). The root layout
@@ -39,4 +41,57 @@ export function leaveSheetThenPush(href: Href): void {
 export function leaveAppTo(href: "/" | "/home"): void {
   if (router.canDismiss()) router.dismissAll();
   router.replace(href);
+}
+
+/** The parts of a navigator's state that `dropLeftoverPreviews` reads. */
+interface NavigatorState {
+  key: string;
+  type?: string;
+  routes: { state?: unknown }[];
+  preloadedRoutes?: unknown[];
+}
+
+interface NavigationRef {
+  getRootState(): unknown;
+  dispatch(action: object): void;
+}
+
+let navigationRef: NavigationRef | null = null;
+
+/** Root layout only: lets `dropLeftoverPreviews` reach the navigation state. */
+export function useNavigationForLinks(): void {
+  const navigation = useNavigationContainerRef();
+  useEffect(() => {
+    navigationRef = navigation as unknown as NavigationRef;
+    return () => {
+      navigationRef = null;
+    };
+  }, [navigation]);
+}
+
+function dropPreloadedRoutes(state: NavigatorState, dispatch: (action: object) => void): void {
+  if (state.type === "stack" && state.preloadedRoutes?.length) {
+    dispatch({
+      ...CommonActions.reset({ ...state, preloadedRoutes: [] } as never),
+      target: state.key,
+    });
+  }
+  for (const route of state.routes) {
+    if (route.state) dropPreloadedRoutes(route.state as NavigatorState, dispatch);
+  }
+}
+
+/**
+ * Drops the screens a dismissed `Link.Preview` left preloaded (called by
+ * `app/+native-intent.tsx` before a link is handled). Touch and hold
+ * preloads the destination, and a dismissed preview leaves it there; taps
+ * and pushes adopt it, but a deep link to the same route did nothing: links
+ * are NAVIGATE actions with `pop`, and expo-router's stack router takes the
+ * preloaded route but only looks for it among the visible routes (checked in
+ * the simulator with `hark://notification/…` after a preview). Each preview
+ * replaces the last one, so at most one waits per stack.
+ */
+export function dropLeftoverPreviews(): void {
+  const root = navigationRef?.getRootState() as NavigatorState | undefined;
+  if (root && navigationRef) dropPreloadedRoutes(root, navigationRef.dispatch.bind(navigationRef));
 }
