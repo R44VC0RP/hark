@@ -1,5 +1,5 @@
 import { type Href, router, useNavigationContainerRef } from "expo-router";
-import { CommonActions } from "expo-router/react-navigation";
+import { CommonActions, StackActions } from "expo-router/react-navigation";
 import { useEffect } from "react";
 
 /**
@@ -47,8 +47,55 @@ export function leaveAppTo(href: "/" | "/home"): void {
 interface NavigatorState {
   key: string;
   type?: string;
-  routes: { state?: unknown }[];
+  index?: number;
+  routes: { name?: string; state?: unknown }[];
   preloadedRoutes?: unknown[];
+}
+
+/** Root routes presented as form sheets (`app/_layout.tsx`). */
+export const SHEET_ROUTES: ReadonlySet<string> = new Set([
+  "apps/[id]",
+  "pages/[id]",
+  "join/[code]",
+  "critical-alerts",
+  "reply/[id]",
+  "settings",
+]);
+
+/** The root Stack's state: expo-router nests it under its own `__root` route. */
+function rootStack(): NavigatorState | undefined {
+  const container = navigationRef?.getRootState() as NavigatorState | undefined;
+  return container?.routes?.[0]?.state as NavigatorState | undefined;
+}
+
+/** Closes the sheet on top of the app, if any (iPad Esc and ⌘W, links). */
+export function closeTopSheet(): boolean {
+  const stack = rootStack();
+  const top = stack?.routes[stack.index ?? stack.routes.length - 1];
+  if (!stack || !navigationRef || !top?.name || !SHEET_ROUTES.has(top.name)) return false;
+  navigationRef.dispatch({ ...StackActions.pop(), target: stack.key });
+  return true;
+}
+
+/** The sheet route a link opens ("/join/abc" → "join/[code]"), if it opens one. */
+function sheetRouteOf(path: string): string | null {
+  const route = path.replace(/^[a-z][a-z0-9+.-]*:\/\/\/?/i, "").replace(/^\/+/, "");
+  const [first = "", second] = route.split(/[/?#]/);
+  if (first === "apps") return second ? "apps/[id]" : null;
+  if (first === "critical-alerts" || first === "settings") return first;
+  if (first === "join") return "join/[code]";
+  if (first === "pages") return "pages/[id]";
+  if (first === "reply") return "reply/[id]";
+  return null;
+}
+
+/**
+ * A link that opens a sheet while another sheet is up closes that one first,
+ * so sheets never stack (a Reply link over the Join sheet showed both).
+ * Called by `app/+native-intent.tsx` before the link is handled.
+ */
+export function closeSheetForLink(path: string): void {
+  if (sheetRouteOf(path)) closeTopSheet();
 }
 
 interface NavigationRef {

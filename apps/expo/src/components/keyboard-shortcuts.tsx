@@ -3,7 +3,7 @@ import { router, usePathname, useRootNavigationState } from "expo-router";
 import { useEffect, useRef } from "react";
 import { type Directory, useDirectory } from "../lib/app-directory";
 import { type KeyCommand, onKeyCommand, setKeyCommands } from "../lib/key-commands";
-import { openWebApp } from "../lib/navigation";
+import { closeTopSheet, openWebApp, SHEET_ROUTES } from "../lib/navigation";
 import { groupAppsByTeam } from "../lib/teams";
 
 /** Web apps in launcher order: your own, then each team's. */
@@ -26,15 +26,18 @@ function showTab(href: "/inbox" | "/apps", tabsOnTop: boolean): void {
 /**
  * iPad keyboard shortcuts (hold ⌘ to list them, DESIGN.md 2.6): ⌘0 Apps,
  * ⌘1–9 the first nine web apps, ⇧⌘I Inbox, ⌘, Settings; inside a web app
- * also ⌘R, ⌘[, ⌘] and ⌘W (handled by that screen). Mounted once, in the
- * tabs layout, so it stays active over web apps and sheets.
+ * also ⌘R, ⌘[, ⌘] and ⌘W (handled by that screen); with a sheet up, Esc and
+ * ⌘W close it. Mounted once, in the tabs layout, so it stays active over web
+ * apps and sheets.
  */
 export function KeyboardShortcuts() {
   const pathname = usePathname();
   const directory = useDirectory();
   // expo-router nests the root layout's Stack under its own `__root` route.
   const stackState = useRootNavigationState()?.routes?.[0]?.state;
-  const tabsOnTop = stackState?.routes?.[stackState.index ?? 0]?.name === "(tabs)";
+  const topRoute = stackState?.routes?.[stackState.index ?? 0]?.name;
+  const tabsOnTop = topRoute === "(tabs)";
+  const sheetOnTop = topRoute !== undefined && SHEET_ROUTES.has(topRoute);
   const apps = orderedApps(directory).slice(0, 9);
   const inWebApp = pathname.startsWith("/web/");
   const appKey = apps.map((app) => `${app.id}:${app.name}`).join("|");
@@ -52,7 +55,14 @@ export function KeyboardShortcuts() {
       { id: "inbox", input: "i", modifiers: ["command", "shift"], title: "Inbox" },
       { id: "settings", input: ",", modifiers: ["command"], title: "Settings" },
     ];
-    if (inWebApp) {
+    if (sheetOnTop) {
+      // Like a sheet on the Mac. A popover or alert inside the sheet is
+      // closer in the responder chain and takes Esc first.
+      commands.push(
+        { id: "closeSheet", input: "escape", modifiers: [], title: "Close" },
+        { id: "closeSheetW", input: "w", modifiers: ["command"], title: "Close" },
+      );
+    } else if (inWebApp) {
       commands.push(
         { id: "reload", input: "r", modifiers: ["command"], title: "Reload" },
         { id: "back", input: "[", modifiers: ["command"], title: "Back" },
@@ -61,7 +71,7 @@ export function KeyboardShortcuts() {
       );
     }
     setKeyCommands(commands);
-  }, [appKey, inWebApp]);
+  }, [appKey, inWebApp, sheetOnTop]);
 
   // Read at key-press time; the subscriptions below only change with the apps.
   const pathRef = useRef(pathname);
@@ -74,6 +84,8 @@ export function KeyboardShortcuts() {
     const subscriptions = [
       onKeyCommand("apps", () => showTab("/apps", tabsOnTopRef.current)),
       onKeyCommand("inbox", () => showTab("/inbox", tabsOnTopRef.current)),
+      onKeyCommand("closeSheet", () => void closeTopSheet()),
+      onKeyCommand("closeSheetW", () => void closeTopSheet()),
       // Settings opens over whatever is showing, once.
       onKeyCommand("settings", () => {
         if (!pathRef.current.startsWith("/settings")) router.push("/settings");
