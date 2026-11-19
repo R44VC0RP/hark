@@ -3,7 +3,7 @@ import { memo } from "react";
 import { StyleSheet, View } from "react-native";
 import { spoken } from "../../ui/a11y";
 import { SourceAvatar } from "../../ui/avatar";
-import { Cell } from "../../ui/list";
+import { Cell, useStackedRows } from "../../ui/list";
 import { ProgressBar } from "../../ui/progress-bar";
 import { Text } from "../../ui/text";
 import { metrics, space } from "../../ui/tokens";
@@ -16,6 +16,7 @@ export const LiveActivityRow = memo(function LiveActivityRow({
 }: {
   item: InboxLiveActivityDto;
 }) {
+  const stacked = useStackedRows();
   const progress = item.props.progress;
   const percent = progress !== undefined ? Math.round(progress * 100) : null;
   const detail = `${item.sourceName} · ${item.props.detail ?? item.props.status}`;
@@ -33,7 +34,12 @@ export const LiveActivityRow = memo(function LiveActivityRow({
       <SourceAvatar name={item.sourceName} size={AVATAR} url={item.sourceImageUrl} />
       <View style={styles.copy}>
         <View style={styles.titleLine}>
-          <Text numberOfLines={2} style={styles.title} variant="body" weight="600">
+          <Text
+            numberOfLines={stacked ? undefined : 2}
+            style={styles.title}
+            variant="body"
+            weight="600"
+          >
             {item.props.title}
           </Text>
           {percent !== null ? (
@@ -42,7 +48,7 @@ export const LiveActivityRow = memo(function LiveActivityRow({
             </Text>
           ) : null}
         </View>
-        <Text color="secondaryLabel" numberOfLines={1} variant="subheadline">
+        <Text color="secondaryLabel" numberOfLines={stacked ? 2 : 1} variant="subheadline">
           {detail}
         </Text>
         {progress !== undefined ? (

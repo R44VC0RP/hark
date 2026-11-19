@@ -380,7 +380,11 @@ export function Row({
           {title}
         </Text>
         {subtitle ? (
-          <Text color="secondaryLabel" numberOfLines={subtitleLines} variant="subheadline">
+          <Text
+            color="secondaryLabel"
+            numberOfLines={stacked ? undefined : subtitleLines}
+            variant="subheadline"
+          >
             {subtitle}
           </Text>
         ) : null}

@@ -4,7 +4,7 @@ import { memo } from "react";
 import { StyleSheet, View } from "react-native";
 import { spoken } from "../../ui/a11y";
 import { Thumbnail } from "../../ui/avatar";
-import { Cell } from "../../ui/list";
+import { Cell, useStackedRows } from "../../ui/list";
 import { Text } from "../../ui/text";
 import { colors, metrics, radius, space } from "../../ui/tokens";
 import { relativeTime } from "./format";
@@ -24,6 +24,7 @@ export const ProjectRow = memo(function ProjectRow({
   item: InboxProjectSummaryDto;
   now: number;
 }) {
+  const stacked = useStackedRows();
   const unread = item.unreadCount > 0;
   const preview = item.latestPreview ?? "No notifications yet";
   const count = item.unreadCount > 99 ? "99+" : String(item.unreadCount);
@@ -48,10 +49,10 @@ export const ProjectRow = memo(function ProjectRow({
       >
         <Thumbnail name={item.name} size={THUMB} url={item.latestImageUrl} />
         <View style={styles.copy}>
-          <Text numberOfLines={1} variant={unread ? "headline" : "body"}>
+          <Text numberOfLines={stacked ? undefined : 1} variant={unread ? "headline" : "body"}>
             {item.name}
           </Text>
-          <Text color="secondaryLabel" numberOfLines={1} variant="subheadline">
+          <Text color="secondaryLabel" numberOfLines={stacked ? 2 : 1} variant="subheadline">
             {preview}
           </Text>
         </View>

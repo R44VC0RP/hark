@@ -93,10 +93,15 @@ export const RequestRow = memo(function RequestRow({
             {relativeTime(item.createdAt, now)}
           </Text>
         </View>
-        <Text numberOfLines={2} style={styles.measure} variant="headline">
+        <Text numberOfLines={stacked ? undefined : 2} style={styles.measure} variant="headline">
           {item.title}
         </Text>
-        <Text color="secondaryLabel" numberOfLines={6} style={styles.measure} variant="subheadline">
+        <Text
+          color="secondaryLabel"
+          numberOfLines={stacked ? undefined : 6}
+          style={styles.measure}
+          variant="subheadline"
+        >
           {item.prompt}
         </Text>
         <View style={styles.meta}>
