@@ -8,7 +8,7 @@ import { api } from "../../../src/lib/api";
 import { previewActivity } from "../../../src/lib/inbox-preview";
 import { createRefreshSequence } from "../../../src/lib/inbox-refresh";
 import { EmptyState, ErrorState, isNetworkError, LoadingState } from "../../../src/ui/empty-state";
-import { PlainSeparator, useScreenMargin } from "../../../src/ui/list";
+import { PlainSeparator, useHorizontalSafeArea, useScreenMargin } from "../../../src/ui/list";
 import { colors, metrics, space } from "../../../src/ui/tokens";
 
 type Filter = "all" | InboxActivityKind;
@@ -33,6 +33,7 @@ type Status = "loading" | "idle" | "more" | "error";
  */
 export default function HistoryScreen() {
   const margin = useScreenMargin();
+  const safeArea = useHorizontalSafeArea();
   const [filter, setFilter] = useState<Filter>("all");
   const [items, setItems] = useState<InboxActivityDto[]>([]);
   const [total, setTotal] = useState(0);
@@ -164,6 +165,7 @@ export default function HistoryScreen() {
             </View>
           ) : null
         }
+        contentContainerStyle={safeArea}
         contentInsetAdjustmentBehavior="automatic"
         data={items}
         initialNumToRender={12}

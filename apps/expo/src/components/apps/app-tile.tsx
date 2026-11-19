@@ -10,9 +10,8 @@ import {
   StyleSheet,
   View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useHover, useLayout } from "../../lib/layout";
-import { Row, useScreenMargin, useStackedRows } from "../../ui/list";
+import { Row, useHorizontalSafeArea, useScreenMargin, useStackedRows } from "../../ui/list";
 import { Text } from "../../ui/text";
 import { colors, space } from "../../ui/tokens";
 import { AppIcon } from "../app-icon";
@@ -43,42 +42,20 @@ export interface GridGeometry {
   regular: boolean;
   tileWidth: number;
   iconSize: number;
-  /**
-   * Leading and trailing content padding: the screen margin plus the safe
-   * area. On iPad the docked sidebar floats over the content and reports its
-   * width as a leading safe-area inset, which a vertical scroll view doesn't
-   * apply by itself.
-   */
-  paddingLeft: number;
-  paddingRight: number;
 }
 
 /** Tile size for the current window (narrow iPad windows get the iPhone grid). */
 export function useGridGeometry(): GridGeometry {
   const { width, regular } = useLayout();
   const margin = useScreenMargin();
-  const insets = useSafeAreaInsets();
+  // `List` pads the content by the margin and the horizontal safe area.
+  const safeArea = useHorizontalSafeArea();
   const list = useStackedRows();
-  const paddingLeft = margin + insets.left;
-  const paddingRight = margin + insets.right;
   if (regular) {
-    return {
-      list,
-      regular,
-      tileWidth: REGULAR_TILE,
-      iconSize: REGULAR_ICON,
-      paddingLeft,
-      paddingRight,
-    };
+    return { list, regular, tileWidth: REGULAR_TILE, iconSize: REGULAR_ICON };
   }
-  return {
-    list,
-    regular,
-    tileWidth: (width - paddingLeft - paddingRight) / COMPACT_COLUMNS,
-    iconSize: COMPACT_ICON,
-    paddingLeft,
-    paddingRight,
-  };
+  const content = width - 2 * margin - safeArea.paddingLeft - safeArea.paddingRight;
+  return { list, regular, tileWidth: content / COMPACT_COLUMNS, iconSize: COMPACT_ICON };
 }
 
 /**

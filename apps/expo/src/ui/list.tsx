@@ -8,6 +8,7 @@ import {
   type ReactNode,
   type Ref,
   useContext,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -27,6 +28,7 @@ import {
   View,
   type ViewStyle,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLayout } from "../lib/layout";
 import { spoken } from "./a11y";
 import { Text } from "./text";
@@ -41,6 +43,18 @@ import { type ColorName, colors, metrics, palette, radius, space } from "./token
 /** 16 pt on compact widths, 20 pt on regular (iPad) widths. */
 export function useScreenMargin(): number {
   return useLayout().regular ? metrics.marginRegular : metrics.marginCompact;
+}
+
+/**
+ * The horizontal safe area as content padding. On iPad the docked sidebar
+ * floats over the content and reports its width as a leading safe-area
+ * inset, which a vertical scroll view does not apply by itself, so content
+ * would sit under the sidebar. `List` applies it; a plain `FlatList` passes
+ * it as `contentContainerStyle` (its rows add the screen margin).
+ */
+export function useHorizontalSafeArea(): { paddingLeft: number; paddingRight: number } {
+  const { left, right } = useSafeAreaInsets();
+  return useMemo(() => ({ paddingLeft: left, paddingRight: right }), [left, right]);
 }
 
 /** True at accessibility text sizes, where rows stack their value under the label. */
@@ -85,6 +99,7 @@ export function List({
   ...props
 }: ListProps) {
   const margin = useScreenMargin();
+  const safeArea = useHorizontalSafeArea();
   return (
     <ScrollView
       contentInsetAdjustmentBehavior="automatic"
@@ -95,14 +110,23 @@ export function List({
       }
       style={[variant === "grouped" ? styles.grouped : styles.plain, style]}
       contentContainerStyle={[
-        { paddingHorizontal: margin },
+        reading
+          ? safeArea
+          : {
+              paddingLeft: margin + safeArea.paddingLeft,
+              paddingRight: margin + safeArea.paddingRight,
+            },
         styles.content,
-        reading ? readingColumn : null,
         contentContainerStyle,
       ]}
       {...props}
     >
-      {children}
+      {/* The reading column centres in the area the sidebar leaves free. */}
+      {reading ? (
+        <View style={[readingColumn, { paddingHorizontal: margin }]}>{children}</View>
+      ) : (
+        children
+      )}
     </ScrollView>
   );
 }

@@ -27,7 +27,7 @@ import {
   isNetworkError,
   LoadingState,
 } from "../../../../src/ui/empty-state";
-import { PlainSeparator, useScreenMargin } from "../../../../src/ui/list";
+import { PlainSeparator, useHorizontalSafeArea, useScreenMargin } from "../../../../src/ui/list";
 import { colors, space } from "../../../../src/ui/tokens";
 
 const PAGE_SIZE = 30;
@@ -47,6 +47,7 @@ export default function ProjectScreen() {
   const projectParam = typeof params.project === "string" ? params.project : "unfiled";
   const title = typeof params.name === "string" && params.name ? params.name : "Notifications";
   const margin = useScreenMargin();
+  const safeArea = useHorizontalSafeArea();
 
   const [items, setItems] = useState<InboxNotificationSummaryDto[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -301,6 +302,7 @@ export default function ProjectScreen() {
             </View>
           ) : null
         }
+        contentContainerStyle={safeArea}
         contentInsetAdjustmentBehavior="automatic"
         data={loading ? [] : items}
         initialNumToRender={12}

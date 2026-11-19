@@ -208,10 +208,6 @@ export default function AppsScreen() {
       />
       <TabRootToolbar />
       <List
-        contentContainerStyle={{
-          paddingLeft: geometry.paddingLeft,
-          paddingRight: geometry.paddingRight,
-        }}
         onRefresh={directory || loadFailed ? () => void onRefresh() : undefined}
         ref={scrollView}
         refreshing={refreshing}
