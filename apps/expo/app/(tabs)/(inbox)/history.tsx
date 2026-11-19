@@ -7,8 +7,10 @@ import { HISTORY_AVATAR, HistoryRow } from "../../../src/components/inbox/histor
 import { api } from "../../../src/lib/api";
 import { previewActivity } from "../../../src/lib/inbox-preview";
 import { createRefreshSequence } from "../../../src/lib/inbox-refresh";
+import { Button } from "../../../src/ui/button";
 import { EmptyState, ErrorState, isNetworkError, LoadingState } from "../../../src/ui/empty-state";
 import { PlainSeparator, useHorizontalSafeArea, useScreenMargin } from "../../../src/ui/list";
+import { Text } from "../../../src/ui/text";
 import { colors, metrics, space } from "../../../src/ui/tokens";
 
 type Filter = "all" | InboxActivityKind;
@@ -24,7 +26,8 @@ const FILTERS: { value: Filter; label: string; empty: string }[] = [
 const PAGE_SIZE = 20;
 const simulatorPreview = __DEV__ && !Device.isDevice;
 
-type Status = "loading" | "idle" | "more" | "error";
+/** `moreFailed`: the next page failed; the footer offers Try Again. */
+type Status = "loading" | "idle" | "more" | "moreFailed" | "error";
 
 /**
  * History (DESIGN.md 5.4): everything that already happened, newest first,
@@ -84,10 +87,12 @@ export default function HistoryScreen() {
     reload(filter);
   }, [filter, reload]);
 
-  const loadMore = () => {
-    if (status !== "idle" || items.length >= total) return;
+  // A failed page waits for Try Again instead of retrying on every scroll.
+  const loadMore = (retry = false) => {
+    if (items.length >= total) return;
+    if (status !== "idle" && !(retry && status === "moreFailed")) return;
     setStatus("more");
-    void loadPage(filter, page.current + 1).catch(() => setStatus("idle"));
+    void loadPage(filter, page.current + 1).catch(() => setStatus("moreFailed"));
   };
 
   const onRefresh = async () => {
@@ -163,6 +168,13 @@ export default function HistoryScreen() {
             <View style={styles.footer}>
               <ActivityIndicator accessibilityLabel="Loading more" />
             </View>
+          ) : status === "moreFailed" ? (
+            <View style={styles.footer}>
+              <Text align="center" color="secondaryLabel" variant="footnote">
+                Couldn't load more activity.
+              </Text>
+              <Button onPress={() => loadMore(true)} title="Try Again" variant="plain" />
+            </View>
           ) : null
         }
         contentContainerStyle={safeArea}
@@ -170,7 +182,7 @@ export default function HistoryScreen() {
         data={items}
         initialNumToRender={12}
         keyExtractor={(item) => `${item.kind}-${item.id}`}
-        onEndReached={loadMore}
+        onEndReached={() => loadMore()}
         onEndReachedThreshold={0.4}
         refreshControl={
           <RefreshControl onRefresh={() => void onRefresh()} refreshing={refreshing} />
@@ -190,6 +202,7 @@ const styles = StyleSheet.create({
   },
   footer: {
     alignItems: "center",
+    gap: space.xs,
     paddingVertical: space.l,
   },
 });

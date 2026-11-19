@@ -38,7 +38,11 @@ Dimensions.addEventListener("change", ({ window }) => {
   for (const listener of fontScaleListeners) listener();
 });
 
-function useFontScale(): number {
+/**
+ * The current text size as a multiplier (1 at the default size). Inline
+ * symbols next to text scale by it, like SF Symbols in UIKit text.
+ */
+export function useFontScale(): number {
   return useSyncExternalStore(
     (listener) => {
       fontScaleListeners.add(listener);

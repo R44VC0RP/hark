@@ -6,7 +6,7 @@ import { spoken } from "../../ui/a11y";
 import { SourceAvatar } from "../../ui/avatar";
 import { Button } from "../../ui/button";
 import { Cell, useStackedRows } from "../../ui/list";
-import { Text } from "../../ui/text";
+import { Text, useFontScale } from "../../ui/text";
 import { colors, metrics, space } from "../../ui/tokens";
 import { relativeTime, timeRemaining, timeRemainingSpoken } from "./format";
 
@@ -40,6 +40,7 @@ export const RequestRow = memo(function RequestRow({
   onReply,
 }: RequestRowProps) {
   const stacked = useStackedRows();
+  const scale = useFontScale();
   const answers =
     item.kind === "approval"
       ? {
@@ -108,7 +109,7 @@ export const RequestRow = memo(function RequestRow({
           {item.prompt}
         </Text>
         <View style={styles.meta}>
-          <SymbolView name="clock" size={12} tintColor={colors.tertiaryLabel} />
+          <SymbolView name="clock" size={Math.round(12 * scale)} tintColor={colors.tertiaryLabel} />
           <Text color="tertiaryLabel" tabular variant="footnote">
             {timeRemaining(item.expiresAt, now)}
           </Text>

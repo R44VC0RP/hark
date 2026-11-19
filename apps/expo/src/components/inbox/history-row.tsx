@@ -6,7 +6,7 @@ import { spoken } from "../../ui/a11y";
 import { SourceAvatar } from "../../ui/avatar";
 import { Cell, useStackedRows } from "../../ui/list";
 import { animateListChange } from "../../ui/motion";
-import { Text } from "../../ui/text";
+import { Text, useFontScale } from "../../ui/text";
 import { colors, space } from "../../ui/tokens";
 import { activityKindLabel, formatActivityTime } from "./format";
 
@@ -28,11 +28,17 @@ export const HistoryRow = memo(function HistoryRow({
 }) {
   const [expanded, setExpanded] = useState(false);
   const stacked = useStackedRows();
+  const scale = useFontScale();
   const expandable = Boolean(item.detail);
   const meta = `${item.sourceName} · ${activityKindLabel(item.kind)} · ${formatActivityTime(item.createdAt)}`;
   const result = item.result ? (
     <View style={styles.result}>
-      <SymbolView name="checkmark" size={12} tintColor={colors.accent} weight="semibold" />
+      <SymbolView
+        name="checkmark"
+        size={Math.round(12 * scale)}
+        tintColor={colors.accent}
+        weight="semibold"
+      />
       <Text color="accent" numberOfLines={stacked ? undefined : 1} variant="footnote">
         {item.result}
       </Text>
