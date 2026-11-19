@@ -535,7 +535,9 @@ export default function PageSheet() {
 function TimelineRow({ event, now }: { event: OncallPageEventDto; now: number }) {
   // On compact widths the time goes under the label: once it carries a date
   // ("Nov 17, 10:32 PM") a trailing time squeezed the label into two lines.
-  const stacked = useStackedRows() || !useLayout().regular;
+  const accessibilitySize = useStackedRows();
+  const { regular } = useLayout();
+  const stacked = accessibilitySize || !regular;
   const label = timelineLabel(event);
   const time = formatHandoff(event.at, now);
   return (
