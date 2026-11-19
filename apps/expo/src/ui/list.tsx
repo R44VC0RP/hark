@@ -62,6 +62,11 @@ export function useStackedRows(): boolean {
   return useWindowDimensions().fontScale >= metrics.accessibilityFontScale;
 }
 
+/** True from xxxLarge up, for layouts that check whether their text still fits. */
+export function useLargeText(): boolean {
+  return useWindowDimensions().fontScale >= metrics.largeFontScale;
+}
+
 /** Centers detail-screen content at 680 pt on iPad; a no-op on iPhone widths. */
 export const readingColumn = {
   width: "100%",
@@ -504,6 +509,9 @@ export function SwitchRow({ title, subtitle, value, onValueChange, disabled }: S
         accessibilityLabel={title}
         disabled={disabled}
         onValueChange={onValueChange}
+        // React Native's iOS switch defaults to the row's top (alignSelf
+        // flex-start); Settings centres it on rows with a subtitle.
+        style={styles.switch}
         trackColor={{ true: palette.accent }}
         value={value}
       />
@@ -659,5 +667,8 @@ const styles = StyleSheet.create({
   },
   disabled: {
     opacity: 0.4,
+  },
+  switch: {
+    alignSelf: "center",
   },
 });

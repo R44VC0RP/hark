@@ -100,8 +100,14 @@ export const metrics = {
   /** The Inbox's trailing column on iPad: two 120-pt answer buttons. */
   trailingColumnWidth: 248,
   hitTarget: 44,
-  /** At or above this `fontScale` rows stack their value under the label (3.6). */
-  accessibilityFontScale: 1.35,
+  /**
+   * At or above this `fontScale` rows stack their value under the label
+   * (3.6): the accessibility sizes (AX1 is 1.79 in React Native's scale),
+   * as Apple does. xxxLarge (1.35) still lays rows out side by side.
+   */
+  accessibilityFontScale: 1.6,
+  /** xxxLarge and up: for layouts that must check whether text still fits. */
+  largeFontScale: 1.35,
 } as const;
 
 /** Radii (3.4). Always pair with `borderCurve: "continuous"`. */
@@ -187,12 +193,6 @@ export const navigationTheme: Theme = {
 };
 
 /**
- * Every native-stack screen (3.12): transparent header so content scrolls
- * under the glass bar with the system's soft scroll-edge effect, minimal
- * back button, ink bar items. Never add `headerStyle.backgroundColor`,
- * `headerBlurEffect` or `headerShadowVisible`.
- */
-/**
  * Navigation titles in UIKit's own title fonts, which follow Dynamic Type
  * like Settings' and Mail's. expo-router always sends a title colour and a
  * weight (the theme's), and react-native-screens then sets a fixed 17- and
@@ -208,6 +208,12 @@ const systemTitleStyle: { color?: ColorValue; fontFamily?: string; fontWeight?: 
   fontWeight: "" as unknown as "normal",
 };
 
+/**
+ * Every native-stack screen (3.12): transparent header so content scrolls
+ * under the glass bar with the system's soft scroll-edge effect, minimal
+ * back button, ink bar items. Never add `headerStyle.backgroundColor`,
+ * `headerBlurEffect` or `headerShadowVisible`.
+ */
 export const stackScreenOptions = {
   headerTransparent: true,
   headerBackButtonDisplayMode: "minimal",

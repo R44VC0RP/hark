@@ -27,7 +27,16 @@ import {
 import { spoken } from "../../src/ui/a11y";
 import { Button } from "../../src/ui/button";
 import { EmptyState, ErrorState, isNetworkError, LoadingState } from "../../src/ui/empty-state";
-import { ActionRow, Cell, LabeledRow, List, Row, Section, useStackedRows } from "../../src/ui/list";
+import {
+  ActionRow,
+  Cell,
+  LabeledRow,
+  List,
+  Row,
+  Section,
+  useLargeText,
+  useStackedRows,
+} from "../../src/ui/list";
 import { Text } from "../../src/ui/text";
 import { type ColorName, metrics, palette, space } from "../../src/ui/tokens";
 
@@ -73,7 +82,9 @@ const TIMELINE_DOT: Record<OncallPageEventDto["kind"], ColorName> = {
  */
 export default function PageSheet() {
   const { data: session, isPending } = useSession();
-  const stacked = useStackedRows();
+  // From xxxLarge up (not only accessibility sizes): the toolbar's three
+  // labels stop fitting there.
+  const stacked = useLargeText();
   const directory = useDirectory();
   const params = useLocalSearchParams<{ id: string; intent?: string }>();
   const id = String(params.id);
