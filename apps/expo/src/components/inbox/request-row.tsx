@@ -3,14 +3,14 @@ import { SymbolView } from "expo-symbols";
 import { memo } from "react";
 import { type AccessibilityActionEvent, StyleSheet, View } from "react-native";
 import { formatAgo, formatTimeLeft, spokenTime } from "../../lib/dates";
-import type { RequestAnswer } from "../../lib/inbox-cache";
+import { type RequestAnswer, type RequestOutcome, useHasReplyDraft } from "../../lib/inbox-cache";
 import { spoken } from "../../ui/a11y";
 import { SourceAvatar } from "../../ui/avatar";
 import { Button } from "../../ui/button";
 import { Cell, useStackedRows, useTextMeasure } from "../../ui/list";
 import { Text, useFontScale } from "../../ui/text";
 import { colors, metrics, space } from "../../ui/tokens";
-import { ANSWER_LABELS, isRefusal } from "./format";
+import { outcomeLine } from "./format";
 
 export type RequestAction = Exclude<RequestAnswer, "reply">;
 
@@ -21,8 +21,12 @@ interface RequestRowProps {
   sending: boolean;
   /** Any response is being sent: every action waits. */
   busy: boolean;
-  /** Answered in this session: the answer shows where the buttons were. */
-  answer: RequestAnswer | null;
+  /**
+   * The request stopped waiting while on screen (answered here or on
+   * another device, expired, withdrawn): what happened shows where the
+   * buttons were.
+   */
+  outcome: RequestOutcome | null;
   /** Re-renders the relative times; pass the Inbox's minute tick. */
   now: number;
   onRespond: (item: InboxInteractionDto, action: RequestAction) => void;
@@ -34,16 +38,18 @@ interface RequestRowProps {
  * left, and its answers as flat buttons. The text is one VoiceOver element
  * with the answers as actions; the buttons stay separate elements.
  *
- * Once answered, the row keeps its exact size and shows the answer
- * ("Approved") over the space its buttons held, which no longer take
- * touches. Nothing moves, so a second tap can't land on the next request.
+ * Once it stops waiting, the row keeps its exact size and shows what
+ * happened ("Approved", "Approved on another device", "Expired") over the
+ * space its buttons held, which no longer take touches; the countdown goes
+ * and the title quietens. Nothing moves, so a tap on its way can't land on
+ * the next request.
  */
 export const RequestRow = memo(function RequestRow({
   item,
   projectName,
   sending,
   busy,
-  answer,
+  outcome,
   now,
   onRespond,
   onReply,
@@ -52,6 +58,8 @@ export const RequestRow = memo(function RequestRow({
   const measure = useTextMeasure();
   const wide = measure !== null;
   const scale = useFontScale();
+  // A saved reply shows on the button, as Mail and Messages mark drafts (P2-07).
+  const draft = useHasReplyDraft(item.id);
   const answers =
     item.kind === "approval"
       ? {
@@ -66,14 +74,15 @@ export const RequestRow = memo(function RequestRow({
         : null;
 
   const source = projectName ? `${item.sourceName}, ${projectName}` : item.sourceName;
-  const result = answer ? ANSWER_LABELS[answer] : null;
+  const result = outcome ? outcomeLine(outcome) : null;
   const label = spoken(
     item.title,
     item.prompt,
     source,
-    result ?? spokenTime(formatTimeLeft(item.expiresAt, now)),
+    result ? result.text : spokenTime(formatTimeLeft(item.expiresAt, now)),
+    result?.note,
   );
-  const actions = answer
+  const actions = outcome
     ? undefined
     : answers
       ? [
@@ -86,7 +95,8 @@ export const RequestRow = memo(function RequestRow({
       {formatAgo(item.createdAt, now)}
     </Text>
   );
-  const inactive = busy || answer !== null;
+  const settled = outcome !== null;
+  const inactive = busy || settled;
   const onAccessibilityAction = (event: AccessibilityActionEvent) => {
     const name = event.nativeEvent.actionName;
     if (inactive) return;
@@ -121,32 +131,52 @@ export const RequestRow = memo(function RequestRow({
       </View>
       {/* At accessibility sizes the time stacks under the source (3.6). */}
       {stacked ? time : null}
-      <Text numberOfLines={stacked ? undefined : 2} variant="headline">
+      <Text
+        color={settled ? "secondaryLabel" : "label"}
+        numberOfLines={stacked ? undefined : 2}
+        variant="headline"
+      >
         {item.title}
       </Text>
       <Text color="secondaryLabel" numberOfLines={stacked ? undefined : 6} variant="subheadline">
         {item.prompt}
       </Text>
-      <View style={styles.meta}>
-        <SymbolView name="clock" size={Math.round(12 * scale)} tintColor={colors.tertiaryLabel} />
-        <Text color="tertiaryLabel" tabular variant="footnote">
-          {formatTimeLeft(item.expiresAt, now)}
-        </Text>
-      </View>
+      {/*
+        Settled: the countdown no longer applies. An answer from another
+        device says so in its place; otherwise the line keeps its space.
+      */}
+      {result?.note ? (
+        <View importantForAccessibility="no-hide-descendants" style={styles.meta}>
+          <Text color="secondaryLabel" variant="footnote">
+            {result.note}
+          </Text>
+        </View>
+      ) : (
+        <View
+          accessibilityElementsHidden={settled}
+          importantForAccessibility={settled ? "no-hide-descendants" : "auto"}
+          style={[styles.meta, settled && styles.spent]}
+        >
+          <SymbolView name="clock" size={Math.round(12 * scale)} tintColor={colors.tertiaryLabel} />
+          <Text color="tertiaryLabel" tabular variant="footnote">
+            {formatTimeLeft(item.expiresAt, now)}
+          </Text>
+        </View>
+      )}
     </View>
   );
   const buttons = (
     <View style={styles.full}>
       {/*
-        Answered: the buttons keep their space (so the row keeps its
+        Settled: the buttons keep their space (so the row keeps its
         height) but are invisible, hidden from VoiceOver and take no
-        touches; the answer sits on top of that space.
+        touches; what happened sits on top of that space.
       */}
       <View
-        accessibilityElementsHidden={answer !== null}
-        importantForAccessibility={answer ? "no-hide-descendants" : "auto"}
-        pointerEvents={answer ? "none" : "auto"}
-        style={[styles.actions, stacked && styles.actionsStacked, answer && styles.spent]}
+        accessibilityElementsHidden={settled}
+        importantForAccessibility={settled ? "no-hide-descendants" : "auto"}
+        pointerEvents={settled ? "none" : "auto"}
+        style={[styles.actions, stacked && styles.actionsStacked, settled && styles.spent]}
       >
         {answers ? (
           <>
@@ -169,17 +199,17 @@ export const RequestRow = memo(function RequestRow({
           </>
         ) : (
           <Button
-            accessibilityHint="Opens a reply sheet"
+            accessibilityHint={draft ? "Opens your saved reply" : "Opens a reply sheet"}
             disabled={inactive}
             onPress={() => onReply(item, projectName)}
             style={stacked ? null : styles.action}
-            symbol="arrowshape.turn.up.left"
-            title="Reply…"
+            symbol={draft ? "pencil" : "arrowshape.turn.up.left"}
+            title={draft ? "Edit Draft…" : "Reply…"}
             variant="bordered"
           />
         )}
       </View>
-      {result ? <AnswerLine result={result} scale={scale} /> : null}
+      {result ? <OutcomeLine {...result} scale={scale} trailing={wide} /> : null}
     </View>
   );
 
@@ -205,18 +235,35 @@ export const RequestRow = memo(function RequestRow({
   );
 });
 
-/** "✓ Approved" (accent) or "✕ Denied" (secondary), centred where the buttons were. */
-function AnswerLine({ result, scale }: { result: string; scale: number }) {
-  const refusal = isRefusal(result);
+/**
+ * "✓ Approved" (accent), "✕ Denied" or "Expired" (secondary) where the
+ * buttons were: centred under the request, or on the trailing edge of a
+ * wide row, where the time above it sits.
+ */
+function OutcomeLine({
+  text,
+  symbol,
+  done,
+  scale,
+  trailing,
+}: ReturnType<typeof outcomeLine> & { scale: number; trailing: boolean }) {
   return (
-    <View importantForAccessibility="no-hide-descendants" style={styles.answer}>
+    <View
+      importantForAccessibility="no-hide-descendants"
+      style={[styles.answer, trailing && styles.answerTrailing]}
+    >
       <SymbolView
-        name={refusal ? "xmark.circle.fill" : "checkmark.circle.fill"}
+        name={symbol}
         size={Math.round(17 * scale)}
-        tintColor={refusal ? colors.secondaryLabel : colors.accent}
+        tintColor={done ? colors.accent : colors.secondaryLabel}
       />
-      <Text color={refusal ? "secondaryLabel" : "accent"} variant="subheadline" weight="600">
-        {result}
+      <Text
+        color={done ? "accent" : "secondaryLabel"}
+        style={styles.answerText}
+        variant="subheadline"
+        weight="600"
+      >
+        {text}
       </Text>
     </View>
   );
@@ -298,5 +345,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: space.xs,
+  },
+  answerTrailing: {
+    justifyContent: "flex-end",
+  },
+  answerText: {
+    flexShrink: 1,
   },
 });

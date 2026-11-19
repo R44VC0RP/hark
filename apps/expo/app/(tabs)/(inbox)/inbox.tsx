@@ -1,7 +1,12 @@
-import type {
-  InboxInteractionDto,
-  InboxLiveActivityDto,
-  InboxProjectSummaryDto,
+import {
+  HARK_APPROVE_ACTION_ID,
+  HARK_DENY_ACTION_ID,
+  HARK_NO_ACTION_ID,
+  HARK_REPLY_ACTION_ID,
+  HARK_YES_ACTION_ID,
+  type InboxInteractionDto,
+  type InboxLiveActivityDto,
+  type InboxProjectSummaryDto,
 } from "@hark/contracts";
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
@@ -22,11 +27,17 @@ import { publishInboxCounts } from "../../../src/lib/app-directory";
 import { useSession } from "../../../src/lib/auth";
 import { alertFailure, haptic } from "../../../src/lib/haptics";
 import {
-  clearAnsweredRequests,
+  clearSettledRequests,
+  currentHandledIds,
+  currentSettledRequests,
   markInteractionHandled,
+  type RequestAnswer,
+  type RequestOutcome,
   rememberInteraction,
-  useAnsweredRequests,
+  type SettledRequest,
+  settleRequests,
   useHandledInteractionIds,
+  useSettledRequests,
 } from "../../../src/lib/inbox-cache";
 import { previewActive, previewPending, previewProjects } from "../../../src/lib/inbox-preview";
 import { createFocusRefreshPolicy, createRefreshSequence } from "../../../src/lib/inbox-refresh";
@@ -43,6 +54,28 @@ const POLL_MS = 15_000;
 const TICK_MS = 60_000;
 /** Where a first-run Inbox points: how to send the first webhook or request. */
 const DOCS_URL = "https://hark.fyi/docs";
+/**
+ * A request that arrives while the Inbox is on screen ignores taps on its
+ * answers until it has faded in (300 ms) and been on screen long enough to
+ * be seen: a tap that lands sooner was aimed at what used to be there.
+ * (At 700 ms a tap hammered at the spot got through 0.65 s after the row
+ * began to fade in.)
+ */
+const ARRIVAL_GUARD_MS = 1_000;
+/**
+ * A request that leaves the open list within this long of its expiry
+ * expired (the server's clock decides, and the two clocks differ a little).
+ */
+const EXPIRY_SLACK_MS = 60_000;
+
+/** The notification actions that answer a request, as the Inbox words them. */
+const PUSH_ANSWERS: Record<string, RequestAnswer> = {
+  [HARK_APPROVE_ACTION_ID]: "approve",
+  [HARK_DENY_ACTION_ID]: "deny",
+  [HARK_YES_ACTION_ID]: "yes",
+  [HARK_NO_ACTION_ID]: "no",
+  [HARK_REPLY_ACTION_ID]: "reply",
+};
 
 interface Summary {
   pending: InboxInteractionDto[];
@@ -52,6 +85,53 @@ interface Summary {
 }
 
 type LoadFailure = "network" | "other";
+
+/** A Needs You row: an open request, or one that stopped waiting while on screen. */
+interface RequestEntry {
+  item: InboxInteractionDto;
+  outcome: RequestOutcome | null;
+}
+
+/** Open requests plus the settled ones, each once, newest first (the order at rest). */
+function requestEntries(
+  pending: readonly InboxInteractionDto[],
+  settled: ReadonlyMap<string, SettledRequest>,
+  handled: ReadonlySet<string>,
+): RequestEntry[] {
+  return [
+    ...pending
+      .filter((item) => !handled.has(item.id) && !settled.has(item.id))
+      .map((item) => ({ item, outcome: null })),
+    ...[...settled.values()].map(({ interaction, outcome }) => ({ item: interaction, outcome })),
+  ].sort((a, b) => Date.parse(b.item.createdAt) - Date.parse(a.item.createdAt));
+}
+
+/**
+ * What happened to requests that left the server's open list: past their
+ * expiry, answered (History's response feed has the answer, but not where
+ * it was given; answers given here never get this far), else withdrawn by
+ * whoever asked. Without the feed it can't tell answered from withdrawn.
+ */
+async function outcomesOf(
+  vanished: readonly InboxInteractionDto[],
+  now: number,
+): Promise<SettledRequest[]> {
+  const expired = (item: InboxInteractionDto) =>
+    Date.parse(item.expiresAt) <= now + EXPIRY_SLACK_MS;
+  let answers: Map<string, string | null> | null = new Map();
+  if (vanished.some((item) => !expired(item))) {
+    answers = await api.listActivityFeed("response", 0).then(
+      (page) => new Map(page.items.map((entry) => [entry.id, entry.result])),
+      () => null,
+    );
+  }
+  return vanished.map((interaction): SettledRequest => {
+    if (expired(interaction)) return { interaction, outcome: { kind: "expired" } };
+    const result = answers?.get(`response:${interaction.id}`);
+    if (result) return { interaction, outcome: { kind: "answeredElsewhere", result } };
+    return { interaction, outcome: { kind: answers ? "withdrawn" : "gone" } };
+  });
+}
 
 /**
  * Inbox (DESIGN.md 5.3), the first tab and the reference screen: what needs
@@ -71,7 +151,34 @@ export default function InboxScreen() {
   const [sendingId, setSendingId] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const handled = useHandledInteractionIds();
-  const answered = useAnsweredRequests();
+  const settled = useSettledRequests();
+  // While the Inbox is in sight, Needs You keeps every row where it is
+  // (I2-01): requests that stop waiting stay with what happened, and new
+  // ones join the end. `order` pins that order; null is newest first.
+  const [order, setOrder] = useState<readonly string[] | null>(null);
+  // What the screen shows, for the refresh and notification callbacks:
+  // written with each change of `summary` and `order` (answered and settled
+  // requests come from their store, which is always current).
+  const shown = useRef<{ summary: Summary | null; order: readonly string[] | null }>({
+    summary: null,
+    order: null,
+  });
+  // A push or another tab has fully covered the Inbox (`transitionEnd`),
+  // until it is focused again. A sheet only blurs it: the rows stay in view.
+  const covered = useRef(false);
+  // When each request that arrived in sight appeared (ARRIVAL_GUARD_MS).
+  const arrivedAt = useRef(new Map<string, number>());
+  const arrivedJustNow = useCallback((id: string) => {
+    const arrived = arrivedAt.current.get(id);
+    return arrived !== undefined && Date.now() - arrived < ARRIVAL_GUARD_MS;
+  }, []);
+  /** Back to rest: settled rows go, and arrivals take their place by age. */
+  const restOrder = useCallback(() => {
+    arrivedAt.current.clear();
+    clearSettledRequests();
+    shown.current = { ...shown.current, order: null };
+    setOrder(null);
+  }, []);
   const summaryJson = useRef("");
   const sending = useRef<string | null>(null);
   // Older/self-hosted servers without /api/inbox keep the legacy layout.
@@ -121,10 +228,48 @@ export default function InboxScreen() {
     setLoadFailure(null);
     // Polling only re-renders when something changed.
     const json = JSON.stringify(next);
-    if (json !== summaryJson.current) {
-      summaryJson.current = json;
-      setSummary(next);
+    if (json === summaryJson.current) return;
+    const before = shown.current;
+    if (before.summary && !covered.current && AppState.currentState === "active") {
+      // In sight, a request that left the open list (answered on another
+      // device, expired, withdrawn) stays where it is and says so, like one
+      // answered here; one that arrived joins the end of Needs You, so no
+      // answer button already on screen moves under a finger.
+      const open = new Set(next.pending.map((item) => item.id));
+      const vanished = before.summary.pending.filter(
+        (item) =>
+          !open.has(item.id) &&
+          !currentHandledIds().has(item.id) &&
+          !currentSettledRequests().has(item.id),
+      );
+      const outcomes = vanished.length > 0 ? await outcomesOf(vanished, Date.now()) : [];
+      if (!refreshSequence.isCurrent(token)) return;
+      const current = shown.current;
+      const known = new Set(current.summary?.pending.map((item) => item.id));
+      const arrivals = next.pending
+        .filter((item) => !known.has(item.id) && !currentHandledIds().has(item.id))
+        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+      if (arrivals.length > 0) {
+        const base =
+          current.order ??
+          requestEntries(
+            current.summary?.pending ?? [],
+            currentSettledRequests(),
+            currentHandledIds(),
+          ).map((entry) => entry.item.id);
+        const arrived = Date.now();
+        for (const item of arrivals) arrivedAt.current.set(item.id, arrived);
+        const nextOrder = [...base, ...arrivals.map((item) => item.id)];
+        shown.current = { ...shown.current, order: nextOrder };
+        // The new row fades in; only what is below Needs You slides down.
+        animateListChange();
+        setOrder(nextOrder);
+      }
+      settleRequests(outcomes);
     }
+    summaryJson.current = json;
+    shown.current = { ...shown.current, summary: next };
+    setSummary(next);
   }, [refreshSequence]);
 
   const load = useCallback(() => {
@@ -141,30 +286,53 @@ export default function InboxScreen() {
     const received = Notifications.addNotificationReceivedListener(quiet);
     const appState = AppState.addEventListener("change", (state) => {
       if (state === "active") quiet();
-      else if (state === "background") clearAnsweredRequests();
+      else if (state === "background") restOrder();
     });
     return () => {
       clearInterval(timer);
       received.remove();
       appState.remove();
     };
-  }, [load, ready, refresh]);
+  }, [load, ready, refresh, restOrder]);
 
-  // Answered requests stay in place with their answer and leave only while
-  // nobody can be tapping them: once a pushed screen or another tab has
-  // fully covered the Inbox, in the background, or on pull to refresh. A
-  // row that left under a finger let a double tap answer the next request.
+  // Settled requests stay in place and leave, and arrivals take their place
+  // by age, only while nobody can be tapping them: once a pushed screen or
+  // another tab has fully covered the Inbox, in the background, or on pull
+  // to refresh. A row that left under a finger let a tap answer the next
+  // request.
   useEffect(() => {
     // Fires once the Inbox is fully covered: a push or another tab (checked).
     // A sheet only blurs it, and the rows stay in view behind the sheet.
-    const unsubscribe = navigation.addListener("transitionEnd", (event) => {
-      if (event.data.closing) clearAnsweredRequests();
+    const unsubscribeEnd = navigation.addListener("transitionEnd", (event) => {
+      if (!event.data.closing) return;
+      covered.current = true;
+      restOrder();
+    });
+    const unsubscribeFocus = navigation.addListener("focus", () => {
+      covered.current = false;
     });
     return () => {
-      unsubscribe();
-      clearAnsweredRequests();
+      unsubscribeEnd();
+      unsubscribeFocus();
+      clearSettledRequests();
     };
-  }, [navigation]);
+  }, [navigation, restOrder]);
+
+  // A request answered from its notification while the Inbox shows it was
+  // answered here: it settles in place with that answer (the root layout
+  // sends it), not as an answer from another device on the next refresh.
+  useEffect(() => {
+    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+      const answer = PUSH_ANSWERS[response.actionIdentifier];
+      const data = response.notification.request.content.data as { interactionId?: unknown };
+      if (!answer || typeof data?.interactionId !== "string") return;
+      if (answer === "reply" && !response.userText?.trim()) return;
+      if (covered.current || AppState.currentState !== "active") return;
+      const item = shown.current.summary?.pending.find((entry) => entry.id === data.interactionId);
+      if (item) markInteractionHandled(item, answer);
+    });
+    return () => subscription.remove();
+  }, []);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), TICK_MS);
@@ -190,6 +358,18 @@ export default function InboxScreen() {
     }, [focusRefreshPolicy]),
   );
 
+  // A pull is a drag, not a tap on a button: once the refresh control has
+  // let go, settled rows fade out and arrivals move to their place by age.
+  // In the same commit as the control's end they left in one frame (P2-02).
+  const tidyAfterRefresh = useRef(false);
+  useEffect(() => {
+    if (refreshing || !tidyAfterRefresh.current) return;
+    tidyAfterRefresh.current = false;
+    if (currentSettledRequests().size === 0 && shown.current.order === null) return;
+    animateListChange();
+    restOrder();
+  }, [refreshing, restOrder]);
+
   const onRefresh = async () => {
     setRefreshing(true);
     try {
@@ -198,18 +378,14 @@ export default function InboxScreen() {
       // Keep showing the last data; only an empty screen shows the failure.
       if (!summaryJson.current) setLoadFailure(isNetworkError(error) ? "network" : "other");
     } finally {
-      // A pull is a drag, not a tap on a button: answered rows can go now.
-      if (answered.size > 0) {
-        animateListChange();
-        clearAnsweredRequests();
-      }
+      tidyAfterRefresh.current = true;
       setRefreshing(false);
     }
   };
 
   const respond = useCallback(
     async (item: InboxInteractionDto, action: RequestAction) => {
-      if (sending.current) return;
+      if (sending.current || arrivedJustNow(item.id)) return;
       sending.current = item.id;
       setSendingId(item.id);
       try {
@@ -229,34 +405,41 @@ export default function InboxScreen() {
         setSendingId(null);
       }
     },
-    [refresh],
+    [arrivedJustNow, refresh],
   );
 
   const reply = useCallback(
     (item: InboxInteractionDto, projectName: string | null) => {
+      if (arrivedJustNow(item.id)) return;
       rememberInteraction(item, projectName);
       router.push({ pathname: "/reply/[id]", params: { id: item.id } });
     },
-    [router],
+    [arrivedJustNow, router],
   );
 
   const projects = summary?.projects ?? [];
   const active = summary?.active ?? [];
-  // Open requests plus the ones answered here, each in its own place.
-  const requests = useMemo(
-    () =>
-      [
-        ...(summary?.pending ?? [])
-          .filter((item) => !handled.has(item.id))
-          .map((item) => ({ item, answer: null })),
-        ...[...answered.values()].map(({ interaction, answer }) => ({
-          item: interaction,
-          answer,
-        })),
-      ].sort((a, b) => Date.parse(b.item.createdAt) - Date.parse(a.item.createdAt)),
-    [answered, handled, summary],
-  );
-  const waiting = requests.filter((request) => request.answer === null).length;
+  // Open requests plus the settled ones, each in its own place: newest
+  // first at rest, in the pinned order while the Inbox is in sight.
+  const requests = useMemo(() => {
+    const entries = requestEntries(summary?.pending ?? [], settled, handled);
+    if (!order) return entries;
+    const byId = new Map(entries.map((entry) => [entry.item.id, entry]));
+    const pinned = new Set(order);
+    return [
+      ...order.flatMap((id) => byId.get(id) ?? []),
+      ...entries.filter((entry) => !pinned.has(entry.item.id)),
+    ];
+  }, [handled, order, settled, summary]);
+  const waiting = requests.filter((request) => request.outcome === null).length;
+  // The count says how many still wait; with settled rows on screen it says
+  // so in words, so "3" never sits over five rows (V2-02).
+  const needsYouDetail =
+    waiting === requests.length
+      ? String(waiting)
+      : waiting > 0
+        ? `${waiting} waiting`
+        : "None waiting";
   const empty = requests.length === 0 && active.length === 0 && projects.length === 0;
 
   return (
@@ -279,18 +462,14 @@ export default function InboxScreen() {
         ) : (
           <>
             {requests.length > 0 ? (
-              <Section
-                detail={waiting > 0 ? String(waiting) : undefined}
-                prominent
-                title="Needs You"
-              >
-                {requests.map(({ item, answer }) => (
+              <Section detail={needsYouDetail} prominent title="Needs You">
+                {requests.map(({ item, outcome }) => (
                   <RequestRow
-                    answer={answer}
                     busy={sendingId !== null}
                     item={item}
                     key={item.id}
                     now={now}
+                    outcome={outcome}
                     onRespond={respond}
                     onReply={reply}
                     projectName={projectNameFor(item, projects)}
