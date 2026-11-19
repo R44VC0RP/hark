@@ -3,10 +3,11 @@ import * as Device from "expo-device";
 import { Stack, useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActionSheetIOS, Alert, Linking, Pressable, StyleSheet, View } from "react-native";
+import { Alert, Linking, Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 import type { ShouldStartLoadRequest } from "react-native-webview/lib/WebViewTypes";
+import { useActionSheet } from "../../src/components/apps/action-sheet";
 import { ConsentView } from "../../src/components/web/consent-view";
 import { HoldHint } from "../../src/components/web/hold-hint";
 import { LaunchErrorView, SigningInView } from "../../src/components/web/launch-state";
@@ -249,10 +250,12 @@ export default function WebAppScreen() {
 
   // The Hark menu: a two-finger hold on the page (or VoiceOver's action on
   // the status strip). On iPad the same actions live in the bar; a hold there
-  // shows this sheet as a centred popover.
+  // shows this sheet as a centred popover, with the shield over the page so
+  // the tap that closes it never reaches the page.
+  const actionSheet = useActionSheet();
   const showMenu = () => {
     if (!app) return;
-    ActionSheetIOS.showActionSheetWithOptions(
+    actionSheet.show(
       {
         title: app.name,
         message: `Signed in with Hark on ${new URL(app.origin).host}`,
@@ -471,6 +474,7 @@ export default function WebAppScreen() {
           webviewDebuggingEnabled={__DEV__}
         />
         {chrome === "bar" ? null : <HoldHint top={insets.top} />}
+        {actionSheet.shield}
       </View>
     );
   }

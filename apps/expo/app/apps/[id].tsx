@@ -2,8 +2,9 @@ import type { AppDto, TeamDto } from "@hark/contracts";
 import * as Device from "expo-device";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActionSheetIOS, Alert, findNodeHandle, StyleSheet, View } from "react-native";
+import { Alert, findNodeHandle, StyleSheet, View } from "react-native";
 import { AppIcon } from "../../src/components/app-icon";
+import { useActionSheet } from "../../src/components/apps/action-sheet";
 import { ApiError, api } from "../../src/lib/api";
 import { refreshDirectory, useDirectory } from "../../src/lib/app-directory";
 import { useSession } from "../../src/lib/auth";
@@ -71,6 +72,7 @@ export default function AppInfoSheet() {
   const [saving, setSaving] = useState(false);
   const [moving, setMoving] = useState(false);
   const shareRow = useRef<View>(null);
+  const actionSheet = useActionSheet();
 
   const load = useCallback(() => {
     if (simulatorPreview) {
@@ -217,7 +219,7 @@ export default function AppInfoSheet() {
     const [onlyTeam] = teams;
     if (teams.length === 1 && onlyTeam) return moveTo(onlyTeam);
     const anchor = shareRow.current ? findNodeHandle(shareRow.current) : null;
-    ActionSheetIOS.showActionSheetWithOptions(
+    actionSheet.show(
       {
         title: "Share with a Team",
         options: [...teams.map((team) => team.name), "Cancel"],
@@ -323,7 +325,7 @@ export default function AppInfoSheet() {
             </View>
 
             <Section title="Details">
-              {app.team ? <LabeledRow label="Team" value={`Shared with ${app.team.name}`} /> : null}
+              {app.team ? <LabeledRow label="Team" value={app.team.name} /> : null}
               <LabeledRow label="Added By" value={app.addedBy ?? app.createdBy ?? "Unknown"} />
               {app.addedBy && app.createdBy && app.addedBy !== app.createdBy ? (
                 <LabeledRow label="Via" value={app.createdBy} />
@@ -391,6 +393,7 @@ export default function AppInfoSheet() {
           </>
         )}
       </List>
+      {actionSheet.shield}
     </>
   );
 }
