@@ -170,14 +170,17 @@ export interface SectionProps {
  */
 export function Section({ title, detail, prominent, footer, children, bare, style }: SectionProps) {
   const rows = flatten(children);
+  // At accessibility sizes the detail goes under the title instead of
+  // squeezing it into several lines (3.6).
+  const stacked = useStackedRows();
   return (
     <View style={[styles.section, style]}>
       {title ? (
-        <View style={styles.header}>
+        <View style={[styles.header, stacked && detail ? styles.headerStacked : null]}>
           <Text
             accessibilityRole="header"
             color={prominent ? "label" : "secondaryLabel"}
-            style={styles.headerTitle}
+            style={stacked && detail ? null : styles.headerTitle}
             variant={prominent ? "headline" : "subheadline"}
             weight={prominent ? undefined : "500"}
           >
@@ -581,6 +584,11 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     flex: 1,
+  },
+  headerStacked: {
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: 2,
   },
   container: {
     overflow: "hidden",
