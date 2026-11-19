@@ -479,13 +479,18 @@ export default function PageSheet() {
               </Stack.Toolbar.MenuAction>
             </Stack.Toolbar.Menu>
           ) : null}
+          {/*
+            Labels stay the same while a request is out (the items are only
+            disabled): a wider "Acknowledging…" no longer fit and UIKit
+            folded the bar into "…" for a moment (seen frame by frame).
+          */}
           {triggered && !stacked ? (
             <Stack.Toolbar.Button
               accessibilityHint="Notifies the next responder now"
               disabled={busy !== null}
               onPress={() => escalate(page)}
             >
-              {busy === "escalate" ? "Escalating…" : "Escalate"}
+              Escalate
             </Stack.Toolbar.Button>
           ) : null}
           {triggered && !stacked ? (
@@ -494,7 +499,7 @@ export default function PageSheet() {
               disabled={busy !== null}
               onPress={resolve}
             >
-              {busy === "resolve" ? "Resolving…" : "Resolve"}
+              Resolve
             </Stack.Toolbar.Button>
           ) : null}
           <Stack.Toolbar.Spacer />
@@ -506,7 +511,7 @@ export default function PageSheet() {
               tintColor={palette.accent}
               variant="prominent"
             >
-              {busy === "acknowledge" ? "Acknowledging…" : "Acknowledge"}
+              Acknowledge
             </Stack.Toolbar.Button>
           ) : (
             <Stack.Toolbar.Button
@@ -516,7 +521,7 @@ export default function PageSheet() {
               tintColor={palette.accent}
               variant="prominent"
             >
-              {busy === "resolve" ? "Resolving…" : "Resolve"}
+              Resolve
             </Stack.Toolbar.Button>
           )}
         </Stack.Toolbar>
