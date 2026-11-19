@@ -1,10 +1,5 @@
 import { type ReactNode, useCallback, useState } from "react";
-import {
-  ActionSheetIOS,
-  type ActionSheetIOSOptions,
-  StyleSheet,
-  View,
-} from "react-native";
+import { ActionSheetIOS, type ActionSheetIOSOptions, StyleSheet, View } from "react-native";
 
 /**
  * Shows an action sheet and, while it is up, a transparent view over the
@@ -20,16 +15,13 @@ export function useActionSheet(): {
   shield: ReactNode;
 } {
   const [open, setOpen] = useState(false);
-  const show = useCallback(
-    (options: ActionSheetIOSOptions, onSelect: (index: number) => void) => {
-      setOpen(true);
-      ActionSheetIOS.showActionSheetWithOptions(options, (index) => {
-        setOpen(false);
-        onSelect(index);
-      });
-    },
-    [],
-  );
+  const show = useCallback((options: ActionSheetIOSOptions, onSelect: (index: number) => void) => {
+    setOpen(true);
+    ActionSheetIOS.showActionSheetWithOptions(options, (index) => {
+      setOpen(false);
+      onSelect(index);
+    });
+  }, []);
   const shield = open ? (
     <View
       accessibilityElementsHidden
