@@ -1,10 +1,21 @@
+import Constants from "expo-constants";
+import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
 import * as SecureStore from "expo-secure-store";
-import { Alert } from "react-native";
+import { Alert, Platform } from "react-native";
+import { trackAppEvent, trackOnboardingCompleted } from "./analytics";
 import { api } from "./api";
 import { authClient } from "./auth";
+import { readCriticalAlertState } from "./critical-alerts";
 import { haptic } from "./haptics";
-import { clearInteractionResponses, DEVICE_ID_KEY } from "./interactions";
+import {
+  clearInteractionResponses,
+  DEVICE_ID_KEY,
+  flushInteractionResponses,
+  registerInteractionCategories,
+} from "./interactions";
+import { deviceNoun, isPad } from "./layout";
+import { refreshLiveActivityTokenSync } from "./live-activities";
 import { leaveAppTo } from "./navigation";
 import { clearAllWebsiteData } from "./website-data";
 
@@ -18,6 +29,81 @@ import { clearAllWebsiteData } from "./website-data";
 export const EXPO_TOKEN_KEY = "hark.device.expoPushToken";
 /** This device's APNs token, when iOS gave one. */
 export const APNS_TOKEN_KEY = "hark.device.apnsToken";
+
+/**
+ * Registers this device for pushes (or refreshes its registration): push
+ * tokens, notification actions and Critical Alerts state, then stores what
+ * the server returned. Set Up runs it from its Register button; a launch of
+ * a set-up device runs it in the background. Throws when it fails.
+ */
+export async function registerThisDevice(): Promise<void> {
+  void trackAppEvent("device_registration_started", { path: "/home" });
+  try {
+    if (!Device.isDevice) {
+      throw new Error(`Push notifications require a physical ${deviceNoun}.`);
+    }
+    const projectId =
+      (Constants.expoConfig?.extra?.eas as { projectId?: string } | undefined)?.projectId ??
+      process.env.EXPO_PUBLIC_EAS_PROJECT_ID;
+    const expoToken = (
+      await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : undefined)
+    ).data;
+
+    let apns: string | null = null;
+    try {
+      const nativeToken = await Notifications.getDevicePushTokenAsync();
+      apns = typeof nativeToken.data === "string" ? nativeToken.data : null;
+    } catch {
+      // APNs token is optional; delivery uses the Expo push token.
+    }
+
+    await registerInteractionCategories();
+    const criticalAlerts = await readCriticalAlertState().catch(() => undefined);
+    const registered = await api.registerDevice({
+      expoPushToken: expoToken,
+      ...(apns ? { apnsToken: apns } : {}),
+      platform: "ios",
+      deviceName: Device.deviceName ?? undefined,
+      interactionSchemaVersion: 1,
+      ...(!isPad && Number.parseFloat(String(Platform.Version)) >= 17
+        ? { liveActivityInteractionVersion: 1 as const }
+        : {}),
+      ...(criticalAlerts ? { criticalAlerts } : {}),
+    });
+
+    await SecureStore.setItemAsync(EXPO_TOKEN_KEY, expoToken);
+    await SecureStore.setItemAsync(DEVICE_ID_KEY, registered.device.id);
+    if (apns) {
+      await SecureStore.setItemAsync(APNS_TOKEN_KEY, apns);
+    } else {
+      await SecureStore.deleteItemAsync(APNS_TOKEN_KEY);
+    }
+
+    void trackAppEvent("device_registration_completed", {
+      path: "/home",
+      outcome: "registered",
+    });
+    void trackOnboardingCompleted();
+    void flushInteractionResponses();
+    refreshLiveActivityTokenSync(registered.device.id);
+  } catch (error) {
+    void trackAppEvent("device_registration_completed", { path: "/home", outcome: "failed" });
+    throw error;
+  }
+}
+
+/**
+ * True when this device finished Set Up: it is registered and may show
+ * notifications. A signed-in launch then opens the Inbox directly.
+ */
+export async function isDeviceSetUp(): Promise<boolean> {
+  const [deviceId, expoToken, permission] = await Promise.all([
+    SecureStore.getItemAsync(DEVICE_ID_KEY),
+    SecureStore.getItemAsync(EXPO_TOKEN_KEY),
+    Notifications.getPermissionsAsync(),
+  ]);
+  return Boolean(deviceId && expoToken) && permission.granted;
+}
 
 async function unregisterPushToken(): Promise<void> {
   const expoPushToken = await SecureStore.getItemAsync(EXPO_TOKEN_KEY);

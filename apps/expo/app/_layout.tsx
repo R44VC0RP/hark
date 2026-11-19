@@ -145,8 +145,10 @@ export default function RootLayout() {
         {/*
           Nothing belongs behind the tabs, so the edge swipe never pops them
           (it popped a second tab bar that a launch-chain link had stacked).
+          They replace Sign In or Set Up without a slide: a launch opens
+          straight into them.
         */}
-        <Stack.Screen name="(tabs)" options={{ gestureEnabled: false }} />
+        <Stack.Screen name="(tabs)" options={{ gestureEnabled: false, animation: "none" }} />
         <Stack.Screen name="web/[id]" />
         <Stack.Screen name="apps/[id]" options={sheetOptions} />
         <Stack.Screen name="pages/[id]" options={sheetOptions} />

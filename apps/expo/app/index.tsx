@@ -1,4 +1,5 @@
 import * as AppleAuthentication from "expo-apple-authentication";
+import * as Device from "expo-device";
 import { Redirect } from "expo-router";
 import { useEffect, useState } from "react";
 import {
@@ -10,6 +11,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { isDeviceSetUp, registerThisDevice } from "../src/lib/account";
 import { trackAppEvent } from "../src/lib/analytics";
 import { signInWithApple } from "../src/lib/apple-auth";
 import { authClient, useSession } from "../src/lib/auth";
@@ -33,6 +35,7 @@ const LABEL_SIZE = 19;
 const WORDMARK_MAX_SCALE = 1.4;
 /** The sign-in column on iPad and other wide windows. */
 const COLUMN_WIDTH = 480;
+const simulatorPreview = __DEV__ && !Device.isDevice;
 
 /**
  * What a failed sign-in says. Native errors (they carry an `ERR_…` code)
@@ -46,6 +49,35 @@ function signInError(error: unknown, provider: "Apple" | "Google"): string {
   }
   if (error instanceof Error && error.message) return error.message;
   return `Couldn't sign in with ${provider}. Try again.`;
+}
+
+/**
+ * Where a signed-in launch goes: straight to the Inbox when this device
+ * finished Set Up (registered, notifications allowed), refreshing its
+ * registration in the background as Set Up did on every launch; to Set Up
+ * otherwise. `undefined` while it reads the device's state.
+ */
+function useSignedInRoute(signedIn: boolean): "/inbox" | "/home" | undefined {
+  const [route, setRoute] = useState<"/inbox" | "/home">();
+  useEffect(() => {
+    if (!signedIn) return;
+    if (simulatorPreview) {
+      setRoute("/inbox");
+      return;
+    }
+    let current = true;
+    void isDeviceSetUp()
+      .catch(() => false)
+      .then((setUp) => {
+        if (!current) return;
+        if (setUp) void registerThisDevice().catch(() => {});
+        setRoute(setUp ? "/inbox" : "/home");
+      });
+    return () => {
+      current = false;
+    };
+  }, [signedIn]);
+  return signedIn ? route : undefined;
 }
 
 /**
@@ -66,9 +98,14 @@ export default function SignInScreen() {
     if (error) AccessibilityInfo.announceForAccessibility(error);
   }, [error]);
 
+  const signedInRoute = useSignedInRoute(Boolean(session));
+
   // Keep the sign-in screen mounted until the native authorization code is
   // exchanged and its revocation token is safely stored server-side.
-  if (session && busy !== "apple") return <Redirect href="/home" />;
+  if (session && busy !== "apple") {
+    // Nothing is drawn while the route is decided (a few milliseconds).
+    return signedInRoute ? <Redirect href={signedInRoute} /> : <View style={styles.screen} />;
+  }
 
   const signInWithGoogle = async () => {
     setBusy("google");
