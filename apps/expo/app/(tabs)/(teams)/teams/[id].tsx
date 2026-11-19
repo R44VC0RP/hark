@@ -6,31 +6,17 @@ import type {
   TeamRole,
 } from "@hark/contracts";
 import * as Device from "expo-device";
-import { Redirect, Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { StatusBar } from "expo-status-bar";
-import { SymbolView } from "expo-symbols";
-import { useCallback, useState } from "react";
-import {
-  ActionSheetIOS,
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  ScrollView,
-  Share,
-  Text,
-  View,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import {
-  PersonAvatar,
-  ScreenHeader,
-  SeatLimitNotice,
-  SecondaryButton,
-  SectionLabel,
-  ui,
-} from "../../../../src/components/screen-parts";
-import { api } from "../../../../src/lib/api";
+import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useCallback, useRef, useState } from "react";
+import { ActionSheetIOS, Alert, findNodeHandle, Share, StyleSheet, View } from "react-native";
+import { InviteRow } from "../../../../src/components/teams/invite-row";
+import { MemberRow } from "../../../../src/components/teams/member-row";
+import { unbroken } from "../../../../src/components/teams/page-row";
+import { SeatLimitNotice } from "../../../../src/components/teams/seat-limit-notice";
+import { ApiError, api } from "../../../../src/lib/api";
+import { refreshDirectory } from "../../../../src/lib/app-directory";
 import { useSession } from "../../../../src/lib/auth";
+import { haptic } from "../../../../src/lib/haptics";
 import {
   previewOncallGroups,
   previewTeamInvites,
@@ -42,36 +28,71 @@ import {
   canManageTeam,
   formatHandoff,
   isSeatLimitError,
-  memberCountLabel,
   roleLabel,
   seatsFull,
   seatsLabel,
 } from "../../../../src/lib/teams";
-import { colors } from "../../../../src/lib/theme";
+import { Avatar } from "../../../../src/ui/avatar";
+import {
+  EmptyState,
+  ErrorState,
+  isNetworkError,
+  LoadingState,
+} from "../../../../src/ui/empty-state";
+import { ActionRow, List, Row, Section, useStackedRows } from "../../../../src/ui/list";
+import { animateListChange } from "../../../../src/ui/motion";
+import { Text } from "../../../../src/ui/text";
+import { colors, metrics, radius, space } from "../../../../src/ui/tokens";
+
+const simulatorPreview = __DEV__ && !Device.isDevice;
+const AVATAR = 60;
+const CAPSULE = 22;
+
+type LoadFailure = "network" | "other" | "missing";
 
 function errorText(cause: unknown): string {
-  return cause instanceof Error ? cause.message : "Please try again.";
+  return cause instanceof Error ? cause.message : "Check your connection, then try again.";
 }
 
-export default function TeamDetailScreen() {
-  const { data: session, isPending } = useSession();
+function failed(title: string, cause: unknown): void {
+  haptic.error();
+  Alert.alert(title, errorText(cause));
+}
+
+/** "Owner · 5 seats · Team plan" */
+function identityLine(team: TeamDto): string {
+  return `${roleLabel(team.role)} · ${seatsLabel(team.seats)}${team.plan === "team" ? " · Team plan" : ""}`;
+}
+
+/**
+ * A team (DESIGN.md 5.13): who is in it, who is invited, its on-call groups,
+ * and what you can do as its owner, admin or member. Admins rename it from
+ * the header; every member action is an anchored action sheet.
+ */
+export default function TeamScreen() {
+  const { data: session } = useSession();
   const router = useRouter();
+  const stacked = useStackedRows();
   const { id: rawId } = useLocalSearchParams<{ id: string }>();
   const id = String(rawId);
-  const simulatorPreview = __DEV__ && !Device.isDevice;
   const viewerId = simulatorPreview ? previewViewer.userId : session?.user.id;
   const [team, setTeam] = useState<TeamDto | null>(null);
   const [members, setMembers] = useState<TeamMemberDto[]>([]);
   const [invites, setInvites] = useState<TeamInviteDto[]>([]);
   const [groups, setGroups] = useState<OncallGroupDto[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<LoadFailure | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [seatLimitHit, setSeatLimitHit] = useState(false);
   const [inviting, setInviting] = useState(false);
+  const inviteRef = useRef<View>(null);
 
   const load = useCallback(async () => {
     if (simulatorPreview) {
       const preview = previewTeams.find((item) => item.id === id);
-      if (!preview) return setError("This team no longer exists.");
+      if (!preview) {
+        setFailure("missing");
+        return;
+      }
       setTeam(preview);
       const isAcme = preview.id === previewTeams[0]?.id;
       setMembers(
@@ -85,9 +106,6 @@ export default function TeamDetailScreen() {
     }
     try {
       const result = await api.getTeam(id);
-      setTeam(result.team);
-      setMembers(result.members);
-      setError(null);
       const [inviteResult, groupResult] = await Promise.all([
         canManageTeam(result.team.role)
           ? api.listTeamInvites(id).catch(() => null)
@@ -95,20 +113,34 @@ export default function TeamDetailScreen() {
         // Older servers lack on-call; the section simply stays hidden.
         api.listOncallGroups(id).catch(() => null),
       ]);
+      setTeam(result.team);
+      setMembers(result.members);
       setInvites(inviteResult?.invites ?? []);
       setGroups(groupResult?.groups ?? null);
+      setFailure(null);
     } catch (cause) {
-      setError(errorText(cause));
+      setFailure(
+        cause instanceof ApiError && cause.status === 404
+          ? "missing"
+          : isNetworkError(cause)
+            ? "network"
+            : "other",
+      );
     }
-  }, [id, simulatorPreview]);
+  }, [id]);
 
+  // Back from On Call or the share sheet: show what changed meanwhile.
   useFocusEffect(
     useCallback(() => {
       void load();
     }, [load]),
   );
 
-  if (!isPending && !session && !simulatorPreview) return <Redirect href="/" />;
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  };
 
   const admin = canManageTeam(team?.role);
   const owner = team?.role === "owner";
@@ -134,6 +166,8 @@ export default function TeamDetailScreen() {
               },
             }
           : await api.createTeamInvite(team.id, { role });
+        haptic.success();
+        animateListChange();
         setInvites((current) => [result.invite, ...current]);
         setSeatLimitHit(false);
         setInviting(false);
@@ -142,8 +176,10 @@ export default function TeamDetailScreen() {
           url: result.url,
         });
       } catch (cause) {
-        if (isSeatLimitError(cause)) setSeatLimitHit(true);
-        else Alert.alert("Couldn’t create invite", errorText(cause));
+        if (isSeatLimitError(cause)) {
+          haptic.error();
+          setSeatLimitHit(true);
+        } else failed("Couldn't Create Invite", cause);
       } finally {
         setInviting(false);
       }
@@ -151,12 +187,15 @@ export default function TeamDetailScreen() {
   };
 
   const chooseInviteRole = () => {
+    if (!team || inviting) return;
+    const anchor = findNodeHandle(inviteRef.current) ?? undefined;
     ActionSheetIOS.showActionSheetWithOptions(
       {
-        title: `Invite to ${team?.name ?? "team"}`,
-        message: "You’ll get a link to send. It works once and expires in 7 days.",
-        options: ["Invite as member", "Invite as admin", "Cancel"],
+        title: `Invite to ${team.name}`,
+        message: "You'll get a link to send. It works once and expires in 7 days.",
+        options: ["Invite as Member", "Invite as Admin", "Cancel"],
         cancelButtonIndex: 2,
+        anchor,
       },
       (index) => {
         if (index === 0) invite("member");
@@ -167,16 +206,17 @@ export default function TeamDetailScreen() {
 
   const revokeInvite = (item: TeamInviteDto) => {
     if (!team) return;
-    Alert.alert("Revoke invite?", "The link stops working right away.", [
+    Alert.alert("Revoke Invite?", "The link stops working right away.", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Revoke",
         style: "destructive",
         onPress: () => {
+          animateListChange();
           setInvites((current) => current.filter((entry) => entry.id !== item.id));
           if (simulatorPreview) return;
           void api.revokeTeamInvite(team.id, item.id).catch((cause: unknown) => {
-            Alert.alert("Couldn’t revoke invite", errorText(cause));
+            failed("Couldn't Revoke Invite", cause);
             void load();
           });
         },
@@ -191,7 +231,7 @@ export default function TeamDetailScreen() {
     );
     if (simulatorPreview) return;
     void api.updateTeamMember(team.id, member.userId, role).catch((cause: unknown) => {
-      Alert.alert("Couldn’t change role", errorText(cause));
+      failed("Couldn't Change Role", cause);
       void load();
     });
   };
@@ -200,20 +240,24 @@ export default function TeamDetailScreen() {
     if (!team) return;
     Alert.alert(
       `Remove ${member.name}?`,
-      `They lose access to ${team.name}’s apps and on-call groups.`,
+      `They lose access to ${team.name}'s apps and on-call groups.`,
       [
         { text: "Cancel", style: "cancel" },
         {
           text: "Remove",
           style: "destructive",
           onPress: () => {
+            animateListChange();
             setMembers((current) => current.filter((entry) => entry.userId !== member.userId));
             if (simulatorPreview) return;
             void api
               .removeTeamMember(team.id, member.userId)
-              .then(() => load())
+              .then(() => {
+                void load();
+                void refreshDirectory().catch(() => {});
+              })
               .catch((cause: unknown) => {
-                Alert.alert("Couldn’t remove member", errorText(cause));
+                failed("Couldn't Remove Member", cause);
                 void load();
               });
           },
@@ -222,16 +266,14 @@ export default function TeamDetailScreen() {
     );
   };
 
-  const memberActions = (member: TeamMemberDto) => {
-    // Admins manage members and admins; only owners touch other owners.
-    if (member.role === "owner" && !owner) return;
+  const manageMember = (member: TeamMemberDto, anchor: number | undefined) => {
     const options: Array<{ label: string; run: () => void; destructive?: boolean }> = [];
     if (member.role === "member") {
-      options.push({ label: "Make admin", run: () => changeRole(member, "admin") });
+      options.push({ label: "Make Admin", run: () => changeRole(member, "admin") });
     } else if (member.role === "admin") {
-      options.push({ label: "Make member", run: () => changeRole(member, "member") });
+      options.push({ label: "Make Member", run: () => changeRole(member, "member") });
     }
-    options.push({ label: "Remove from team", run: () => removeMember(member), destructive: true });
+    options.push({ label: "Remove from Team", run: () => removeMember(member), destructive: true });
     ActionSheetIOS.showActionSheetWithOptions(
       {
         title: member.name,
@@ -239,6 +281,7 @@ export default function TeamDetailScreen() {
         options: [...options.map((option) => option.label), "Cancel"],
         destructiveButtonIndex: options.findIndex((option) => option.destructive),
         cancelButtonIndex: options.length,
+        anchor,
       },
       (index) => options[index]?.run(),
     );
@@ -247,12 +290,13 @@ export default function TeamDetailScreen() {
   const rename = () => {
     if (!team) return;
     Alert.prompt(
-      "Rename team",
+      "Rename Team",
       undefined,
       [
         { text: "Cancel", style: "cancel" },
         {
           text: "Save",
+
           onPress: (value?: string) => {
             const name = value?.trim();
             if (!name || name === team.name) return;
@@ -260,9 +304,12 @@ export default function TeamDetailScreen() {
             if (simulatorPreview) return;
             void api
               .renameTeam(team.id, name)
-              .then((result) => setTeam(result.team))
+              .then((result) => {
+                setTeam(result.team);
+                void refreshDirectory().catch(() => {});
+              })
               .catch((cause: unknown) => {
-                Alert.alert("Couldn’t rename team", errorText(cause));
+                failed("Couldn't Rename Team", cause);
                 setTeam(team);
               });
           },
@@ -273,22 +320,29 @@ export default function TeamDetailScreen() {
     );
   };
 
+  /** After leaving or deleting: back to Teams, which reloads its list. */
+  const leaveScreen = () => {
+    void refreshDirectory().catch(() => {});
+    if (router.canGoBack()) router.back();
+    else router.replace("/teams");
+  };
+
   const leave = () => {
     if (!team) return;
     Alert.alert(
       `Leave ${team.name}?`,
-      "Its apps disappear from your home screen and you’re taken off its on-call rotations.",
+      "Its apps disappear from your Apps tab and you're taken off its on-call rotations.",
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Leave team",
+          text: "Leave Team",
           style: "destructive",
           onPress: () => {
             if (simulatorPreview) return router.back();
             void api
               .leaveTeam(team.id)
-              .then(() => (router.canGoBack() ? router.back() : router.replace("/teams")))
-              .catch((cause: unknown) => Alert.alert("Couldn’t leave team", errorText(cause)));
+              .then(leaveScreen)
+              .catch((cause: unknown) => failed("Couldn't Leave Team", cause));
           },
         },
       ],
@@ -299,18 +353,18 @@ export default function TeamDetailScreen() {
     if (!team) return;
     Alert.alert(
       `Delete ${team.name}?`,
-      "Its apps, on-call groups and pages are deleted for everyone. This can’t be undone.",
+      "Its apps, on-call groups and pages are deleted for everyone. This can't be undone.",
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Delete team",
+          text: "Delete Team",
           style: "destructive",
           onPress: () => {
             if (simulatorPreview) return router.back();
             void api
               .deleteTeam(team.id)
-              .then(() => (router.canGoBack() ? router.back() : router.replace("/teams")))
-              .catch((cause: unknown) => Alert.alert("Couldn’t delete team", errorText(cause)));
+              .then(leaveScreen)
+              .catch((cause: unknown) => failed("Couldn't Delete Team", cause));
           },
         },
       ],
@@ -318,195 +372,176 @@ export default function TeamDetailScreen() {
   };
 
   return (
-    <SafeAreaView edges={["top"]} style={ui.container}>
-      <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar style="dark" />
-      <ScreenHeader
-        fallback="/teams"
-        right={
-          admin ? (
-            <Pressable
-              accessibilityLabel="Rename team"
-              accessibilityRole="button"
-              onPress={rename}
-              style={({ pressed }) => [ui.iconButton, pressed && ui.iconButtonPressed]}
-            >
-              <SymbolView name="pencil" size={16} tintColor={colors.muted} />
-            </Pressable>
-          ) : undefined
-        }
-      />
-      {!team ? (
-        error ? (
-          <Text style={[ui.message, { paddingHorizontal: 24 }]}>{error}</Text>
+    <>
+      <Stack.Screen options={{ title: team?.name ?? "" }} />
+      {admin ? (
+        <Stack.Toolbar placement="right">
+          <Stack.Toolbar.Button accessibilityLabel="Rename Team" icon="pencil" onPress={rename} />
+        </Stack.Toolbar>
+      ) : null}
+      <List
+        onRefresh={team || failure ? () => void onRefresh() : undefined}
+        refreshing={refreshing}
+      >
+        {!team ? (
+          failure === "missing" ? (
+            <EmptyState
+              message="It was deleted or you're no longer a member."
+              symbol="person.2"
+              title="Team Unavailable"
+            />
+          ) : failure ? (
+            <ErrorState
+              network={failure === "network"}
+              onRetry={() => {
+                setFailure(null);
+                void load();
+              }}
+              title="Couldn't Load Team"
+            />
+          ) : (
+            <LoadingState />
+          )
         ) : (
-          <ActivityIndicator color={colors.accent} style={ui.loading} />
-        )
-      ) : (
-        <ScrollView contentContainerStyle={ui.scroll}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
-            <PersonAvatar name={team.name} size={52} />
-            <View style={ui.rowCopy}>
-              <Text style={ui.title}>{team.name}</Text>
-              <Text style={ui.muted}>
-                {roleLabel(team.role)} · {seatsLabel(team.seats)}
-                {team.plan === "team" ? " · Team plan" : ""}
-              </Text>
-            </View>
-          </View>
-
-          {admin ? (
-            <View style={{ marginTop: 20 }}>
-              <Pressable
-                accessibilityHint="Creates a join link and opens the share sheet"
-                accessibilityLabel="Invite people"
-                accessibilityRole="button"
-                disabled={inviting}
-                onPress={chooseInviteRole}
-                style={({ pressed }) => [
-                  ui.primaryButton,
-                  { flexDirection: "row", gap: 8 },
-                  inviting && ui.disabled,
-                  pressed && ui.primaryButtonPressed,
-                ]}
-              >
-                <SymbolView name="person.badge.plus" size={16} tintColor="#FFFFFF" />
-                <Text style={ui.primaryButtonText}>
-                  {inviting ? "Creating link…" : "Invite people"}
+          <>
+            <View
+              accessibilityLabel={`${team.name}. ${identityLine(team)}`}
+              accessible
+              style={[styles.identity, stacked && styles.identityStacked]}
+            >
+              <Avatar name={team.name} size={AVATAR} />
+              <View style={styles.identityCopy}>
+                <Text accessibilityRole="header" variant="title3">
+                  {team.name}
                 </Text>
-              </Pressable>
+                <Text color="secondaryLabel" variant="subheadline">
+                  {identityLine(team)}
+                </Text>
+              </View>
             </View>
-          ) : null}
 
-          {seatLimitHit || seatsFull(team.seats) ? (
-            <SeatLimitNotice owner={team.role === "owner"} teamName={team.name} />
-          ) : null}
-
-          {groups && groups.length > 0 ? (
-            <>
-              <SectionLabel>On call</SectionLabel>
-              {groups.map((group, index) => (
-                <Pressable
-                  accessibilityHint="Shows shifts and open pages"
-                  accessibilityLabel={`${group.name} on-call group${group.current ? `, ${group.current.person.name} is on call` : ""}${group.openPageCount > 0 ? `, ${group.openPageCount} open pages` : ""}`}
-                  accessibilityRole="button"
-                  key={group.id}
-                  onPress={() => router.push({ pathname: "/oncall", params: { team: team.id } })}
-                  style={({ pressed }) => [
-                    ui.row,
-                    index === groups.length - 1 && ui.lastRow,
-                    pressed && ui.rowPressed,
-                  ]}
-                >
-                  <View style={[ui.avatar, { width: 34, height: 34, borderRadius: 17 }]}>
-                    <SymbolView name="bell.badge.fill" size={15} tintColor={colors.accent} />
-                  </View>
-                  <View style={ui.rowCopy}>
-                    <Text style={ui.rowLabel}>{group.name}</Text>
-                    <Text style={ui.rowValue}>
-                      {group.current
-                        ? `${group.current.person.userId === viewerId ? "You" : group.current.person.name} until ${formatHandoff(group.current.endsAt)}`
-                        : "Nobody on call"}
-                    </Text>
-                  </View>
-                  {group.openPageCount > 0 ? (
-                    <View style={[ui.rolePill, { backgroundColor: colors.accentSoft }]}>
-                      <Text style={[ui.rolePillText, { color: colors.accent }]}>
-                        {group.openPageCount} open
-                      </Text>
-                    </View>
-                  ) : null}
-                  <SymbolView name="chevron.right" size={12} tintColor={colors.soft} />
-                </Pressable>
-              ))}
-            </>
-          ) : null}
-
-          <SectionLabel detail={memberCountLabel(members.length)}>Members</SectionLabel>
-          {members.map((member, index) => {
-            const self = member.userId === viewerId;
-            const manageable = admin && !self && (member.role !== "owner" || owner);
-            return (
-              <Pressable
-                accessibilityHint={manageable ? "Change role or remove" : undefined}
-                accessibilityLabel={`${member.name}${self ? " (you)" : ""}, ${roleLabel(member.role)}`}
-                accessibilityRole={manageable ? "button" : undefined}
-                disabled={!manageable}
-                key={member.userId}
-                onPress={() => memberActions(member)}
-                style={({ pressed }) => [
-                  ui.row,
-                  index === members.length - 1 && ui.lastRow,
-                  pressed && ui.rowPressed,
-                ]}
-              >
-                <PersonAvatar image={member.image} name={member.name} size={34} />
-                <View style={ui.rowCopy}>
-                  <Text numberOfLines={1} style={ui.rowLabel}>
-                    {member.name}
-                    {self ? <Text style={ui.rowValue}> · You</Text> : null}
-                  </Text>
-                  <Text numberOfLines={1} style={ui.rowValue}>
-                    {member.email}
-                  </Text>
-                </View>
-                <View style={ui.rolePill}>
-                  <Text style={ui.rolePillText}>{roleLabel(member.role)}</Text>
-                </View>
-                {manageable ? (
-                  <SymbolView name="ellipsis" size={14} tintColor={colors.soft} />
-                ) : admin ? (
-                  <View style={{ width: 14 }} />
-                ) : null}
-              </Pressable>
-            );
-          })}
-
-          {admin && pendingInvites.length > 0 ? (
-            <>
-              <SectionLabel>Pending invites</SectionLabel>
-              {pendingInvites.map((item, index) => (
-                <Pressable
-                  accessibilityHint="Revokes the invite"
-                  accessibilityLabel={`Invite ${item.email ?? "link"}, ${roleLabel(item.role)}`}
-                  accessibilityRole="button"
-                  key={item.id}
-                  onPress={() => revokeInvite(item)}
-                  style={({ pressed }) => [
-                    ui.row,
-                    index === pendingInvites.length - 1 && ui.lastRow,
-                    pressed && ui.rowPressed,
-                  ]}
-                >
-                  <View style={[ui.avatar, { width: 34, height: 34, borderRadius: 17 }]}>
-                    <SymbolView name="link" size={14} tintColor={colors.accent} />
-                  </View>
-                  <View style={ui.rowCopy}>
-                    <Text numberOfLines={1} style={ui.rowLabel}>
-                      {item.email ?? "Invite link"}
-                    </Text>
-                    <Text numberOfLines={1} style={ui.rowValue}>
-                      {roleLabel(item.role)} · from {item.invitedBy} · expires{" "}
-                      {new Date(item.expiresAt).toLocaleDateString(undefined, {
-                        month: "short",
-                        day: "numeric",
-                      })}
-                    </Text>
-                  </View>
-                  <Text style={[ui.rowTrailing, { color: colors.danger }]}>Revoke</Text>
-                </Pressable>
-              ))}
-            </>
-          ) : null}
-
-          <View style={{ gap: 10, marginTop: 30 }}>
-            <SecondaryButton destructive label="Leave team" onPress={leave} />
-            {owner ? (
-              <SecondaryButton destructive label="Delete team" onPress={deleteTeam} />
+            {admin ? (
+              <Section>
+                <ActionRow
+                  accessibilityHint="Creates a join link and opens the share sheet"
+                  disabled={inviting}
+                  onPress={chooseInviteRole}
+                  ref={inviteRef}
+                  symbol="person.badge.plus"
+                  title={inviting ? "Creating Link…" : "Invite People…"}
+                />
+              </Section>
             ) : null}
-          </View>
-        </ScrollView>
-      )}
-    </SafeAreaView>
+
+            {seatLimitHit || seatsFull(team.seats) ? (
+              <SeatLimitNotice owner={owner} teamName={team.name} />
+            ) : null}
+
+            {groups && groups.length > 0 ? (
+              <Section title="On Call">
+                {groups.map((group) => (
+                  <Row
+                    accessibilityHint="Shows shifts, rotations and open pages"
+                    chevron
+                    key={group.id}
+                    onPress={() =>
+                      router.push({
+                        pathname: "/oncall",
+                        params: { team: team.id, name: team.name },
+                      })
+                    }
+                    subtitle={
+                      group.current
+                        ? `${group.current.person.userId === viewerId ? "You" : group.current.person.name} ${unbroken(`until ${formatHandoff(group.current.endsAt)}`)}`
+                        : "Nobody on call"
+                    }
+                    symbol="bell"
+                    title={group.name}
+                    trailing={
+                      group.openPageCount > 0 ? (
+                        <View
+                          accessibilityLabel={`${group.openPageCount} open`}
+                          style={styles.openCapsule}
+                        >
+                          <Text
+                            color="accent"
+                            maxFontSizeMultiplier={1.3}
+                            tabular
+                            variant="caption1"
+                            weight="600"
+                          >
+                            {`${group.openPageCount} open`}
+                          </Text>
+                        </View>
+                      ) : null
+                    }
+                  />
+                ))}
+              </Section>
+            ) : null}
+
+            <Section detail={String(members.length)} title="Members">
+              {members.map((member) => {
+                const self = member.userId === viewerId;
+                // Admins manage members and admins; only owners touch other owners.
+                const manageable = admin && !self && (member.role !== "owner" || owner);
+                return (
+                  <MemberRow
+                    key={member.userId}
+                    manageable={manageable}
+                    member={member}
+                    onManage={manageMember}
+                    reserveAction={admin}
+                    self={self}
+                  />
+                );
+              })}
+            </Section>
+
+            {admin && pendingInvites.length > 0 ? (
+              <Section detail={String(pendingInvites.length)} title="Pending Invites">
+                {pendingInvites.map((item) => (
+                  <InviteRow invite={item} key={item.id} onRevoke={revokeInvite} />
+                ))}
+              </Section>
+            ) : null}
+
+            <Section>
+              <ActionRow destructive onPress={leave} title="Leave Team" />
+              {owner ? <ActionRow destructive onPress={deleteTeam} title="Delete Team" /> : null}
+            </Section>
+          </>
+        )}
+      </List>
+    </>
   );
 }
+
+const styles = StyleSheet.create({
+  identity: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.m,
+    marginTop: space.l,
+    paddingHorizontal: metrics.rowPaddingHorizontal,
+  },
+  identityStacked: {
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: space.s,
+  },
+  identityCopy: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    gap: 2,
+  },
+  openCapsule: {
+    minHeight: CAPSULE,
+    justifyContent: "center",
+    paddingHorizontal: space.xs,
+    borderRadius: radius.capsule(CAPSULE),
+    borderCurve: "continuous",
+    backgroundColor: colors.accentSoft,
+  },
+});

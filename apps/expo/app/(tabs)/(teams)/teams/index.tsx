@@ -1,215 +1,190 @@
 import type { TeamDto } from "@hark/contracts";
 import * as Device from "expo-device";
-import { Redirect, Stack, useFocusEffect, useRouter } from "expo-router";
-import { StatusBar } from "expo-status-bar";
-import { SymbolView } from "expo-symbols";
-import { useCallback, useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import {
-  PersonAvatar,
-  PrimaryButton,
-  ScreenHeader,
-  SectionLabel,
-  ui,
-} from "../../../../src/components/screen-parts";
+import { Stack, useRouter } from "expo-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Alert } from "react-native";
+import { OncallStatusRow, oncallStatus } from "../../../../src/components/teams/oncall-status";
+import { PageRow, sortPages } from "../../../../src/components/teams/page-row";
 import { api } from "../../../../src/lib/api";
-import { useSession } from "../../../../src/lib/auth";
+import {
+  refreshDirectory,
+  useDirectory,
+  useDirectoryLoadFailed,
+} from "../../../../src/lib/app-directory";
+import { haptic } from "../../../../src/lib/haptics";
 import { previewTeams } from "../../../../src/lib/inbox-preview";
-import { isUnsupportedRoute, memberCountLabel, roleLabel } from "../../../../src/lib/teams";
-import { colors } from "../../../../src/lib/theme";
+import { memberCountLabel, roleLabel } from "../../../../src/lib/teams";
+import { TabRootToolbar } from "../../../../src/ui/account-button";
+import { Avatar } from "../../../../src/ui/avatar";
+import { EmptyState, ErrorState, LoadingState } from "../../../../src/ui/empty-state";
+import { List, Row, Section } from "../../../../src/ui/list";
 
+const simulatorPreview = __DEV__ && !Device.isDevice;
+/** Relative times ("4 min ago") move on once a minute. */
+const TICK_MS = 60_000;
+const AVATAR = 36;
+
+function teamSubtitle(team: TeamDto): string {
+  const apps = team.appCount === 1 ? "1 app" : `${team.appCount} apps`;
+  return [roleLabel(team.role), memberCountLabel(team.memberCount), team.appCount > 0 ? apps : null]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/**
+ * Teams (DESIGN.md 5.12), the third tab: where you stand on call, the pages
+ * still open, and your teams. Everything reads the app directory the tab bar
+ * badge and the pages accessory use, so they never disagree; pull to refresh
+ * reloads it. "+" creates a team with a native prompt.
+ */
 export default function TeamsScreen() {
-  const { data: session, isPending } = useSession();
   const router = useRouter();
-  const simulatorPreview = __DEV__ && !Device.isDevice;
-  const [teams, setTeams] = useState<TeamDto[] | null>(null);
-  const [unsupported, setUnsupported] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [name, setName] = useState("");
-  const [saving, setSaving] = useState(false);
+  const directory = useDirectory();
+  const loadFailed = useDirectoryLoadFailed();
+  const [refreshing, setRefreshing] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  const creating = useRef(false);
 
-  const load = useCallback(async () => {
-    if (simulatorPreview) {
-      setTeams([...previewTeams]);
-      return;
-    }
-    try {
-      const result = await api.listTeams();
-      setTeams(result.teams);
-      setError(null);
-    } catch (cause) {
-      if (isUnsupportedRoute(cause)) setUnsupported(true);
-      else setError(cause instanceof Error ? cause.message : "Couldn’t load teams.");
-    }
-  }, [simulatorPreview]);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), TICK_MS);
+    return () => clearInterval(timer);
+  }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      void load();
-    }, [load]),
-  );
-
-  if (!isPending && !session && !simulatorPreview) return <Redirect href="/" />;
-
-  const create = async () => {
-    const trimmed = name.trim();
-    if (!trimmed || saving) return;
-    setSaving(true);
-    try {
-      let team: TeamDto;
-      if (simulatorPreview) {
-        team = {
-          id: `team_preview${Date.now().toString(36)}`,
-          name: trimmed,
-          role: "owner",
-          memberCount: 1,
-          appCount: 0,
-          oncallGroupCount: 0,
-          seats: { used: 1, available: 0, billable: 0 },
-          plan: "free",
-          createdAt: new Date().toISOString(),
-        };
-        previewTeams.push(team);
-      } else {
-        team = (await api.createTeam(trimmed)).team;
-      }
-      setName("");
-      setCreating(false);
-      setTeams((current) => [...(current ?? []), team]);
-      router.push({ pathname: "/teams/[id]", params: { id: team.id } });
-    } catch (cause) {
-      Alert.alert("Couldn’t create team", cause instanceof Error ? cause.message : "");
-    } finally {
-      setSaving(false);
-    }
+  const onRefresh = async () => {
+    setRefreshing(true);
+    // A failed refresh keeps the last data on screen.
+    await refreshDirectory().catch(() => {});
+    setRefreshing(false);
   };
 
+  const create = useCallback(
+    async (value?: string) => {
+      const name = value?.trim();
+      if (!name || creating.current) return;
+      creating.current = true;
+      try {
+        let team: TeamDto;
+        if (simulatorPreview) {
+          team = {
+            id: `team_preview${Date.now().toString(36)}`,
+            name,
+            role: "owner",
+            memberCount: 1,
+            appCount: 0,
+            oncallGroupCount: 0,
+            seats: { used: 1, available: 0, billable: 0 },
+            plan: "free",
+            createdAt: new Date().toISOString(),
+          };
+          previewTeams.push(team);
+        } else {
+          team = (await api.createTeam(name)).team;
+        }
+        router.push({ pathname: "/teams/[id]", params: { id: team.id } });
+        void refreshDirectory().catch(() => {});
+      } catch (cause) {
+        haptic.error();
+        Alert.alert(
+          "Couldn't Create Team",
+          cause instanceof Error ? cause.message : "Check your connection, then try again.",
+        );
+      } finally {
+        creating.current = false;
+      }
+    },
+    [router],
+  );
+
+  const newTeam = useCallback(() => {
+    Alert.prompt(
+      "New Team",
+      "Name your team.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Create", onPress: (value?: string) => void create(value) },
+      ],
+      "plain-text",
+    );
+  }, [create]);
+
+  const teams = directory?.teams ?? null;
+  const oncall = directory?.oncall ?? null;
+  const pages = useMemo(
+    () => sortPages((oncall?.pages ?? []).filter((page) => page.status !== "resolved")),
+    [oncall],
+  );
+  const showOncall =
+    (oncall?.shifts.length ?? 0) > 0 ||
+    pages.length > 0 ||
+    (teams ?? []).some((team) => team.oncallGroupCount > 0);
+  const status = oncallStatus(oncall, now);
+
   return (
-    <SafeAreaView edges={["top"]} style={ui.container}>
-      <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar style="dark" />
-      <ScreenHeader fallback="/settings" title="Teams" />
-      <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={ui.scroll} keyboardShouldPersistTaps="handled">
-          {unsupported ? (
-            <Text style={ui.message}>This Hark server doesn’t support teams yet.</Text>
-          ) : teams === null ? (
-            error ? (
-              <Text style={ui.message}>{error}</Text>
-            ) : (
-              <ActivityIndicator color={colors.accent} style={ui.loading} />
-            )
+    <>
+      <TabRootToolbar>
+        {teams ? (
+          <Stack.Toolbar.Button accessibilityLabel="New Team" icon="plus" onPress={newTeam} />
+        ) : null}
+      </TabRootToolbar>
+      <List onRefresh={directory || loadFailed ? onRefresh : undefined} refreshing={refreshing}>
+        {directory === null ? (
+          loadFailed ? (
+            <ErrorState
+              onRetry={() => void refreshDirectory().catch(() => {})}
+              title="Couldn't Load Teams"
+            />
           ) : (
-            <>
-              <Text style={[ui.muted, { marginTop: 4 }]}>
-                Share apps with the people you work with and take turns being on call.
-              </Text>
-              <SectionLabel>Your teams</SectionLabel>
-              {teams.length === 0 ? (
-                <Text style={[ui.muted, { paddingBottom: 12 }]}>
-                  You’re not on a team yet. Create one, or open an invite link from a teammate.
-                </Text>
-              ) : null}
-              {teams.map((team, index) => (
-                <Pressable
-                  accessibilityHint="Shows members, invites and seats"
-                  accessibilityLabel={`${team.name}, ${roleLabel(team.role)}, ${memberCountLabel(team.memberCount)}`}
-                  accessibilityRole="button"
+            <LoadingState />
+          )
+        ) : teams === null ? (
+          <EmptyState
+            message="This Hark server doesn't support teams yet."
+            symbol="person.2"
+            title="Teams Aren't Available"
+          />
+        ) : teams.length === 0 ? (
+          <EmptyState
+            actionTitle="Create a Team"
+            message="Create a team to share apps with the people you work with and take turns being on call. Got an invite? Open the link your teammate sent."
+            onAction={newTeam}
+            symbol="person.2"
+            title="No Teams Yet"
+          />
+        ) : (
+          <>
+            {showOncall ? (
+              <Section prominent title="On Call">
+                <OncallStatusRow onPress={() => router.push("/oncall")} status={status} />
+              </Section>
+            ) : null}
+            {pages.length > 0 ? (
+              <Section detail={String(pages.length)} prominent title="Open Pages">
+                {pages.map((page) => (
+                  <PageRow key={page.id} now={now} page={page} />
+                ))}
+              </Section>
+            ) : null}
+            <Section
+              footer="Share apps with the people you work with and take turns being on call."
+              prominent
+              title="Your Teams"
+            >
+              {teams.map((team) => (
+                <Row
+                  accessibilityHint="Shows members, invites and on-call groups"
+                  chevron
                   key={team.id}
+                  leading={<Avatar name={team.name} size={AVATAR} />}
+                  leadingWidth={AVATAR}
                   onPress={() => router.push({ pathname: "/teams/[id]", params: { id: team.id } })}
-                  style={({ pressed }) => [
-                    ui.row,
-                    index === teams.length - 1 && !creating && ui.lastRow,
-                    pressed && ui.rowPressed,
-                  ]}
-                >
-                  <PersonAvatar name={team.name} size={34} />
-                  <View style={ui.rowCopy}>
-                    <Text style={ui.rowLabel}>{team.name}</Text>
-                    <Text style={ui.rowValue}>
-                      {roleLabel(team.role)} · {memberCountLabel(team.memberCount)}
-                      {team.appCount > 0
-                        ? ` · ${team.appCount} app${team.appCount === 1 ? "" : "s"}`
-                        : ""}
-                    </Text>
-                  </View>
-                  <SymbolView name="chevron.right" size={12} tintColor={colors.soft} />
-                </Pressable>
+                  subtitle={teamSubtitle(team)}
+                  title={team.name}
+                />
               ))}
-              {creating ? (
-                <View style={[ui.row, ui.lastRow, { paddingVertical: 14 }]}>
-                  <View style={{ flex: 1, gap: 10 }}>
-                    <TextInput
-                      accessibilityLabel="Team name"
-                      autoFocus
-                      maxLength={60}
-                      onChangeText={setName}
-                      onSubmitEditing={() => void create()}
-                      placeholder="Team name"
-                      placeholderTextColor={colors.soft}
-                      returnKeyType="done"
-                      style={ui.input}
-                      value={name}
-                    />
-                    <View style={{ flexDirection: "row", gap: 10 }}>
-                      <View style={{ flex: 1 }}>
-                        <PrimaryButton
-                          busy={saving}
-                          disabled={!name.trim()}
-                          label="Create team"
-                          onPress={() => void create()}
-                        />
-                      </View>
-                      <Pressable
-                        accessibilityLabel="Cancel"
-                        accessibilityRole="button"
-                        onPress={() => {
-                          setCreating(false);
-                          setName("");
-                        }}
-                        style={({ pressed }) => [
-                          ui.secondaryButton,
-                          { minHeight: 48 },
-                          pressed && ui.secondaryButtonPressed,
-                        ]}
-                      >
-                        <Text style={ui.secondaryButtonText}>Cancel</Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                </View>
-              ) : (
-                <Pressable
-                  accessibilityLabel="New team"
-                  accessibilityRole="button"
-                  onPress={() => setCreating(true)}
-                  style={({ pressed }) => [
-                    ui.row,
-                    teams.length === 0 && ui.lastRow,
-                    pressed && ui.rowPressed,
-                  ]}
-                >
-                  <View style={[ui.avatar, { width: 34, height: 34, borderRadius: 17 }]}>
-                    <SymbolView name="plus" size={14} tintColor={colors.accent} weight="semibold" />
-                  </View>
-                  <Text style={[ui.rowLabel, { color: colors.accent }]}>New team</Text>
-                </Pressable>
-              )}
-            </>
-          )}
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+            </Section>
+          </>
+        )}
+      </List>
+    </>
   );
 }

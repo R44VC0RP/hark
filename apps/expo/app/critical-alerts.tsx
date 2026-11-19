@@ -1,31 +1,52 @@
 import type { CriticalAlertState } from "@hark/contracts";
-import { useRouter } from "expo-router";
-import { StatusBar } from "expo-status-bar";
+import { Stack } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useEffect, useState } from "react";
-import { Linking, ScrollView, StyleSheet, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { PrimaryButton, ScreenHeader, SecondaryButton, ui } from "../src/components/screen-parts";
+import { AppState, Linking, StyleSheet, View } from "react-native";
+import { closeSheet } from "../src/components/teams/close-sheet";
 import {
   criticalAlertsEnabled,
   readCriticalAlertState,
   requestCriticalAlerts,
 } from "../src/lib/critical-alerts";
 import { deviceNoun } from "../src/lib/layout";
-import { colors, fonts, tightTracking } from "../src/lib/theme";
+import { List } from "../src/ui/list";
+import { Text } from "../src/ui/text";
+import { colors, metrics, palette, radius, space } from "../src/ui/tokens";
+
+const TILE = 64;
+
+function stateLine(state: CriticalAlertState): string | null {
+  switch (state) {
+    case "authorized":
+      return "Critical Alerts are on. Pages will ring through silent mode.";
+    case "denied":
+      return "Critical Alerts are off. Turn them on in Settings › Notifications › Hark.";
+    case "unavailable":
+      return "This version of Hark can't send Critical Alerts yet.";
+    default:
+      return null;
+  }
+}
 
 /**
- * Explains Critical Alerts before iOS asks, so the one-time system prompt
- * comes with context. Only reachable when the build has the entitlement.
+ * Explains Critical Alerts before iOS asks (DESIGN.md 5.20), so the one-time
+ * system prompt comes with context. One centered prominent action in the
+ * sheet's bottom toolbar: allow, open Settings, or done.
  */
-export default function CriticalAlertsScreen() {
-  const router = useRouter();
+export default function CriticalAlertsSheet() {
   const enabled = criticalAlertsEnabled();
   const [state, setState] = useState<CriticalAlertState | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    void readCriticalAlertState().then(setState);
+    const read = () => void readCriticalAlertState().then(setState);
+    read();
+    // Back from iOS Settings: show what changed there.
+    const appState = AppState.addEventListener("change", (next) => {
+      if (next === "active") read();
+    });
+    return () => appState.remove();
   }, []);
 
   const allow = async () => {
@@ -37,73 +58,103 @@ export default function CriticalAlertsScreen() {
     }
   };
 
-  return (
-    <SafeAreaView edges={["top"]} style={ui.container}>
-      <StatusBar style="dark" />
-      <ScreenHeader title="Critical Alerts" />
-      <ScrollView contentContainerStyle={[ui.scroll, styles.content]}>
-        <View style={styles.icon}>
-          <SymbolView
-            name="bell.and.waves.left.and.right.fill"
-            size={34}
-            tintColor={colors.danger}
-          />
-        </View>
-        <Text style={styles.title}>Never sleep through a page</Text>
-        <Text style={ui.body}>
-          Critical Alerts let on-call pages ring at full volume even when your {deviceNoun} is on
-          silent or in a Focus like Sleep or Do Not Disturb.
-        </Text>
-        <Text style={ui.body}>
-          Hark only uses them for on-call pages sent to you. Every other notification keeps your
-          normal sound settings. You can turn them off any time in Settings › Notifications › Hark.
-        </Text>
+  const shown: CriticalAlertState | null = !enabled ? "unavailable" : state;
+  const line = shown ? stateLine(shown) : null;
 
-        {!enabled || state === "unavailable" ? (
-          <Text style={ui.muted}>This version of Hark can’t send Critical Alerts yet.</Text>
-        ) : state === "authorized" ? (
-          <>
-            <Text style={ui.muted}>
-              Critical Alerts are on. Pages will ring through silent mode.
+  return (
+    <>
+      <Stack.Toolbar placement="right">
+        <Stack.Toolbar.Button
+          accessibilityLabel="Close"
+          icon="xmark"
+          onPress={() => closeSheet("/oncall")}
+        />
+      </Stack.Toolbar>
+      <List alwaysBounceVertical={false} reading>
+        <View style={styles.hero}>
+          <View style={styles.tile}>
+            <SymbolView
+              accessibilityElementsHidden
+              name="bell.and.waves.left.and.right.fill"
+              size={34}
+              tintColor={colors.danger}
+            />
+          </View>
+          <Text accessibilityRole="header" align="center" variant="title2">
+            Never Sleep Through a Page
+          </Text>
+          <Text align="center" variant="body">
+            {`Critical Alerts let on-call pages ring at full volume even when your ${deviceNoun} is on silent or in a Focus like Sleep or Do Not Disturb.`}
+          </Text>
+          <Text align="center" variant="body">
+            Hark only uses them for on-call pages sent to you. Every other notification keeps your
+            normal sound settings. You can turn them off any time in Settings › Notifications ›
+            Hark.
+          </Text>
+          {line ? (
+            <Text
+              accessibilityLiveRegion="polite"
+              align="center"
+              color="secondaryLabel"
+              variant="footnote"
+            >
+              {line}
             </Text>
-            <SecondaryButton label="Done" onPress={() => router.back()} />
-          </>
-        ) : state === "denied" ? (
-          <>
-            <Text style={ui.muted}>
-              Critical Alerts are off. Turn them on in Settings › Notifications › Hark.
-            </Text>
-            <PrimaryButton label="Open Settings" onPress={() => void Linking.openSettings()} />
-            <SecondaryButton label="Not now" onPress={() => router.back()} />
-          </>
-        ) : (
-          <>
-            <PrimaryButton busy={busy} label="Allow Critical Alerts" onPress={() => void allow()} />
-            <SecondaryButton label="Not now" onPress={() => router.back()} />
-          </>
-        )}
-      </ScrollView>
-    </SafeAreaView>
+          ) : null}
+        </View>
+      </List>
+      {shown ? (
+        <Stack.Toolbar placement="bottom">
+          <Stack.Toolbar.Spacer />
+          {shown === "notDetermined" ? (
+            <Stack.Toolbar.Button
+              disabled={busy}
+              onPress={() => void allow()}
+              tintColor={palette.accent}
+              variant="prominent"
+            >
+              Allow Critical Alerts
+            </Stack.Toolbar.Button>
+          ) : shown === "denied" ? (
+            <Stack.Toolbar.Button
+              accessibilityHint="Opens Hark in the Settings app"
+              onPress={() => void Linking.openSettings()}
+              tintColor={palette.accent}
+              variant="prominent"
+            >
+              Open Settings
+            </Stack.Toolbar.Button>
+          ) : (
+            <Stack.Toolbar.Button
+              onPress={() => closeSheet("/oncall")}
+              tintColor={palette.accent}
+              variant="prominent"
+            >
+              Done
+            </Stack.Toolbar.Button>
+          )}
+          <Stack.Toolbar.Spacer />
+        </Stack.Toolbar>
+      ) : null}
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  content: {
-    gap: 16,
-    paddingTop: 12,
+  hero: {
+    alignItems: "center",
+    gap: space.m,
+    marginTop: space.l,
+    paddingHorizontal: metrics.rowPaddingHorizontal,
   },
-  icon: {
-    width: 64,
-    height: 64,
+  tile: {
+    width: TILE,
+    height: TILE,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 16,
-    backgroundColor: colors.surface,
-  },
-  title: {
-    color: colors.ink,
-    fontFamily: fonts.semibold,
-    fontSize: 22,
-    letterSpacing: tightTracking(22),
+    marginBottom: space.xxs,
+    borderRadius: radius.inner(10),
+    borderCurve: "continuous",
+    backgroundColor: colors.cell,
   },
 });

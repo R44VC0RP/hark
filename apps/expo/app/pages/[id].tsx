@@ -1,51 +1,91 @@
-import type { OncallPageDto } from "@hark/contracts";
+import type { OncallPageDto, OncallPageEventDto } from "@hark/contracts";
 import * as Device from "expo-device";
-import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
-import { StatusBar } from "expo-status-bar";
-import { SymbolView } from "expo-symbols";
+import { Redirect, Stack, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { Alert, StyleSheet, View } from "react-native";
 import { AppIcon } from "../../src/components/app-icon";
-import {
-  MetaRow,
-  PrimaryButton,
-  ScreenHeader,
-  SecondaryButton,
-  SectionLabel,
-  ui,
-} from "../../src/components/screen-parts";
+import { closeSheet } from "../../src/components/teams/close-sheet";
+import { LeadingDot } from "../../src/components/teams/page-row";
+import { PageStatusPill } from "../../src/components/teams/page-status";
 import { ApiError, api } from "../../src/lib/api";
+import { publishDirectory, refreshDirectory, useDirectory } from "../../src/lib/app-directory";
 import { useSession } from "../../src/lib/auth";
+import { haptic } from "../../src/lib/haptics";
 import { openTopLevelDestination } from "../../src/lib/inbox-body";
 import { previewPages, previewViewer } from "../../src/lib/inbox-preview";
-import { readableColumn } from "../../src/lib/layout";
+import { leaveSheetThenPush } from "../../src/lib/navigation";
 import { dismissNotificationsForPage } from "../../src/lib/notification-withdrawals";
 import {
   escalationLabel,
+  formatHandoff,
   onPageClaimed,
   pageStatusLabel,
   timeAgo,
   timelineLabel,
 } from "../../src/lib/teams";
-import { colors, fonts, tightTracking } from "../../src/lib/theme";
+import { spoken } from "../../src/ui/a11y";
+import { Button } from "../../src/ui/button";
+import { EmptyState, ErrorState, isNetworkError, LoadingState } from "../../src/ui/empty-state";
+import { ActionRow, Cell, LabeledRow, List, Row, Section, useStackedRows } from "../../src/ui/list";
+import { Text } from "../../src/ui/text";
+import { type ColorName, metrics, palette, space } from "../../src/ui/tokens";
+
+const simulatorPreview = __DEV__ && !Device.isDevice;
+/** "next in 4 min" and "12 min ago" move on while the page is open. */
+const TICK_MS = 30_000;
+const APP_ICON = 40;
 
 type Busy = "acknowledge" | "escalate" | "resolve" | null;
+type LoadFailure = "missing" | "network" | "other";
 
 function errorText(cause: unknown): string {
-  return cause instanceof Error ? cause.message : "Please try again.";
+  return cause instanceof Error ? cause.message : "Check your connection, then try again.";
 }
 
-export default function PageDetailScreen() {
+function failed(title: string, cause: unknown): void {
+  haptic.error();
+  Alert.alert(title, errorText(cause));
+}
+
+function dateTime(value: string): string {
+  return new Date(value).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+const TIMELINE_DOT: Record<OncallPageEventDto["kind"], ColorName> = {
+  paged: "danger",
+  acknowledged: "accent",
+  resolved: "placeholder",
+};
+
+/**
+ * A page (DESIGN.md 5.18), the most urgent thing in Hark: someone is being
+ * paged. A form sheet with the status, what happened and who was notified,
+ * and a native bottom toolbar whose prominent item is the next step:
+ * Acknowledge while it's open, Resolve once someone is on it. Every change
+ * goes straight into the app directory, so the Teams badge and the pages
+ * accessory update the moment the server answers.
+ */
+export default function PageSheet() {
   const { data: session, isPending } = useSession();
-  const router = useRouter();
+  const stacked = useStackedRows();
+  const directory = useDirectory();
   const params = useLocalSearchParams<{ id: string; intent?: string }>();
   const id = String(params.id);
-  const simulatorPreview = __DEV__ && !Device.isDevice;
   const [page, setPage] = useState<OncallPageDto | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<LoadFailure | null>(null);
   const [busy, setBusy] = useState<Busy>(null);
+  const [now, setNow] = useState(() => Date.now());
   const intentHandled = useRef(false);
+  const directoryRef = useRef(directory);
+
+  useEffect(() => {
+    directoryRef.current = directory;
+  }, [directory]);
 
   const load = useCallback(async (): Promise<OncallPageDto | null> => {
     if (simulatorPreview) {
@@ -56,17 +96,19 @@ export default function PageDetailScreen() {
     try {
       const result = await api.getPage(id);
       setPage(result.page);
-      setError(null);
+      setFailure(null);
       return result.page;
     } catch (cause) {
-      setError(
+      setFailure(
         cause instanceof ApiError && cause.status === 404
-          ? "This page was deleted or you’re no longer on its team."
-          : errorText(cause),
+          ? "missing"
+          : isNetworkError(cause)
+            ? "network"
+            : "other",
       );
       return null;
     }
-  }, [id, simulatorPreview]);
+  }, [id]);
 
   useEffect(() => {
     void load();
@@ -81,38 +123,87 @@ export default function PageDetailScreen() {
     [id, load],
   );
 
-  const apply = (next: OncallPageDto) => {
+  const triggered = page?.status === "triggered";
+  const nextEscalationAt = triggered ? page?.nextEscalationAt : null;
+
+  // While it rings, the escalation countdown and the age keep moving.
+  useEffect(() => {
+    if (!triggered) return;
+    const timer = setInterval(() => setNow(Date.now()), TICK_MS);
+    return () => clearInterval(timer);
+  }, [triggered]);
+
+  // When the next escalation is due, fetch the page once to show who it reached.
+  useEffect(() => {
+    if (!nextEscalationAt) return;
+    const delay = Math.max(0, Date.parse(nextEscalationAt) - Date.now()) + 3000;
+    const timer = setTimeout(() => void load(), delay);
+    return () => clearTimeout(timer);
+  }, [load, nextEscalationAt]);
+
+  /**
+   * Shows a changed page here and in the app directory at once (Teams badge,
+   * pages accessory, Open Pages), then reloads the directory from the server.
+   */
+  const apply = useCallback((next: OncallPageDto) => {
     setPage(next);
+    setNow(Date.now());
     if (next.status !== "triggered") void dismissNotificationsForPage(next.id).catch(() => {});
-  };
+    const snapshot = directoryRef.current;
+    if (snapshot?.oncall) {
+      publishDirectory({
+        ...snapshot,
+        oncall: {
+          ...snapshot.oncall,
+          pages: snapshot.oncall.pages.map((item) => (item.id === next.id ? next : item)),
+        },
+      });
+    }
+    void refreshDirectory().catch(() => {});
+  }, []);
+
+  /**
+   * Someone else got there first (409): show the page as it is now and who
+   * has it. The server only escalates pages nobody has acknowledged.
+   */
+  const alreadyHandled = useCallback(async () => {
+    const latest = await load();
+    if (latest) apply(latest);
+    haptic.warning();
+    if (latest?.status === "resolved") {
+      const who = latest.resolvedBy?.name;
+      Alert.alert(
+        who ? `Already Resolved by ${who}` : "Already Resolved",
+        "This page is closed for everyone.",
+      );
+      return;
+    }
+    const who = latest?.acknowledgedBy?.name;
+    Alert.alert(
+      who ? `Already Acknowledged by ${who}` : "Already Acknowledged",
+      "Someone else is on it. You can still resolve it from here.",
+    );
+  }, [apply, load]);
 
   const acknowledge = async () => {
     if (!page || busy) return;
     setBusy("acknowledge");
     try {
-      if (simulatorPreview) {
-        const viewer = { ...previewViewer, image: null };
-        apply({
-          ...page,
-          status: "acknowledged",
-          acknowledgedBy: viewer,
-          acknowledgedAt: new Date().toISOString(),
-          nextEscalationAt: null,
-        });
-      } else {
-        apply((await api.acknowledgePage(page.id)).page);
-      }
+      const next = simulatorPreview
+        ? {
+            ...page,
+            status: "acknowledged" as const,
+            acknowledgedBy: { ...previewViewer, image: null },
+            acknowledgedAt: new Date().toISOString(),
+            nextEscalationAt: null,
+            ringing: [],
+          }
+        : (await api.acknowledgePage(page.id)).page;
+      haptic.success();
+      apply(next);
     } catch (cause) {
-      if (cause instanceof ApiError && cause.status === 409) {
-        const latest = await load();
-        const who = latest?.acknowledgedBy?.name ?? latest?.resolvedBy?.name;
-        Alert.alert(
-          who ? `Already acknowledged by ${who}` : "Already acknowledged",
-          "Someone else is on it. You can still escalate or resolve it from here.",
-        );
-      } else {
-        Alert.alert("Couldn’t acknowledge", errorText(cause));
-      }
+      if (cause instanceof ApiError && cause.status === 409) await alreadyHandled();
+      else failed("Couldn't Acknowledge", cause);
     } finally {
       setBusy(null);
     }
@@ -121,23 +212,25 @@ export default function PageDetailScreen() {
   const escalate = useCallback(
     (current: OncallPageDto) => {
       Alert.alert(
-        "Escalate this page?",
+        "Escalate This Page?",
         "Hark notifies the next step in the escalation policy right away.",
         [
           { text: "Cancel", style: "cancel" },
           {
             text: "Escalate",
+
             onPress: () => {
               setBusy("escalate");
               void (async () => {
                 try {
-                  if (simulatorPreview) {
-                    setPage({ ...current, escalationStep: current.escalationStep + 1 });
-                  } else {
-                    setPage((await api.escalatePage(current.id)).page);
-                  }
+                  const next = simulatorPreview
+                    ? { ...current, escalationStep: current.escalationStep + 1 }
+                    : (await api.escalatePage(current.id)).page;
+                  haptic.success();
+                  apply(next);
                 } catch (cause) {
-                  Alert.alert("Couldn’t escalate", errorText(cause));
+                  if (cause instanceof ApiError && cause.status === 409) await alreadyHandled();
+                  else failed("Couldn't Escalate", cause);
                 } finally {
                   setBusy(null);
                 }
@@ -147,42 +240,45 @@ export default function PageDetailScreen() {
         ],
       );
     },
-    [simulatorPreview],
+    [alreadyHandled, apply],
   );
 
   // The Escalate notification action lands here and asks once.
   useEffect(() => {
     if (params.intent !== "escalate" || intentHandled.current || !page) return;
     intentHandled.current = true;
-    if (page.status !== "resolved") escalate(page);
+    if (page.status === "triggered") escalate(page);
   }, [escalate, page, params.intent]);
 
   const resolve = () => {
     if (!page || busy) return;
     Alert.prompt(
-      "Resolve page",
+      "Resolve Page",
       "Add an optional note for the team.",
       [
         { text: "Cancel", style: "cancel" },
         {
           text: "Resolve",
+
           onPress: (note?: string) => {
             setBusy("resolve");
             void (async () => {
               try {
-                if (simulatorPreview) {
-                  apply({
-                    ...page,
-                    status: "resolved",
-                    resolvedBy: { ...previewViewer, image: null },
-                    resolvedAt: new Date().toISOString(),
-                    nextEscalationAt: null,
-                  });
-                } else {
-                  apply((await api.resolvePage(page.id, note?.trim() || undefined)).page);
-                }
+                const next = simulatorPreview
+                  ? {
+                      ...page,
+                      status: "resolved" as const,
+                      resolvedBy: { ...previewViewer, image: null },
+                      resolvedAt: new Date().toISOString(),
+                      nextEscalationAt: null,
+                      ringing: [],
+                    }
+                  : (await api.resolvePage(page.id, note?.trim() || undefined)).page;
+                haptic.success();
+                apply(next);
               } catch (cause) {
-                Alert.alert("Couldn’t resolve", errorText(cause));
+                if (cause instanceof ApiError && cause.status === 409) await alreadyHandled();
+                else failed("Couldn't Resolve", cause);
               } finally {
                 setBusy(null);
               }
@@ -196,82 +292,90 @@ export default function PageDetailScreen() {
 
   if (!isPending && !session && !simulatorPreview) return <Redirect href="/" />;
 
-  const open = page?.status === "triggered";
   const resolved = page?.status === "resolved";
+  const ringing = page?.ringing ?? [];
+  const timeline = page?.timeline ?? [];
 
   return (
-    <SafeAreaView edges={["top", "bottom"]} style={ui.container}>
-      <StatusBar style="dark" />
-      <ScreenHeader />
-      {!page ? (
-        error ? (
-          <Text style={[ui.message, { paddingHorizontal: 24 }]}>{error}</Text>
+    <>
+      <Stack.Screen options={{ title: page?.groupName ?? "" }} />
+      <Stack.Toolbar placement="right">
+        <Stack.Toolbar.Button
+          accessibilityLabel="Close"
+          icon="xmark"
+          onPress={() => closeSheet("/teams")}
+        />
+      </Stack.Toolbar>
+      <List reading>
+        {!page ? (
+          failure === "missing" ? (
+            <EmptyState
+              message="It was deleted or you're no longer on its team."
+              symbol="bell.slash"
+              title="Page Unavailable"
+            />
+          ) : failure ? (
+            <ErrorState
+              network={failure === "network"}
+              onRetry={() => {
+                setFailure(null);
+                void load();
+              }}
+              title="Couldn't Load Page"
+            />
+          ) : (
+            <LoadingState />
+          )
         ) : (
-          <ActivityIndicator color={colors.accent} style={ui.loading} />
-        )
-      ) : (
-        <>
-          <ScrollView contentContainerStyle={ui.scroll}>
-            <View style={styles.statusRow}>
+          <>
+            <View style={styles.hero}>
               <View
-                style={[
-                  styles.statusPill,
-                  open ? styles.statusOpen : resolved ? styles.statusResolved : styles.statusAck,
-                ]}
+                accessibilityLabel={spoken(
+                  pageStatusLabel(page),
+                  page.groupName,
+                  timeAgo(page.createdAt, now),
+                )}
+                accessible
+                style={[styles.statusLine, stacked && styles.statusLineStacked]}
               >
-                <View
-                  style={[
-                    styles.statusDot,
-                    {
-                      backgroundColor: open
-                        ? colors.danger
-                        : resolved
-                          ? colors.soft
-                          : colors.accent,
-                    },
-                  ]}
-                />
-                <Text
-                  style={[
-                    styles.statusText,
-                    { color: open ? colors.danger : resolved ? colors.muted : colors.accent },
-                  ]}
-                >
-                  {pageStatusLabel(page)}
+                <PageStatusPill status={page.status} />
+                {/* The group is the sheet's title, so the line only adds the age. */}
+                <Text color="secondaryLabel" style={styles.flex} tabular variant="subheadline">
+                  {timeAgo(page.createdAt, now)}
                 </Text>
               </View>
-              <Text style={ui.rowTrailing}>
-                {page.groupName} · {timeAgo(page.createdAt)}
+              <Text accessibilityRole="header" selectable variant="title2">
+                {page.title}
               </Text>
+              {page.body ? (
+                <Text selectable variant="body">
+                  {page.body}
+                </Text>
+              ) : null}
             </View>
-            <Text selectable style={[ui.title, { marginTop: 14 }]}>
-              {page.title}
-            </Text>
-            {page.body ? (
-              <Text selectable style={[ui.body, { marginTop: 10 }]}>
-                {page.body}
-              </Text>
+
+            {resolved ? (
+              <Section>
+                <Row
+                  subtitle={page.resolvedAt ? dateTime(page.resolvedAt) : undefined}
+                  symbol="checkmark.circle.fill"
+                  symbolColor="accent"
+                  title={escalationLabel(page, now)}
+                />
+              </Section>
             ) : null}
 
-            <View style={ui.metaBlock}>
-              <MetaRow label="Group" value={page.groupName} />
+            <Section title="Details">
+              <LabeledRow label="Group" value={page.groupName} />
               {page.urgency === "low" ? (
-                <MetaRow label="Urgency" value="Low · one alert, no escalation" />
+                <LabeledRow label="Urgency" value="Low · one alert, no escalation" />
               ) : null}
-              <MetaRow label="From" value={page.source} />
-              <MetaRow
-                label="Raised"
-                value={new Date(page.createdAt).toLocaleString(undefined, {
-                  month: "short",
-                  day: "numeric",
-                  hour: "numeric",
-                  minute: "2-digit",
-                })}
-              />
+              <LabeledRow label="From" selectable value={page.source} />
+              <LabeledRow label="Raised" value={dateTime(page.createdAt)} />
               {page.repeatCount > 0 ? (
-                <MetaRow label="Repeats" value={`Fired ${page.repeatCount + 1} times`} />
+                <LabeledRow label="Repeats" value={`Fired ${page.repeatCount + 1} times`} />
               ) : null}
-              <MetaRow
+              <LabeledRow
                 label="Notified"
                 value={
                   page.notified.length > 0
@@ -279,184 +383,203 @@ export default function PageDetailScreen() {
                     : "Nobody yet"
                 }
               />
-              <MetaRow label="Status" value={escalationLabel(page)} />
-            </View>
+              <LabeledRow label="Status" value={escalationLabel(page, now)} />
+            </Section>
 
             {page.app ? (
-              <View style={styles.appRow}>
-                <AppIcon iconUrl={page.app.iconUrl} name={page.app.name} size={40} />
-                <View style={ui.rowCopy}>
-                  <Text style={ui.rowLabel}>{page.app.name}</Text>
-                  <Text numberOfLines={1} style={ui.rowValue}>
-                    {page.url ?? page.app.origin}
-                  </Text>
-                </View>
-                <SecondaryButton
-                  accessibilityHint={`Opens ${page.app.name} signed in with Hark`}
-                  label="Open app"
-                  onPress={() => {
-                    if (!page.app) return;
-                    router.push({
-                      pathname: "/web/[id]",
-                      params: { id: page.app.id, ...(page.url ? { url: page.url } : {}) },
-                    });
-                  }}
-                />
-              </View>
+              <Section>
+                <Cell
+                  minHeight={APP_ICON + 2 * space.s}
+                  separatorInset={metrics.rowPaddingHorizontal + APP_ICON + metrics.rowAccessoryGap}
+                  style={stacked ? styles.appRowStacked : null}
+                >
+                  <View
+                    accessibilityLabel={spoken(page.app.name, page.url ?? page.app.origin)}
+                    accessible
+                    style={styles.appIdentity}
+                  >
+                    <AppIcon iconUrl={page.app.iconUrl} name={page.app.name} size={APP_ICON} />
+                    <View style={styles.flex}>
+                      <Text variant="body" weight="600">
+                        {page.app.name}
+                      </Text>
+                      <Text
+                        color="secondaryLabel"
+                        numberOfLines={stacked ? undefined : 1}
+                        variant="footnote"
+                      >
+                        {page.url ?? page.app.origin}
+                      </Text>
+                    </View>
+                  </View>
+                  <Button
+                    accessibilityHint={`Opens ${page.app.name} signed in with Hark`}
+                    onPress={() => {
+                      if (!page.app) return;
+                      leaveSheetThenPush({
+                        pathname: "/web/[id]",
+                        params: { id: page.app.id, ...(page.url ? { url: page.url } : {}) },
+                      });
+                    }}
+                    title="Open"
+                    variant="bordered"
+                  />
+                </Cell>
+              </Section>
             ) : page.url ? (
-              <View style={{ marginTop: 16 }}>
-                <SecondaryButton
+              <Section>
+                <ActionRow
                   accessibilityHint="Opens the link from this page"
-                  label="Open link ↗"
                   onPress={() => {
                     if (page.url) void openTopLevelDestination(page.url);
                   }}
+                  symbol="arrow.up.right.square"
+                  title="Open Link"
                 />
-              </View>
+              </Section>
             ) : null}
 
-            {page.timeline && page.timeline.length > 0 ? (
-              <View style={{ marginTop: 8 }}>
-                <SectionLabel>Timeline</SectionLabel>
-                {page.timeline.map((event, index) => (
-                  <View
-                    accessible
+            {timeline.length > 0 || ringing.length > 0 ? (
+              <Section
+                footer={
+                  ringing.length > 0
+                    ? `Ringing ${ringing.map((ring) => ring.person.name).join(", ")} until someone acknowledges.`
+                    : undefined
+                }
+                title="Timeline"
+              >
+                {timeline.map((event) => (
+                  <TimelineRow
+                    event={event}
                     key={`${event.at}-${event.kind}-${event.people.map((person) => person.userId).join(",")}`}
-                    style={[ui.row, index === (page.timeline?.length ?? 0) - 1 && ui.lastRow]}
-                  >
-                    <View
-                      style={[
-                        styles.timelineDot,
-                        event.kind === "acknowledged" && { backgroundColor: colors.accent },
-                        event.kind === "paged" && { backgroundColor: colors.danger },
-                      ]}
-                    />
-                    <Text style={[ui.rowValue, { flex: 1 }]}>{timelineLabel(event)}</Text>
-                    <Text style={ui.rowTrailing}>
-                      {new Date(event.at).toLocaleTimeString(undefined, {
-                        hour: "numeric",
-                        minute: "2-digit",
-                      })}
-                    </Text>
-                  </View>
+                    now={now}
+                  />
                 ))}
-              </View>
+              </Section>
             ) : null}
-            {page.ringing && page.ringing.length > 0 ? (
-              <Text style={[ui.muted, { marginTop: 8 }]}>
-                Ringing {page.ringing.map((ring) => ring.person.name).join(", ")} until someone
-                acknowledges.
-              </Text>
-            ) : null}
-          </ScrollView>
-
-          {resolved ? null : (
-            <View style={styles.actions}>
-              {open ? (
-                <PrimaryButton
-                  accessibilityHint="Tells the team you’re on it and stops escalation"
-                  busy={busy === "acknowledge"}
-                  disabled={busy !== null && busy !== "acknowledge"}
-                  label="Acknowledge"
-                  onPress={() => void acknowledge()}
-                />
-              ) : null}
-              <View style={styles.secondaryActions}>
-                <View style={{ flex: 1 }}>
-                  <SecondaryButton
-                    accessibilityHint="Notifies the next responder now"
-                    disabled={busy !== null}
-                    label={busy === "escalate" ? "Escalating…" : "Escalate"}
-                    onPress={() => escalate(page)}
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <SecondaryButton
-                    accessibilityHint="Closes the page for everyone"
-                    disabled={busy !== null}
-                    label={busy === "resolve" ? "Resolving…" : "Resolve"}
-                    onPress={resolve}
-                  />
-                </View>
-              </View>
-            </View>
-          )}
-          {resolved ? (
-            <View style={[styles.actions, { flexDirection: "row", alignItems: "center", gap: 8 }]}>
-              <SymbolView name="checkmark.circle.fill" size={16} tintColor={colors.accent} />
-              <Text style={ui.muted}>{escalationLabel(page)}</Text>
-            </View>
+          </>
+        )}
+      </List>
+      {page && !resolved ? (
+        <Stack.Toolbar placement="bottom">
+          {/* Escalating needs an open page: the server refuses it once acknowledged. */}
+          {triggered ? (
+            <Stack.Toolbar.Button
+              accessibilityHint="Notifies the next responder now"
+              disabled={busy !== null}
+              onPress={() => escalate(page)}
+            >
+              {busy === "escalate" ? "Escalating…" : "Escalate"}
+            </Stack.Toolbar.Button>
           ) : null}
-        </>
-      )}
-    </SafeAreaView>
+          {triggered ? (
+            <Stack.Toolbar.Button
+              accessibilityHint="Closes the page for everyone"
+              disabled={busy !== null}
+              onPress={resolve}
+            >
+              {busy === "resolve" ? "Resolving…" : "Resolve"}
+            </Stack.Toolbar.Button>
+          ) : null}
+          <Stack.Toolbar.Spacer />
+          {triggered ? (
+            <Stack.Toolbar.Button
+              accessibilityHint="Tells the team you're on it and stops escalation"
+              disabled={busy !== null}
+              onPress={() => void acknowledge()}
+              tintColor={palette.accent}
+              variant="prominent"
+            >
+              {busy === "acknowledge" ? "Acknowledging…" : "Acknowledge"}
+            </Stack.Toolbar.Button>
+          ) : (
+            <Stack.Toolbar.Button
+              accessibilityHint="Closes the page for everyone"
+              disabled={busy !== null}
+              onPress={resolve}
+              tintColor={palette.accent}
+              variant="prominent"
+            >
+              {busy === "resolve" ? "Resolving…" : "Resolve"}
+            </Stack.Toolbar.Button>
+          )}
+        </Stack.Toolbar>
+      ) : null}
+    </>
+  );
+}
+
+/** One line of the page's history: who was paged, claimed or resolved it, and when. */
+function TimelineRow({ event, now }: { event: OncallPageEventDto; now: number }) {
+  const stacked = useStackedRows();
+  const label = timelineLabel(event);
+  const time = formatHandoff(event.at, now);
+  return (
+    <Cell
+      accessibilityLabel={spoken(label, time)}
+      accessible
+      separatorInset={metrics.rowPaddingHorizontal + 8 + metrics.rowAccessoryGap}
+      style={styles.timelineRow}
+    >
+      <LeadingDot color={TIMELINE_DOT[event.kind]} size={8} />
+      <View style={[styles.timelineCopy, stacked && styles.timelineStacked]}>
+        <Text style={stacked ? null : styles.flex} variant="body">
+          {label}
+        </Text>
+        <Text color="secondaryLabel" tabular variant="subheadline">
+          {time}
+        </Text>
+      </View>
+    </Cell>
   );
 }
 
 const styles = StyleSheet.create({
-  statusRow: {
+  hero: {
+    gap: space.xs,
+    marginTop: space.s,
+    paddingHorizontal: metrics.rowPaddingHorizontal,
+  },
+  statusLine: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-    marginTop: 4,
+    gap: space.xs,
+    marginBottom: space.xxs,
   },
-  statusPill: {
+  statusLineStacked: {
+    flexDirection: "column",
+    alignItems: "flex-start",
+  },
+  flex: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+  },
+  appIdentity: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 12,
+    gap: metrics.rowAccessoryGap,
   },
-  statusOpen: {
-    backgroundColor: "#FBEAE7",
+  appRowStacked: {
+    flexDirection: "column",
+    alignItems: "flex-start",
   },
-  statusAck: {
-    backgroundColor: colors.accentSoft,
+  timelineRow: {
+    alignItems: "flex-start",
   },
-  statusResolved: {
-    backgroundColor: "#F2F1ED",
-  },
-  statusDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-  },
-  statusText: {
-    fontFamily: fonts.semibold,
-    fontSize: 12,
-    letterSpacing: tightTracking(12),
-  },
-  appRow: {
+  timelineCopy: {
+    minWidth: 0,
+    flex: 1,
     flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    marginTop: 16,
-    padding: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.line,
-    borderRadius: 14,
-    backgroundColor: colors.surface,
+    alignItems: "baseline",
+    gap: space.s,
   },
-  actions: {
-    ...readableColumn,
-    gap: 10,
-    paddingHorizontal: 24,
-    paddingTop: 12,
-    paddingBottom: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.line,
-    backgroundColor: colors.paper,
-  },
-  timelineDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: colors.soft,
-  },
-  secondaryActions: {
-    flexDirection: "row",
-    gap: 10,
+  timelineStacked: {
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: 2,
   },
 });

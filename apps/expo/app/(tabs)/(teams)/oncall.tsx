@@ -5,30 +5,21 @@ import type {
   OncallSettingsDto,
 } from "@hark/contracts";
 import * as Device from "expo-device";
-import { Redirect, Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { StatusBar } from "expo-status-bar";
+import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ActionSheetIOS, Alert, findNodeHandle, StyleSheet, View } from "react-native";
 import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  View,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { PersonAvatar, ScreenHeader, SectionLabel, ui } from "../../../src/components/screen-parts";
+  criticalAlertValue,
+  OncallStatusRow,
+  oncallStatus,
+} from "../../../src/components/teams/oncall-status";
+import { PageRow, sortPages } from "../../../src/components/teams/page-row";
 import { api, type OncallMeDto } from "../../../src/lib/api";
+import { useDirectory } from "../../../src/lib/app-directory";
 import { useSession } from "../../../src/lib/auth";
-import {
-  criticalAlertLabel,
-  criticalAlertsEnabled,
-  reportCriticalAlertState,
-} from "../../../src/lib/critical-alerts";
+import { criticalAlertsEnabled, reportCriticalAlertState } from "../../../src/lib/critical-alerts";
+import { haptic } from "../../../src/lib/haptics";
 import {
   previewOncallGroups,
   previewOncallMe,
@@ -37,32 +28,70 @@ import {
   previewViewer,
 } from "../../../src/lib/inbox-preview";
 import {
-  currentShift,
   escalationPolicySummary,
   formatHandoff,
   isUnsupportedRoute,
   onPageClaimed,
-  pageStatusLabel,
-  timeAgo,
 } from "../../../src/lib/teams";
-import { colors, fonts, tightTracking } from "../../../src/lib/theme";
+import { spoken } from "../../../src/ui/a11y";
+import { Avatar } from "../../../src/ui/avatar";
+import { EmptyState, ErrorState, isNetworkError, LoadingState } from "../../../src/ui/empty-state";
+import { Cell, List, Row, Section, SwitchRow, useStackedRows } from "../../../src/ui/list";
+import { Text } from "../../../src/ui/text";
+import { colors, space } from "../../../src/ui/tokens";
 
+const simulatorPreview = __DEV__ && !Device.isDevice;
+/** Relative times and "until" lines move on once a minute. */
+const TICK_MS = 60_000;
+const TEAM_AVATAR = 36;
+const SHIFT_AVATAR = 22;
+
+type LoadFailure = "network" | "other";
+
+const RING_INTERVALS: Array<{ label: string; seconds: number | null }> = [
+  { label: "Group Default", seconds: null },
+  { label: "30 Seconds", seconds: 30 },
+  { label: "1 Minute", seconds: 60 },
+  { label: "2 Minutes", seconds: 120 },
+  { label: "5 Minutes", seconds: 300 },
+];
+
+function intervalLabel(seconds: number | null): string {
+  return RING_INTERVALS.find((option) => option.seconds === seconds)?.label ?? `${seconds} Seconds`;
+}
+
+const PREVIEW_SETTINGS: OncallSettingsDto = {
+  ringUntilAcknowledged: true,
+  ringIntervalSeconds: null,
+  criticalAlerts: null,
+  devices: [],
+};
+
+/**
+ * On Call (DESIGN.md 5.14), pushed from Teams: your status and open pages,
+ * then either a team's rotations (`?team=`) or your own shortcuts to every
+ * team's rotations, your paging settings and your next shifts.
+ */
 export default function OncallScreen() {
-  const { data: session, isPending } = useSession();
+  const { data: session } = useSession();
   const router = useRouter();
-  const params = useLocalSearchParams<{ team?: string }>();
+  const directory = useDirectory();
+  const params = useLocalSearchParams<{ team?: string; name?: string }>();
   const teamId = typeof params.team === "string" && params.team ? params.team : null;
-  const simulatorPreview = __DEV__ && !Device.isDevice;
   const viewerId = simulatorPreview ? previewViewer.userId : session?.user.id;
   const [me, setMe] = useState<OncallMeDto | null>(null);
-  const [teamName, setTeamName] = useState<string | null>(null);
+  const [teamName, setTeamName] = useState<string | null>(
+    typeof params.name === "string" && params.name ? params.name : null,
+  );
   const [groups, setGroups] = useState<OncallGroupDto[] | null>(null);
   const [teamPages, setTeamPages] = useState<OncallPageDto[] | null>(null);
   const [unsupported, setUnsupported] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<LoadFailure | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [settings, setSettings] = useState<OncallSettingsDto | null>(null);
   const [critical, setCritical] = useState<CriticalAlertState | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const intervalRef = useRef<View>(null);
 
   const load = useCallback(async () => {
     if (simulatorPreview) {
@@ -87,36 +116,36 @@ export default function OncallScreen() {
       setSettings(mine.settings ?? null);
       // Keeps the server's copy current, e.g. after a change in iOS Settings.
       void reportCriticalAlertState().then(setCritical);
-      setTeamName(team?.team.name ?? null);
+      if (team) setTeamName(team.team.name);
       setGroups(groupResult?.groups ?? null);
       setTeamPages(pageResult?.pages ?? null);
-      setError(null);
+      setFailure(null);
     } catch (cause) {
       if (isUnsupportedRoute(cause)) setUnsupported(true);
-      else setError(cause instanceof Error ? cause.message : "Couldn’t load on-call.");
+      else setFailure(isNetworkError(cause) ? "network" : "other");
     }
-  }, [simulatorPreview, teamId]);
+  }, [teamId]);
 
+  // Back from a page sheet or Critical Alerts: show what changed there.
   useFocusEffect(
     useCallback(() => {
       void load();
     }, [load]),
   );
 
+  // Someone else claimed a page.
   useEffect(() => onPageClaimed(() => void load()), [load]);
 
-  if (!isPending && !session && !simulatorPreview) return <Redirect href="/" />;
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), TICK_MS);
+    return () => clearInterval(timer);
+  }, []);
 
   const onRefresh = async () => {
     setRefreshing(true);
     await load();
     setRefreshing(false);
   };
-
-  const now = Date.now();
-  const shift = me ? currentShift(me.shifts, now) : null;
-  const upcoming = me?.shifts.filter((item) => Date.parse(item.startsAt) > now) ?? [];
-  const pages = (teamPages ?? me?.pages ?? []).filter((page) => page.status !== "resolved");
 
   const saveSettings = async (input: Partial<OncallSettingsDto>) => {
     if (!settings) return;
@@ -135,341 +164,299 @@ export default function OncallScreen() {
       setSettings(result.settings);
     } catch (cause) {
       setSettings(previous);
-      Alert.alert("Couldn’t save", cause instanceof Error ? cause.message : "Please try again.");
+      haptic.error();
+      Alert.alert(
+        "Couldn't Save",
+        cause instanceof Error ? cause.message : "Check your connection, then try again.",
+      );
     }
   };
 
   const chooseInterval = () => {
-    Alert.alert("Repeat the alert every", undefined, [
-      ...RING_INTERVALS.map((option) => ({
-        text: option.label,
-        onPress: () => void saveSettings({ ringIntervalSeconds: option.seconds }),
-      })),
-      { text: "Cancel", style: "cancel" as const },
-    ]);
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        title: "Repeat the Alert Every",
+        options: [...RING_INTERVALS.map((option) => option.label), "Cancel"],
+        cancelButtonIndex: RING_INTERVALS.length,
+        anchor: findNodeHandle(intervalRef.current) ?? undefined,
+      },
+      (index) => {
+        const option = RING_INTERVALS[index];
+        if (option) void saveSettings({ ringIntervalSeconds: option.seconds });
+      },
+    );
   };
 
+  const status = oncallStatus(me, now);
+  const upcoming = useMemo(
+    () => (me?.shifts ?? []).filter((item) => Date.parse(item.startsAt) > now),
+    [me, now],
+  );
+  const pages = useMemo(
+    () => sortPages((teamPages ?? me?.pages ?? []).filter((page) => page.status !== "resolved")),
+    [me, teamPages],
+  );
+  const rotationTeams = (directory?.teams ?? []).filter((team) => team.oncallGroupCount > 0);
+  const criticalEnabled = criticalAlertsEnabled();
+  const title = teamId ? (teamName ? `${teamName} On Call` : "On Call") : "On Call";
+
   return (
-    <SafeAreaView edges={["top"]} style={ui.container}>
-      <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar style="dark" />
-      <ScreenHeader title={teamName ? `${teamName} on call` : "On call"} />
-      {unsupported ? (
-        <Text style={[ui.message, { paddingHorizontal: 24 }]}>
-          This Hark server doesn’t support on-call yet.
-        </Text>
-      ) : !me ? (
-        error ? (
-          <Text style={[ui.message, { paddingHorizontal: 24 }]}>{error}</Text>
-        ) : (
-          <ActivityIndicator color={colors.accent} style={ui.loading} />
-        )
-      ) : (
-        <ScrollView
-          contentContainerStyle={ui.scroll}
-          refreshControl={
-            <RefreshControl
-              onRefresh={() => void onRefresh()}
-              refreshing={refreshing}
-              tintColor={colors.accent}
+    <>
+      <Stack.Screen options={{ title }} />
+      <List onRefresh={me || failure ? () => void onRefresh() : undefined} refreshing={refreshing}>
+        {unsupported ? (
+          <EmptyState
+            message="This Hark server doesn't support on-call yet."
+            symbol="bell.slash"
+            title="On Call Isn't Available"
+          />
+        ) : !me ? (
+          failure ? (
+            <ErrorState
+              network={failure === "network"}
+              onRetry={() => {
+                setFailure(null);
+                void load();
+              }}
+              title="Couldn't Load On Call"
             />
-          }
-        >
-          <View
-            accessibilityLabel={
-              shift
-                ? `You’re on call for ${shift.groupName} until ${formatHandoff(shift.endsAt, now)}`
-                : "You’re not on call right now"
-            }
-            accessible
-            style={[styles.status, shift && styles.statusOn]}
-          >
-            <View style={[styles.statusDot, shift && styles.statusDotOn]} />
-            <View style={ui.rowCopy}>
-              <Text style={styles.statusTitle}>
-                {shift ? "You’re on call" : "You’re not on call"}
-              </Text>
-              <Text style={ui.muted}>
-                {shift
-                  ? `${shift.groupName} · ${shift.teamName} · until ${formatHandoff(shift.endsAt, now)}`
-                  : upcoming[0]
-                    ? `Next: ${upcoming[0].groupName} from ${formatHandoff(upcoming[0].startsAt, now)}`
-                    : "No shifts scheduled for you."}
-              </Text>
-            </View>
-          </View>
-
-          <SectionLabel detail={pages.length > 0 ? `${pages.length} open` : undefined}>
-            {teamId ? "Open pages" : "Your pages"}
-          </SectionLabel>
-          {pages.length === 0 ? (
-            <Text style={[ui.muted, { paddingBottom: 4 }]}>All quiet. No open pages.</Text>
           ) : (
-            pages.map((page, index) => (
-              <PageRow
-                key={page.id}
-                last={index === pages.length - 1}
-                onPress={() => router.push({ pathname: "/pages/[id]", params: { id: page.id } })}
-                page={page}
-              />
-            ))
-          )}
+            <LoadingState />
+          )
+        ) : (
+          <>
+            <Section>
+              <OncallStatusRow status={status} tinted />
+            </Section>
 
-          {groups && groups.length > 0 ? (
-            <>
-              <SectionLabel>Rotations</SectionLabel>
-              {groups.map((group, index) => (
-                <View
-                  key={group.id}
-                  style={[
-                    ui.row,
-                    { alignItems: "flex-start", paddingVertical: 14 },
-                    index === groups.length - 1 && ui.lastRow,
-                  ]}
-                >
-                  <View style={[ui.rowCopy, { gap: 8 }]}>
-                    <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                      <Text style={ui.rowLabel}>{group.name}</Text>
-                      <Text style={ui.rowTrailing}>
-                        {group.rotation.period === "weekly" ? "Weekly" : "Daily"} ·{" "}
-                        {group.rotation.handoffAt}
-                      </Text>
-                    </View>
-                    <Text style={ui.rowValue}>
-                      {escalationPolicySummary(
-                        group,
-                        (id) =>
-                          group.rotation.members.find((member) => member.userId === id)?.name ??
-                          "a teammate",
-                        (id) => groups.find((other) => other.id === id)?.name ?? "another group",
-                      )}
-                    </Text>
-                    {group.upcoming.slice(0, 4).map((item, shiftIndex) => {
-                      const live = shiftIndex === 0 && group.current !== null;
-                      const you = item.person.userId === viewerId;
-                      return (
-                        <View
-                          accessibilityLabel={`${live ? "Now" : formatHandoff(item.startsAt, now)}: ${you ? "you" : item.person.name}${item.override ? ", covering" : ""}`}
-                          accessible
-                          key={`${item.startsAt}-${item.person.userId}`}
-                          style={styles.shiftLine}
-                        >
-                          <PersonAvatar
-                            image={item.person.image}
-                            name={item.person.name}
-                            size={22}
-                          />
-                          <Text
-                            numberOfLines={1}
-                            style={[styles.shiftName, live && styles.shiftNameLive]}
-                          >
-                            {you ? "You" : item.person.name}
-                            {item.override ? " (cover)" : ""}
-                          </Text>
-                          <Text style={ui.rowTrailing}>
-                            {live
-                              ? `Now – ${formatHandoff(item.endsAt, now)}`
-                              : formatHandoff(item.startsAt, now)}
-                          </Text>
-                        </View>
-                      );
-                    })}
-                  </View>
-                </View>
+            <Section
+              detail={pages.length > 0 ? `${pages.length} open` : undefined}
+              footer={pages.length === 0 ? "All quiet. No open pages." : undefined}
+              prominent
+              title={teamId ? "Open Pages" : "Your Pages"}
+            >
+              {pages.map((page) => (
+                <PageRow key={page.id} now={now} page={page} />
               ))}
-            </>
-          ) : null}
+            </Section>
 
-          {!teamId && settings ? (
-            <>
-              <SectionLabel>Paging</SectionLabel>
-              <View style={ui.row}>
-                <View style={ui.rowCopy}>
-                  <Text style={ui.rowLabel}>Ring until acknowledged</Text>
-                  <Text style={ui.rowValue}>
-                    {settings.ringUntilAcknowledged
-                      ? "Pages repeat until someone acknowledges."
-                      : "Pages alert once."}
-                  </Text>
-                </View>
-                <Switch
-                  accessibilityLabel="Ring until acknowledged"
+            {teamId && groups && groups.length > 0 ? (
+              <Section prominent title="Rotations">
+                {groups.map((group) => (
+                  <RotationRow
+                    group={group}
+                    groups={groups}
+                    key={group.id}
+                    now={now}
+                    viewerId={viewerId}
+                  />
+                ))}
+              </Section>
+            ) : null}
+
+            {!teamId && rotationTeams.length > 0 ? (
+              <Section prominent title="Team Rotations">
+                {rotationTeams.map((team) => (
+                  <Row
+                    accessibilityHint="Shows the team's rotations and open pages"
+                    chevron
+                    key={team.id}
+                    leading={<Avatar name={team.name} size={TEAM_AVATAR} />}
+                    leadingWidth={TEAM_AVATAR}
+                    onPress={() =>
+                      router.push({
+                        pathname: "/oncall",
+                        params: { team: team.id, name: team.name },
+                      })
+                    }
+                    subtitle={
+                      team.oncallGroupCount === 1
+                        ? "1 on-call group"
+                        : `${team.oncallGroupCount} on-call groups`
+                    }
+                    title={team.name}
+                  />
+                ))}
+              </Section>
+            ) : null}
+
+            {!teamId && settings ? (
+              <Section
+                footer="Pages break through Focus with an alarm sound. Critical Alerts also ring through silent mode."
+                prominent
+                title="Paging"
+              >
+                <SwitchRow
                   onValueChange={(value) => void saveSettings({ ringUntilAcknowledged: value })}
-                  trackColor={{ true: colors.accent }}
+                  subtitle={
+                    settings.ringUntilAcknowledged
+                      ? "Pages repeat until someone acknowledges."
+                      : "Pages alert once."
+                  }
+                  title="Ring Until Acknowledged"
                   value={settings.ringUntilAcknowledged}
                 />
-              </View>
-              {settings.ringUntilAcknowledged ? (
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={chooseInterval}
-                  style={({ pressed }) => [ui.row, pressed && ui.rowPressed]}
-                >
-                  <View style={ui.rowCopy}>
-                    <Text style={ui.rowLabel}>Repeat every</Text>
-                  </View>
-                  <Text style={ui.rowTrailing}>{intervalLabel(settings.ringIntervalSeconds)}</Text>
-                  <SymbolView name="chevron.right" size={12} tintColor={colors.soft} />
-                </Pressable>
-              ) : null}
-              <Pressable
-                accessibilityRole="button"
-                disabled={!criticalAlertsEnabled()}
-                onPress={() => router.push("/critical-alerts")}
-                style={({ pressed }) => [ui.row, ui.lastRow, pressed && ui.rowPressed]}
-              >
-                <View style={ui.rowCopy}>
-                  <Text style={ui.rowLabel}>Critical Alerts</Text>
-                  <Text style={ui.rowValue}>
-                    {critical === "authorized"
-                      ? "Pages ring through silent mode and Focus."
-                      : "Pages break through Focus with an alarm sound, but not the silent switch."}
-                  </Text>
-                </View>
-                <Text style={ui.rowTrailing}>{criticalAlertLabel(critical)}</Text>
-                {criticalAlertsEnabled() ? (
-                  <SymbolView name="chevron.right" size={12} tintColor={colors.soft} />
+                {settings.ringUntilAcknowledged ? (
+                  <Row
+                    accessibilityHint="Chooses how often the alert repeats"
+                    onPress={chooseInterval}
+                    ref={intervalRef}
+                    title="Repeat Every"
+                    trailing={
+                      <SymbolView
+                        name="chevron.up.chevron.down"
+                        size={13}
+                        tintColor={colors.placeholder}
+                        weight="semibold"
+                      />
+                    }
+                    value={intervalLabel(settings.ringIntervalSeconds)}
+                  />
                 ) : null}
-              </Pressable>
-            </>
-          ) : null}
+                <Row
+                  accessibilityHint={
+                    criticalEnabled ? "Explains Critical Alerts and turns them on" : undefined
+                  }
+                  chevron={criticalEnabled}
+                  onPress={criticalEnabled ? () => router.push("/critical-alerts") : undefined}
+                  title="Critical Alerts"
+                  value={criticalAlertValue(critical)}
+                />
+              </Section>
+            ) : null}
 
-          {!teamId && upcoming.length > 0 ? (
-            <>
-              <SectionLabel>Your next shifts</SectionLabel>
-              {upcoming.map((item, index) => (
-                <View
-                  key={`${item.groupId}-${item.startsAt}`}
-                  style={[ui.row, index === upcoming.length - 1 && ui.lastRow]}
-                >
-                  <View style={ui.rowCopy}>
-                    <Text style={ui.rowLabel}>{item.groupName}</Text>
-                    <Text style={ui.rowValue}>{item.teamName}</Text>
-                  </View>
-                  <Text style={ui.rowTrailing}>
-                    {formatHandoff(item.startsAt, now)} – {formatHandoff(item.endsAt, now)}
-                  </Text>
-                </View>
-              ))}
-            </>
-          ) : null}
-        </ScrollView>
-      )}
-    </SafeAreaView>
+            {!teamId && upcoming.length > 0 ? (
+              <Section prominent title="Your Next Shifts">
+                {upcoming.map((item) => (
+                  <Row
+                    key={`${item.groupId}-${item.startsAt}`}
+                    subtitle={`${item.teamName}\n${formatHandoff(item.startsAt, now)} – ${formatHandoff(item.endsAt, now)}`}
+                    title={item.groupName}
+                  />
+                ))}
+              </Section>
+            ) : null}
+          </>
+        )}
+      </List>
+    </>
   );
 }
 
-const RING_INTERVALS: Array<{ label: string; seconds: number | null }> = [
-  { label: "Group default", seconds: null },
-  { label: "30 seconds", seconds: 30 },
-  { label: "1 minute", seconds: 60 },
-  { label: "2 minutes", seconds: 120 },
-  { label: "5 minutes", seconds: 300 },
-];
-
-function intervalLabel(seconds: number | null): string {
-  return RING_INTERVALS.find((option) => option.seconds === seconds)?.label ?? `${seconds} seconds`;
-}
-
-const PREVIEW_SETTINGS: OncallSettingsDto = {
-  ringUntilAcknowledged: true,
-  ringIntervalSeconds: null,
-  criticalAlerts: null,
-  devices: [],
-};
-
-function PageRow({
-  page,
-  last,
-  onPress,
+/**
+ * One on-call group of a team (5.14): name and handoff, its escalation
+ * policy, and the next four shifts with who covers them.
+ */
+function RotationRow({
+  group,
+  groups,
+  now,
+  viewerId,
 }: {
-  page: OncallPageDto;
-  last: boolean;
-  onPress: () => void;
+  group: OncallGroupDto;
+  groups: OncallGroupDto[];
+  now: number;
+  viewerId: string | undefined;
 }) {
-  const open = page.status === "triggered";
+  const stacked = useStackedRows();
+  const schedule = `${group.rotation.period === "weekly" ? "Weekly" : "Daily"} · ${group.rotation.handoffAt}`;
+  const policy = escalationPolicySummary(
+    group,
+    (id) => group.rotation.members.find((member) => member.userId === id)?.name ?? "a teammate",
+    (id) => groups.find((other) => other.id === id)?.name ?? "another group",
+  );
   return (
-    <Pressable
-      accessibilityHint="Opens the page"
-      accessibilityLabel={`${page.title}, ${pageStatusLabel(page)}, ${page.groupName}, ${timeAgo(page.createdAt)}`}
-      accessibilityRole="button"
-      onPress={onPress}
-      style={({ pressed }) => [ui.row, last && ui.lastRow, pressed && ui.rowPressed]}
-    >
-      <View style={[styles.pageDot, open ? styles.pageDotOpen : styles.pageDotAck]} />
-      <View style={ui.rowCopy}>
-        <Text numberOfLines={1} style={ui.rowLabel}>
-          {page.title}
-        </Text>
-        <Text numberOfLines={1} style={ui.rowValue}>
-          {page.groupName} · {timeAgo(page.createdAt)} ·{" "}
-          {open
-            ? "Needs a responder"
-            : `${pageStatusLabel(page)}${page.acknowledgedBy ? ` by ${page.acknowledgedBy.name}` : ""}`}
+    <Cell style={styles.rotation}>
+      <View
+        accessibilityLabel={spoken(group.name, schedule, policy)}
+        accessible
+        style={styles.rotationCopy}
+      >
+        <View style={[styles.rotationHeader, stacked && styles.stacked]}>
+          <Text style={styles.flex} variant="body" weight="600">
+            {group.name}
+          </Text>
+          <Text color="secondaryLabel" tabular variant="subheadline">
+            {schedule}
+          </Text>
+        </View>
+        <Text color="secondaryLabel" variant="subheadline">
+          {policy}
         </Text>
       </View>
-      <SymbolView name="chevron.right" size={12} tintColor={colors.soft} />
-    </Pressable>
+      {group.upcoming.slice(0, 4).map((item, index) => {
+        const live = index === 0 && group.current !== null;
+        const you = item.person.userId === viewerId;
+        const name = `${you ? "You" : item.person.name}${item.override ? " (cover)" : ""}`;
+        const when = live
+          ? `Now – ${formatHandoff(item.endsAt, now)}`
+          : formatHandoff(item.startsAt, now);
+        return (
+          <View
+            accessibilityLabel={`${live ? "Now" : formatHandoff(item.startsAt, now)}: ${you ? "you" : item.person.name}${item.override ? ", covering" : ""}`}
+            accessible
+            key={`${item.startsAt}-${item.person.userId}`}
+            style={[styles.shift, stacked && styles.stacked]}
+          >
+            <View style={styles.shiftPerson}>
+              <Avatar image={item.person.image} name={item.person.name} size={SHIFT_AVATAR} />
+              <Text
+                color={live ? "label" : "secondaryLabel"}
+                numberOfLines={stacked ? undefined : 1}
+                style={styles.flex}
+                variant="subheadline"
+                weight={live ? "600" : undefined}
+              >
+                {name}
+              </Text>
+            </View>
+            <Text color="secondaryLabel" tabular variant="subheadline">
+              {when}
+            </Text>
+          </View>
+        );
+      })}
+    </Cell>
   );
 }
 
 const styles = StyleSheet.create({
-  status: {
+  rotation: {
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: space.xs,
+    paddingVertical: space.s,
+  },
+  rotationCopy: {
+    gap: 2,
+    marginBottom: space.xxs,
+  },
+  rotationHeader: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: space.xs,
+  },
+  shift: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    marginTop: 4,
-    padding: 16,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.line,
-    borderRadius: 14,
-    backgroundColor: colors.surface,
+    gap: space.xs,
   },
-  statusOn: {
-    borderColor: "#C9DDD6",
-    backgroundColor: colors.accentSoft,
-  },
-  statusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: colors.soft,
-  },
-  statusDotOn: {
-    backgroundColor: colors.accent,
-  },
-  statusTitle: {
-    color: colors.ink,
-    fontFamily: fonts.semibold,
-    fontSize: 17,
-    letterSpacing: tightTracking(17),
-  },
-  pageDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  pageDotOpen: {
-    backgroundColor: colors.danger,
-  },
-  pageDotAck: {
-    backgroundColor: colors.accent,
-  },
-  shiftLine: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  shiftName: {
+  shiftPerson: {
     minWidth: 0,
-    flex: 1,
-    color: colors.muted,
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    letterSpacing: tightTracking(13),
+    flexGrow: 1,
+    flexShrink: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.xs,
   },
-  shiftNameLive: {
-    color: colors.ink,
-    fontFamily: fonts.medium,
+  stacked: {
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: 2,
+  },
+  flex: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
   },
 });
