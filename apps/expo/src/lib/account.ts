@@ -151,11 +151,22 @@ async function deleteAccount(): Promise<void> {
   }
 }
 
-/** Asks "Sign Out?" and signs out this device. */
-export function confirmSignOut(): void {
+/**
+ * Asks "Sign Out?" and signs out this device. `onSigningOut` runs once the
+ * person confirms, so the screen can show progress while the device is
+ * unregistered (a moment on a good network).
+ */
+export function confirmSignOut(onSigningOut?: () => void): void {
   Alert.alert("Sign Out?", "This device will stop receiving notifications.", [
     { text: "Cancel", style: "cancel" },
-    { text: "Sign Out", style: "destructive", onPress: () => void signOut() },
+    {
+      text: "Sign Out",
+      style: "destructive",
+      onPress: () => {
+        onSigningOut?.();
+        void signOut();
+      },
+    },
   ]);
 }
 

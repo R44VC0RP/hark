@@ -174,7 +174,7 @@ export default function SetUpScreen() {
         <Stack.Toolbar.Menu accessibilityLabel="More" icon="ellipsis">
           <Stack.Toolbar.MenuAction
             icon="rectangle.portrait.and.arrow.right"
-            onPress={confirmSignOut}
+            onPress={() => confirmSignOut()}
           >
             Sign Out
           </Stack.Toolbar.MenuAction>

@@ -42,6 +42,8 @@ export default function SettingsScreen() {
   const [registered, setRegistered] = useState<boolean | null>(null);
   const [liveActivitiesCapable, setLiveActivitiesCapable] = useState<boolean | null>(null);
   const [appIcon, setAppIcon] = useState(() => appIconLabel(getAppIconName()));
+  // Shown on the row from the confirmation until the sheet leaves.
+  const [signingOut, setSigningOut] = useState(false);
 
   const checkPermission = useCallback(() => {
     void Notifications.getPermissionsAsync().then((permission) =>
@@ -133,7 +135,9 @@ export default function SettingsScreen() {
             accessibilityHint={registered === false ? `Sets up this ${deviceNoun}` : undefined}
             chevron={registered === false}
             onPress={registered === false ? () => leaveAppTo("/home") : undefined}
-            symbol={isPad ? "ipad" : "iphone"}
+            // Not the device outline: next to Live Activities' phone it read
+            // as the same symbol. Registration is how pushes reach this device.
+            symbol="antenna.radiowaves.left.and.right"
             title="Registration"
             value={registered === null ? undefined : registered ? "Registered" : "Not Registered"}
           />
@@ -165,7 +169,13 @@ export default function SettingsScreen() {
         </Section>
 
         <Section>
-          <ActionRow destructive onPress={confirmSignOut} title="Sign Out" />
+          <ActionRow
+            accessibilityState={{ busy: signingOut }}
+            destructive
+            disabled={signingOut}
+            onPress={() => confirmSignOut(() => setSigningOut(true))}
+            title={signingOut ? "Signing Out…" : "Sign Out"}
+          />
           <ActionRow destructive onPress={confirmDeleteAccount} title="Delete Account" />
         </Section>
 
