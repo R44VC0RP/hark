@@ -2,7 +2,7 @@ import type { AppDto, TeamDto } from "@hark/contracts";
 import * as Device from "expo-device";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, findNodeHandle, StyleSheet, View } from "react-native";
+import { ActionSheetIOS, Alert, findNodeHandle, StyleSheet, View } from "react-native";
 import { AppIcon } from "../../src/components/app-icon";
 import { ApiError, api } from "../../src/lib/api";
 import { refreshDirectory, useDirectory } from "../../src/lib/app-directory";
@@ -14,7 +14,6 @@ import { leaveSheetThenPush } from "../../src/lib/navigation";
 import { cacheApps, cachedApp, hostOf } from "../../src/lib/web-apps";
 import { spoken } from "../../src/ui/a11y";
 import { Button } from "../../src/ui/button";
-import { DismissShield, useActionSheet, useShield } from "../../src/ui/dismiss-shield";
 import { EmptyState, ErrorState, isNetworkError, LoadingState } from "../../src/ui/empty-state";
 import { ActionRow, LabeledRow, List, Section, SwitchRow, useStackedRows } from "../../src/ui/list";
 import { Text } from "../../src/ui/text";
@@ -45,8 +44,6 @@ export default function AppInfoSheet() {
   const [saving, setSaving] = useState(false);
   const [moving, setMoving] = useState(false);
   const shareRow = useRef<View>(null);
-  const shield = useShield();
-  const showActionSheet = useActionSheet(shield);
 
   const load = useCallback(() => {
     if (simulatorPreview) {
@@ -190,7 +187,7 @@ export default function AppInfoSheet() {
     const [onlyTeam] = teams;
     if (teams.length === 1 && onlyTeam) return moveTo(onlyTeam);
     const anchor = shareRow.current ? findNodeHandle(shareRow.current) : null;
-    showActionSheet(
+    ActionSheetIOS.showActionSheetWithOptions(
       {
         title: "Share with a Team",
         options: [...teams.map((team) => team.name), "Cancel"],
@@ -242,7 +239,7 @@ export default function AppInfoSheet() {
   const consented = Boolean(app?.consentedAt);
 
   return (
-    <DismissShield shield={shield}>
+    <>
       <Stack.Screen options={{ title: "App Info" }} />
       <Stack.Toolbar placement="right">
         <Stack.Toolbar.Button accessibilityLabel="Close" icon="xmark" onPress={close} />
@@ -366,7 +363,7 @@ export default function AppInfoSheet() {
           </>
         )}
       </List>
-    </DismissShield>
+    </>
   );
 }
 

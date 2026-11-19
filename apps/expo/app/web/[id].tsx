@@ -3,7 +3,7 @@ import * as Device from "expo-device";
 import { Stack, useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Linking, Pressable, StyleSheet, View } from "react-native";
+import { ActionSheetIOS, Alert, Linking, Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 import type { ShouldStartLoadRequest } from "react-native-webview/lib/WebViewTypes";
@@ -29,7 +29,6 @@ import {
   resolveLaunchUrl,
 } from "../../src/lib/web-apps";
 import { clearWebsiteDataForOrigin } from "../../src/lib/website-data";
-import { DismissShield, useActionSheet, useShield } from "../../src/ui/dismiss-shield";
 import { palette } from "../../src/ui/tokens";
 
 type Phase = "loading" | "consent" | "ready" | "error";
@@ -268,13 +267,10 @@ export default function WebAppScreen() {
 
   // The Hark menu: a two-finger hold on the page (or VoiceOver's action on
   // the status strip). On iPad the same actions live in the bar; a hold there
-  // shows this sheet as a centred popover, with the shield over the page so
-  // the tap that closes it never reaches the page.
-  const shield = useShield();
-  const showActionSheet = useActionSheet(shield);
+  // shows this sheet as a centred popover.
   const showMenu = () => {
     if (!app) return;
-    showActionSheet(
+    ActionSheetIOS.showActionSheetWithOptions(
       {
         title: app.name,
         message: `Signed in with Hark on ${new URL(app.origin).host}`,
@@ -505,7 +501,7 @@ export default function WebAppScreen() {
   }
 
   return (
-    <DismissShield shield={shield}>
+    <>
       <Stack.Screen options={headerOptions} />
       {chrome === "bar" ? (
         <WebBarItems
@@ -523,7 +519,7 @@ export default function WebAppScreen() {
         />
       ) : null}
       {content}
-    </DismissShield>
+    </>
   );
 }
 

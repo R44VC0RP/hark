@@ -42,20 +42,15 @@ function MoreMenu({ label, actions }: { label: string; actions: MemberAction[] }
   return (
     <RowMenu
       label={label}
-      menu={(done) =>
-        actions.map((action) => (
-          <MenuButton
-            key={action.label}
-            label={action.label}
-            onPress={() => {
-              done();
-              action.run();
-            }}
-            role={action.destructive ? "destructive" : "default"}
-            systemImage={action.icon}
-          />
-        ))
-      }
+      menu={actions.map((action) => (
+        <MenuButton
+          key={action.label}
+          label={action.label}
+          onPress={action.run}
+          role={action.destructive ? "destructive" : "default"}
+          systemImage={action.icon}
+        />
+      ))}
     >
       <View style={styles.more}>
         <SymbolView name="ellipsis" size={17} tintColor={colors.secondaryLabel} weight="semibold" />
