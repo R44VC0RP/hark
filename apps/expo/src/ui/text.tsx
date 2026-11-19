@@ -1,4 +1,6 @@
+import { useSyncExternalStore } from "react";
 import {
+  Dimensions,
   Text as NativeText,
   type TextProps as NativeTextProps,
   StyleSheet,
@@ -24,6 +26,46 @@ export interface TextProps extends NativeTextProps {
   align?: "left" | "center" | "right";
 }
 
+/**
+ * The text size (`fontScale`), shared by every `Text`: they re-render only
+ * when it changes, not on rotation or window resizes.
+ */
+let fontScale = Dimensions.get("window").fontScale;
+const fontScaleListeners = new Set<() => void>();
+Dimensions.addEventListener("change", ({ window }) => {
+  if (window.fontScale === fontScale) return;
+  fontScale = window.fontScale;
+  for (const listener of fontScaleListeners) listener();
+});
+
+function useFontScale(): number {
+  return useSyncExternalStore(
+    (listener) => {
+      fontScaleListeners.add(listener);
+      return () => {
+        fontScaleListeners.delete(listener);
+      };
+    },
+    () => fontScale,
+  );
+}
+
+/**
+ * Re-measures every text after a live text-size change. React Native measures
+ * Dynamic Type text as soon as the size changes, while UIFontMetrics still
+ * reports the old size, and caches that height under the new size, so text
+ * that doesn't re-render kept a stale frame (a 22-pt header drawing AX5
+ * glyphs) until relaunch. A letter spacing unique to each text size makes
+ * the settled measurement a new cache entry: 0 at the default size and at
+ * most about 0.2 pt (AX5), which doesn't show. The cache treats differences
+ * under 0.005 as equal; text sizes are at least 0.06 apart in `fontScale`.
+ */
+function sizeKeyedSpacing(variant: TextVariant, scale: number): TextStyle | null {
+  if (scale === 1) return null;
+  const ramp: TypeRamp = typography[variant];
+  return { letterSpacing: (ramp.letterSpacing ?? 0) + (scale - 1) * 0.1 };
+}
+
 export function Text({
   variant = "body",
   color = "label",
@@ -35,6 +77,7 @@ export function Text({
   ...props
 }: TextProps) {
   const ramp: TypeRamp = typography[variant];
+  const scale = useFontScale();
   return (
     <NativeText
       dynamicTypeRamp={ramp.dynamicTypeRamp}
@@ -45,6 +88,7 @@ export function Text({
         weight ? weightStyles[weight] : null,
         tabular ? styles.tabular : null,
         align ? alignStyles[align] : null,
+        sizeKeyedSpacing(variant, scale),
         style,
       ]}
       {...props}
