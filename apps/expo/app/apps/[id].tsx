@@ -1,28 +1,35 @@
 import type { AppDto, TeamDto } from "@hark/contracts";
 import * as Device from "expo-device";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import { StatusBar } from "expo-status-bar";
-import { SymbolView } from "expo-symbols";
-import { useEffect, useState } from "react";
-import {
-  ActionSheetIOS,
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  View,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { Stack, useLocalSearchParams, useRouter } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ActionSheetIOS, Alert, findNodeHandle, StyleSheet, View } from "react-native";
 import { AppIcon } from "../../src/components/app-icon";
-import { api } from "../../src/lib/api";
+import { ApiError, api } from "../../src/lib/api";
+import { refreshDirectory, useDirectory } from "../../src/lib/app-directory";
 import { useSession } from "../../src/lib/auth";
-import { previewApps, previewTeams, previewViewer } from "../../src/lib/inbox-preview";
-import { readableColumn } from "../../src/lib/layout";
-import { colors, fonts, tightTracking } from "../../src/lib/theme";
+import { haptic } from "../../src/lib/haptics";
+import { previewApps, previewViewer } from "../../src/lib/inbox-preview";
+import { leaveSheetThenPush } from "../../src/lib/navigation";
 import { cacheApps, cachedApp } from "../../src/lib/web-apps";
+import { spoken } from "../../src/ui/a11y";
+import { Button } from "../../src/ui/button";
+import { EmptyState, ErrorState, isNetworkError, LoadingState } from "../../src/ui/empty-state";
+import { ActionRow, LabeledRow, List, Section, SwitchRow, useStackedRows } from "../../src/ui/list";
+import { Text } from "../../src/ui/text";
+import { metrics, space } from "../../src/ui/tokens";
+
+const simulatorPreview = __DEV__ && !Device.isDevice;
+const ICON_SIZE = 60;
+
+type LoadFailure = "network" | "other" | "missing";
+
+function hostOf(origin: string): string {
+  try {
+    return new URL(origin).host;
+  } catch {
+    return origin;
+  }
+}
 
 function formatDate(value: string | null): string {
   if (!value) return "Never";
@@ -38,51 +45,78 @@ function formatDate(value: string | null): string {
   });
 }
 
-export default function AppDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+function failureMessage(cause: unknown): string {
+  return cause instanceof Error && cause.message
+    ? cause.message
+    : "Check your connection, then try again.";
+}
+
+/**
+ * App Info (DESIGN.md 5.9): a form sheet from an app's long-press menu, the
+ * web app's Hark menu or its iPad bar. Who added the app and when, what it
+ * may know about you, and sharing, sign-in and removal. Teams come from the
+ * shared directory, so the sheet makes one request: the app itself.
+ */
+export default function AppInfoSheet() {
+  const { id, from } = useLocalSearchParams<{ id: string; from?: string }>();
+  const appId = String(id);
   const router = useRouter();
-  const simulatorPreview = __DEV__ && !Device.isDevice;
-  const [app, setApp] = useState<AppDto | null>(() => cachedApp(String(id)) ?? null);
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [teams, setTeams] = useState<TeamDto[]>([]);
-  const [moving, setMoving] = useState(false);
+  const stacked = useStackedRows();
   const { data: session } = useSession();
+  const directory = useDirectory();
+  const teams: TeamDto[] = directory?.teams ?? [];
   const viewerName = simulatorPreview ? previewViewer.name : session?.user.name;
+  const [app, setApp] = useState<AppDto | null>(() => cachedApp(appId) ?? null);
+  const [failure, setFailure] = useState<LoadFailure | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [moving, setMoving] = useState(false);
+  const shareRow = useRef<View>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     if (simulatorPreview) {
-      setTeams(previewTeams);
-      return;
-    }
-    // Older servers 404: sharing with a team simply isn't offered.
-    void api
-      .listTeams()
-      .then((result) => setTeams(result.teams))
-      .catch(() => setTeams([]));
-  }, [simulatorPreview]);
-
-  useEffect(() => {
-    if (simulatorPreview) {
-      const preview = cachedApp(String(id)) ?? previewApps.find((item) => item.id === id);
+      const preview = cachedApp(appId) ?? previewApps.find((item) => item.id === appId);
       if (preview) setApp(preview);
+      else setFailure("missing");
       return;
     }
     void api
-      .getApp(String(id))
+      .getApp(appId)
       .then((result) => {
         cacheApps([result.app]);
         setApp(result.app);
+        setFailure(null);
       })
-      .catch((cause: unknown) =>
-        setError(cause instanceof Error ? cause.message : "Couldn’t load this app."),
-      );
-  }, [id, simulatorPreview]);
+      .catch((cause: unknown) => {
+        if (cause instanceof ApiError && cause.status === 404) setFailure("missing");
+        else setFailure(isNetworkError(cause) ? "network" : "other");
+      });
+  }, [appId]);
 
-  const back = () => (router.canGoBack() ? router.back() : router.replace("/apps"));
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  const update = async (change: { shareName?: boolean; shareEmail?: boolean }) => {
+  const close = () => {
+    if (router.canGoBack()) router.back();
+    else router.dismissTo("/apps");
+  };
+
+  const open = () => {
+    // From the web app's own menu, "Open" just goes back to it.
+    if (from === "web") close();
+    else leaveSheetThenPush({ pathname: "/web/[id]", params: { id: appId } });
+  };
+
+  /** Keeps the Apps grid, shortcuts and the web app's cache in step. */
+  const changed = (next: AppDto) => {
+    cacheApps([next]);
+    setApp(next);
+    void refreshDirectory().catch(() => {});
+  };
+
+  const updateSharing = async (change: { shareName?: boolean; shareEmail?: boolean }) => {
     if (!app || saving) return;
+    const previous = app;
     const optimistic = { ...app, ...change };
     setApp(optimistic);
     if (simulatorPreview) {
@@ -95,8 +129,9 @@ export default function AppDetailScreen() {
       cacheApps([result.app]);
       setApp(result.app);
     } catch (cause) {
-      setApp(app);
-      Alert.alert("Couldn’t save", cause instanceof Error ? cause.message : "Please try again.");
+      setApp(previous);
+      haptic.error();
+      Alert.alert("Couldn't Save", failureMessage(cause));
     } finally {
       setSaving(false);
     }
@@ -105,29 +140,28 @@ export default function AppDetailScreen() {
   const stopSigningIn = () => {
     if (!app) return;
     Alert.alert(
-      `Stop signing in to ${app.name}?`,
-      `Hark will stop sending passes to ${new URL(app.origin).host}. You’ll be asked again the next time you open it.`,
+      `Stop Signing In to ${app.name}?`,
+      `Hark will stop sending passes to ${hostOf(app.origin)}. You’ll be asked again the next time you open it.`,
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Stop signing in",
+          text: "Stop Signing In",
           style: "destructive",
           onPress: () => {
             if (simulatorPreview) {
-              const revoked = { ...app, consentedAt: null };
-              cacheApps([revoked]);
-              setApp(revoked);
+              changed({ ...app, consentedAt: null });
               return;
             }
             void api
               .revokeApp(app.id)
               .then((result) => {
-                cacheApps([result.app]);
-                setApp(result.app);
+                haptic.success();
+                changed(result.app);
               })
-              .catch((cause: unknown) =>
-                Alert.alert("Couldn’t update", cause instanceof Error ? cause.message : ""),
-              );
+              .catch((cause: unknown) => {
+                haptic.error();
+                Alert.alert("Couldn't Stop Signing In", failureMessage(cause));
+              });
           },
         },
       ],
@@ -138,28 +172,24 @@ export default function AppDetailScreen() {
     if (!app || moving) return;
     const run = () => {
       if (simulatorPreview) {
-        const moved: AppDto = {
+        changed({
           ...app,
           team: team ? { id: team.id, name: team.name } : null,
           addedBy: viewerName ?? null,
-        };
-        cacheApps([moved]);
-        setApp(moved);
+        });
         return;
       }
       setMoving(true);
       void api
         .shareApp(app.id, { teamId: team?.id ?? null, ...(team ? { notify: true } : {}) })
         .then((result) => {
-          cacheApps([result.app]);
-          setApp(result.app);
+          haptic.success();
+          changed(result.app);
         })
-        .catch((cause: unknown) =>
-          Alert.alert(
-            team ? "Couldn’t share app" : "Couldn’t move app",
-            cause instanceof Error ? cause.message : "Please try again.",
-          ),
-        )
+        .catch((cause: unknown) => {
+          haptic.error();
+          Alert.alert(team ? "Couldn't Share App" : "Couldn't Move App", failureMessage(cause));
+        })
         .finally(() => setMoving(false));
     };
     if (team) {
@@ -173,7 +203,7 @@ export default function AppDetailScreen() {
       );
     } else {
       Alert.alert(
-        `Move ${app.name} to your apps?`,
+        `Move ${app.name} to Your Apps?`,
         `It disappears for everyone else on ${app.team?.name ?? "the team"}.`,
         [
           { text: "Cancel", style: "cancel" },
@@ -184,12 +214,15 @@ export default function AppDetailScreen() {
   };
 
   const chooseTeam = () => {
-    if (teams.length === 1 && teams[0]) return moveTo(teams[0]);
+    const [onlyTeam] = teams;
+    if (teams.length === 1 && onlyTeam) return moveTo(onlyTeam);
+    const anchor = shareRow.current ? findNodeHandle(shareRow.current) : null;
     ActionSheetIOS.showActionSheetWithOptions(
       {
-        title: "Share with a team",
+        title: "Share with a Team",
         options: [...teams.map((team) => team.name), "Cancel"],
         cancelButtonIndex: teams.length,
+        ...(anchor ? { anchor } : {}),
       },
       (index) => {
         const team = teams[index];
@@ -211,352 +244,182 @@ export default function AppDetailScreen() {
           text: "Remove",
           style: "destructive",
           onPress: () => {
-            if (simulatorPreview) return router.replace("/apps");
+            if (simulatorPreview) {
+              router.dismissTo("/apps");
+              return;
+            }
             void api
               .removeApp(app.id)
-              .then(() => router.replace("/apps"))
-              .catch((cause: unknown) =>
-                Alert.alert(
-                  "Couldn’t remove",
-                  cause instanceof Error ? cause.message : "Please try again.",
-                ),
-              );
+              .then(() => {
+                haptic.success();
+                void refreshDirectory().catch(() => {});
+                router.dismissTo("/apps");
+              })
+              .catch((cause: unknown) => {
+                haptic.error();
+                Alert.alert("Couldn't Remove App", failureMessage(cause));
+              });
           },
         },
       ],
     );
   };
 
+  const canShare = Boolean(app && !app.team && teams.length > 0);
+  const canMoveBack = Boolean(app?.team && viewerName && app.addedBy === viewerName);
+  const consented = Boolean(app?.consentedAt);
+
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
-      <StatusBar style="dark" />
-      <View style={styles.header}>
-        <Pressable
-          accessibilityLabel="Back"
-          accessibilityRole="button"
-          onPress={back}
-          style={({ pressed }) => [styles.iconButton, pressed && styles.iconButtonPressed]}
-        >
-          <SymbolView name="chevron.left" size={18} tintColor={colors.ink} weight="semibold" />
-        </Pressable>
-      </View>
-      {!app ? (
-        error ? (
-          <Text style={styles.missing}>{error}</Text>
+    <>
+      <Stack.Screen options={{ title: "App Info" }} />
+      <Stack.Toolbar placement="right">
+        <Stack.Toolbar.Button accessibilityLabel="Close" icon="xmark" onPress={close} />
+      </Stack.Toolbar>
+      <List>
+        {!app ? (
+          failure === "missing" ? (
+            <EmptyState
+              message="It was removed, or you no longer have access to it."
+              symbol="square.grid.2x2"
+              title="App Unavailable"
+            />
+          ) : failure ? (
+            <ErrorState
+              network={failure === "network"}
+              onRetry={() => {
+                setFailure(null);
+                load();
+              }}
+              title="Couldn't Load App"
+            />
+          ) : (
+            <LoadingState />
+          )
         ) : (
-          <ActivityIndicator color={colors.accent} style={styles.loading} />
-        )
-      ) : (
-        <ScrollView contentContainerStyle={styles.scroll}>
-          <View style={styles.identity}>
-            <AppIcon iconUrl={app.iconUrl} name={app.name} size={60} />
-            <View style={styles.identityCopy}>
-              <Text style={styles.title}>{app.name}</Text>
-              <Text style={styles.host}>{new URL(app.origin).host}</Text>
+          <>
+            <View style={[styles.identity, stacked && styles.identityStacked]}>
+              <View
+                accessibilityLabel={spoken(app.name, hostOf(app.origin))}
+                accessibilityRole="header"
+                accessible
+                style={styles.identityMain}
+              >
+                <AppIcon iconUrl={app.iconUrl} name={app.name} size={ICON_SIZE} />
+                <View style={styles.identityCopy}>
+                  <Text variant="title3">{app.name}</Text>
+                  <Text color="secondaryLabel" variant="subheadline">
+                    {hostOf(app.origin)}
+                  </Text>
+                </View>
+              </View>
+              <Button
+                accessibilityHint="Opens the app, signed in with Hark"
+                accessibilityLabel={`Open ${app.name}`}
+                onPress={open}
+                style={stacked ? styles.openStacked : null}
+                title="Open"
+                variant="prominent"
+              />
             </View>
-          </View>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => router.push({ pathname: "/web/[id]", params: { id: app.id } })}
-            style={({ pressed }) => [styles.openButton, pressed && styles.openButtonPressed]}
-          >
-            <Text style={styles.openButtonText}>Open app</Text>
-          </Pressable>
 
-          <View style={styles.metaBlock}>
-            {app.team ? <MetaRow label="Team" value={`Shared with ${app.team.name}`} /> : null}
-            <MetaRow label="Added by" value={app.addedBy ?? app.createdBy ?? "Unknown"} />
-            {app.addedBy && app.createdBy && app.addedBy !== app.createdBy ? (
-              <MetaRow label="Via" value={app.createdBy} />
+            <Section title="Details">
+              {app.team ? <LabeledRow label="Team" value={`Shared with ${app.team.name}`} /> : null}
+              <LabeledRow label="Added By" value={app.addedBy ?? app.createdBy ?? "Unknown"} />
+              {app.addedBy && app.createdBy && app.addedBy !== app.createdBy ? (
+                <LabeledRow label="Via" value={app.createdBy} />
+              ) : null}
+              {app.projectName ? <LabeledRow label="Project" value={app.projectName} /> : null}
+              <LabeledRow label="Added" value={formatDate(app.createdAt)} />
+              <LabeledRow label="Last Opened" value={formatDate(app.lastOpenedAt)} />
+              <LabeledRow
+                label="Sign-In"
+                value={consented ? "Signed in with Hark" : "Asks before signing in"}
+              />
+            </Section>
+
+            <Section
+              footer={`Hark gives ${app.name} a private ID made just for this app. Name and email are shared only when they are on.`}
+              title={`Shared with ${app.name}`}
+            >
+              <LabeledRow label="Hark ID" value="Always" />
+              <SwitchRow
+                onValueChange={(value) => void updateSharing({ shareName: value })}
+                title="Name"
+                value={app.shareName}
+              />
+              <SwitchRow
+                onValueChange={(value) => void updateSharing({ shareEmail: value })}
+                title="Email"
+                value={app.shareEmail}
+              />
+            </Section>
+
+            {canShare || canMoveBack || consented ? (
+              <Section>
+                {canShare ? (
+                  <ActionRow
+                    accessibilityHint="Choose a team to add this app to"
+                    accessibilityState={{ busy: moving }}
+                    disabled={moving}
+                    onPress={chooseTeam}
+                    ref={shareRow}
+                    title={moving ? "Sharing…" : "Share with a Team…"}
+                  />
+                ) : null}
+                {canMoveBack && app.team ? (
+                  <ActionRow
+                    accessibilityHint={`Removes it from ${app.team.name} and keeps it for you`}
+                    accessibilityState={{ busy: moving }}
+                    disabled={moving}
+                    onPress={() => moveTo(null)}
+                    title={moving ? "Moving…" : "Move to Your Apps"}
+                  />
+                ) : null}
+                {consented ? (
+                  <ActionRow destructive onPress={stopSigningIn} title="Stop Signing In" />
+                ) : null}
+              </Section>
             ) : null}
-            {app.projectName ? <MetaRow label="Project" value={app.projectName} /> : null}
-            <MetaRow label="Added" value={formatDate(app.createdAt)} />
-            <MetaRow label="Last opened" value={formatDate(app.lastOpenedAt)} />
-            <MetaRow
-              label="Sign-in"
-              value={app.consentedAt ? "Signed in with Hark" : "Asks before signing in"}
-            />
-          </View>
 
-          <Text style={styles.sectionLabel}>Shared with {app.name}</Text>
-          <View style={styles.row}>
-            <View style={styles.rowCopy}>
-              <Text style={styles.rowLabel}>Hark ID</Text>
-              <Text style={styles.rowValue}>A private ID made just for this app</Text>
-            </View>
-            <Text style={styles.always}>Always</Text>
-          </View>
-          <View style={styles.row}>
-            <View style={styles.rowCopy}>
-              <Text style={styles.rowLabel}>Name</Text>
-              <Text style={styles.rowValue}>{app.shareName ? "Shared" : "Not shared"}</Text>
-            </View>
-            <Switch
-              accessibilityLabel="Share name"
-              onValueChange={(value) => void update({ shareName: value })}
-              trackColor={{ true: colors.accent, false: colors.line }}
-              value={app.shareName}
-            />
-          </View>
-          <View style={[styles.row, styles.lastRow]}>
-            <View style={styles.rowCopy}>
-              <Text style={styles.rowLabel}>Email</Text>
-              <Text style={styles.rowValue}>{app.shareEmail ? "Shared" : "Not shared"}</Text>
-            </View>
-            <Switch
-              accessibilityLabel="Share email"
-              onValueChange={(value) => void update({ shareEmail: value })}
-              trackColor={{ true: colors.accent, false: colors.line }}
-              value={app.shareEmail}
-            />
-          </View>
-
-          {app.consentedAt ? (
-            <Pressable
-              accessibilityRole="button"
-              onPress={stopSigningIn}
-              style={({ pressed }) => [styles.action, pressed && styles.rowPressed]}
-            >
-              <Text style={styles.actionLabel}>Stop signing in</Text>
-              <Text style={styles.actionDetail}>
-                Hark stops sending passes. {app.name} may keep its own session until it expires.
-              </Text>
-            </Pressable>
-          ) : null}
-          {!app.team && teams.length > 0 ? (
-            <Pressable
-              accessibilityHint="Choose a team to add this app to"
-              accessibilityRole="button"
-              accessibilityState={{ busy: moving }}
-              disabled={moving}
-              onPress={chooseTeam}
-              style={({ pressed }) => [styles.action, pressed && styles.rowPressed]}
-            >
-              <Text style={styles.actionLabel}>{moving ? "Sharing…" : "Share with a team"}</Text>
-              <Text style={styles.actionDetail}>
-                Teammates see it on their home screen. Each person signs in as themselves.
-              </Text>
-            </Pressable>
-          ) : null}
-          {app.team && viewerName && app.addedBy === viewerName ? (
-            <Pressable
-              accessibilityHint={`Removes it from ${app.team.name} and keeps it for you`}
-              accessibilityRole="button"
-              accessibilityState={{ busy: moving }}
-              disabled={moving}
-              onPress={() => moveTo(null)}
-              style={({ pressed }) => [styles.action, pressed && styles.rowPressed]}
-            >
-              <Text style={styles.actionLabel}>{moving ? "Moving…" : "Move to my apps"}</Text>
-              <Text style={styles.actionDetail}>
-                Only you will see it. Teammates lose it from their home screen.
-              </Text>
-            </Pressable>
-          ) : null}
-          <Pressable
-            accessibilityRole="button"
-            onPress={remove}
-            style={({ pressed }) => [styles.action, pressed && styles.rowPressed]}
-          >
-            <Text style={styles.removeLabel}>
-              {app.team ? `Remove from ${app.team.name}` : "Remove app"}
-            </Text>
-          </Pressable>
-        </ScrollView>
-      )}
-    </SafeAreaView>
-  );
-}
-
-function MetaRow({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.metaRow}>
-      <Text style={styles.metaLabel}>{label}</Text>
-      <Text style={styles.metaValue}>{value}</Text>
-    </View>
+            <Section>
+              <ActionRow
+                destructive
+                onPress={remove}
+                title={app.team ? `Remove from ${app.team.name}` : "Remove App"}
+              />
+            </Section>
+          </>
+        )}
+      </List>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.paper,
-  },
-  header: {
-    ...readableColumn,
-    minHeight: 56,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 12,
-  },
-  iconButton: {
-    width: 44,
-    height: 44,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 22,
-  },
-  iconButtonPressed: {
-    backgroundColor: "#F0EFEC",
-    transform: [{ scale: 0.96 }],
-  },
-  loading: {
-    paddingVertical: 40,
-  },
-  missing: {
-    paddingHorizontal: 24,
-    paddingVertical: 24,
-    color: colors.soft,
-    fontFamily: fonts.regular,
-    fontSize: 14,
-  },
-  scroll: {
-    ...readableColumn,
-    paddingHorizontal: 24,
-    paddingBottom: 64,
-  },
   identity: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 14,
+    gap: metrics.rowAccessoryGap,
+    marginTop: space.l,
+    paddingHorizontal: metrics.rowPaddingHorizontal,
+  },
+  identityStacked: {
+    flexDirection: "column",
+    alignItems: "stretch",
+  },
+  identityMain: {
+    minWidth: 0,
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: metrics.rowAccessoryGap + space.xxs,
   },
   identityCopy: {
     minWidth: 0,
     flex: 1,
     gap: 2,
   },
-  title: {
-    color: colors.ink,
-    fontFamily: fonts.semibold,
-    fontSize: 22,
-    lineHeight: 28,
-    letterSpacing: tightTracking(22),
-  },
-  host: {
-    color: colors.muted,
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    lineHeight: 18,
-    letterSpacing: tightTracking(13),
-  },
-  openButton: {
-    minHeight: 44,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 20,
-    borderRadius: 22,
-    backgroundColor: colors.accent,
-  },
-  openButtonPressed: {
-    backgroundColor: colors.accentPressed,
-    transform: [{ scale: 0.98 }],
-  },
-  openButtonText: {
-    color: "#FFFFFF",
-    fontFamily: fonts.medium,
-    fontSize: 14,
-    letterSpacing: tightTracking(14),
-  },
-  metaBlock: {
-    gap: 6,
-    marginTop: 24,
-    paddingVertical: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.line,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.line,
-  },
-  metaRow: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  metaLabel: {
-    width: 84,
-    color: colors.soft,
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    lineHeight: 18,
-    letterSpacing: tightTracking(13),
-  },
-  metaValue: {
-    flex: 1,
-    color: colors.muted,
-    fontFamily: fonts.medium,
-    fontSize: 13,
-    lineHeight: 18,
-    letterSpacing: tightTracking(13),
-  },
-  sectionLabel: {
-    marginTop: 26,
-    paddingBottom: 8,
-    color: colors.muted,
-    fontFamily: fonts.semibold,
-    fontSize: 12,
-    letterSpacing: 0.5,
-    textTransform: "uppercase",
-  },
-  row: {
-    minHeight: 56,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.line,
-  },
-  lastRow: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.line,
-  },
-  rowPressed: {
-    opacity: 0.65,
-  },
-  rowCopy: {
-    minWidth: 0,
-    flex: 1,
-    gap: 1,
-  },
-  rowLabel: {
-    color: colors.ink,
-    fontFamily: fonts.medium,
-    fontSize: 14,
-    letterSpacing: tightTracking(14),
-  },
-  rowValue: {
-    color: colors.muted,
-    fontFamily: fonts.regular,
-    fontSize: 12,
-    letterSpacing: tightTracking(12),
-  },
-  always: {
-    color: colors.soft,
-    fontFamily: fonts.regular,
-    fontSize: 12,
-  },
-  action: {
-    minHeight: 52,
-    justifyContent: "center",
-    gap: 3,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.line,
-  },
-  actionLabel: {
-    color: colors.ink,
-    fontFamily: fonts.medium,
-    fontSize: 14,
-    letterSpacing: tightTracking(14),
-  },
-  actionDetail: {
-    color: colors.muted,
-    fontFamily: fonts.regular,
-    fontSize: 12,
-    lineHeight: 17,
-    letterSpacing: tightTracking(12),
-  },
-  removeLabel: {
-    color: colors.danger,
-    fontFamily: fonts.medium,
-    fontSize: 14,
-    letterSpacing: tightTracking(14),
+  openStacked: {
+    alignSelf: "flex-start",
   },
 });
