@@ -7,7 +7,7 @@ import type {
 } from "@hark/contracts";
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
-import { Redirect, useFocusEffect, useRouter } from "expo-router";
+import { Stack, useFocusEffect, useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
 import { SymbolView } from "expo-symbols";
@@ -28,19 +28,19 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { HeaderLeading } from "../src/components/screen-parts";
-import { ApiError, api } from "../src/lib/api";
-import { useSession } from "../src/lib/auth";
+import { HeaderLeading } from "../../../src/components/screen-parts";
+import { ApiError, api } from "../../../src/lib/api";
+import { useSession } from "../../../src/lib/auth";
 import {
   previewActive,
   previewActivity,
   previewPending,
   previewProjects,
-} from "../src/lib/inbox-preview";
-import { createFocusRefreshPolicy, createRefreshSequence } from "../src/lib/inbox-refresh";
-import { DEVICE_ID_KEY, submitInteractionResponse } from "../src/lib/interactions";
-import { readableColumn } from "../src/lib/layout";
-import { colors, fonts, tightTracking } from "../src/lib/theme";
+} from "../../../src/lib/inbox-preview";
+import { createFocusRefreshPolicy, createRefreshSequence } from "../../../src/lib/inbox-refresh";
+import { DEVICE_ID_KEY, submitInteractionResponse } from "../../../src/lib/interactions";
+import { readableColumn } from "../../../src/lib/layout";
+import { colors, fonts, tightTracking } from "../../../src/lib/theme";
 
 type ActivityFilter = "all" | InboxActivityKind;
 
@@ -50,7 +50,7 @@ const PLACEHOLDER_AVATAR_URL =
 const ACTIVITY_PAGE_SIZE = 20;
 
 export default function InboxScreen() {
-  const { data: session, isPending: sessionPending } = useSession();
+  const { data: session } = useSession();
   const router = useRouter();
   const scrollRef = useRef<ScrollView>(null);
   const activityOffset = useRef(0);
@@ -258,11 +258,9 @@ export default function InboxScreen() {
   const activityPageCount = Math.max(1, Math.ceil(activityTotal / ACTIVITY_PAGE_SIZE));
   const projectGroups = buildProjectGroups(projects, pending, active);
 
-  if (!sessionPending && !session && !simulatorPreview) return <Redirect href="/" />;
-  if (deviceId === "") return <Redirect href="/home" />;
-
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
+      <Stack.Screen options={{ headerShown: false }} />
       <StatusBar style="dark" />
       <KeyboardAvoidingView
         style={styles.container}

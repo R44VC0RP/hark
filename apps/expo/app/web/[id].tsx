@@ -36,7 +36,7 @@ import { ApiError, api } from "../../src/lib/api";
 import { isHttpUrl, openExternalLink } from "../../src/lib/inbox-body";
 import { previewApps } from "../../src/lib/inbox-preview";
 import { onKeyCommand } from "../../src/lib/key-commands";
-import { deviceNoun, readableColumn, useHover, useLayout, useSidebar } from "../../src/lib/layout";
+import { deviceNoun, readableColumn, useHover, useLayout } from "../../src/lib/layout";
 import { colors, fonts, tightTracking } from "../../src/lib/theme";
 import {
   buildBridgeScript,
@@ -86,7 +86,6 @@ export default function WebAppScreen() {
   const [canGoForward, setCanGoForward] = useState(false);
   // iPad-sized windows get a toolbar instead of the hidden two-finger menu.
   const { regular: toolbar } = useLayout();
-  const sidebar = useSidebar();
   const menuButton = useRef<View>(null);
   const [stripColor, setStripColor] = useState("#FFFFFF");
   const [reloadKey, setReloadKey] = useState(0);
@@ -408,14 +407,12 @@ export default function WebAppScreen() {
           color={stripColor}
           menuButton={menuButton}
           onBack={() => webView.current?.goBack()}
-          onClose={sidebar.docked ? undefined : close}
+          onClose={close}
           onForward={() => webView.current?.goForward()}
           onInfo={() => router.push({ pathname: "/apps/[id]", params: { id: app.id } })}
           onMenu={showMenu}
           onReload={() => webView.current?.reload()}
           onSafari={() => void Linking.openURL(currentUrl.current ?? app.url).catch(() => {})}
-          onToggleSidebar={sidebar.fits ? sidebar.toggle : undefined}
-          sidebarOpen={sidebar.docked}
           top={insets.top}
         />
       ) : edgeToEdge ? (
@@ -502,7 +499,6 @@ function WebToolbar({
   top,
   canGoBack,
   canGoForward,
-  sidebarOpen,
   menuButton,
   onBack,
   onForward,
@@ -511,14 +507,12 @@ function WebToolbar({
   onInfo,
   onMenu,
   onClose,
-  onToggleSidebar,
 }: {
   app: AppDto;
   color: string;
   top: number;
   canGoBack: boolean;
   canGoForward: boolean;
-  sidebarOpen: boolean;
   menuButton: RefObject<View | null>;
   onBack: () => void;
   onForward: () => void;
@@ -526,8 +520,7 @@ function WebToolbar({
   onSafari: () => void;
   onInfo: () => void;
   onMenu: () => void;
-  onClose?: () => void;
-  onToggleSidebar?: () => void;
+  onClose: () => void;
 }) {
   const dark = isDarkColor(color);
   const ink = dark ? "#FFFFFF" : colors.ink;
@@ -542,17 +535,7 @@ function WebToolbar({
       ]}
     >
       <View style={styles.toolbarSide}>
-        {onToggleSidebar ? (
-          <ToolbarButton
-            color={ink}
-            icon="sidebar.left"
-            label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
-            onPress={onToggleSidebar}
-          />
-        ) : null}
-        {onClose ? (
-          <ToolbarButton color={ink} icon="xmark" label="Back to Hark" onPress={onClose} />
-        ) : null}
+        <ToolbarButton color={ink} icon="xmark" label="Back to Hark" onPress={onClose} />
         <ToolbarButton
           color={ink}
           disabled={!canGoBack}

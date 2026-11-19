@@ -5,7 +5,7 @@ import {
 } from "expo-alternate-app-icons";
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
-import { Redirect, useRouter } from "expo-router";
+import { Redirect, Stack, useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
 import { SymbolView } from "expo-symbols";
@@ -22,16 +22,16 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { HeaderLeading } from "../src/components/screen-parts";
-import { api } from "../src/lib/api";
-import { type AppIconOption, appIconLabel, appIconOptions } from "../src/lib/app-icons";
-import { authClient, useSession } from "../src/lib/auth";
-import { previewTeams } from "../src/lib/inbox-preview";
-import { clearInteractionResponses, DEVICE_ID_KEY } from "../src/lib/interactions";
-import { deviceNoun, isPad, readableColumn } from "../src/lib/layout";
-import { isUnsupportedRoute } from "../src/lib/teams";
-import { colors, fonts, tightTracking } from "../src/lib/theme";
-import { clearAllWebsiteData } from "../src/lib/website-data";
+import { HeaderLeading } from "../../src/components/screen-parts";
+import { api } from "../../src/lib/api";
+import { type AppIconOption, appIconLabel, appIconOptions } from "../../src/lib/app-icons";
+import { authClient, useSession } from "../../src/lib/auth";
+import { previewTeams } from "../../src/lib/inbox-preview";
+import { clearInteractionResponses, DEVICE_ID_KEY } from "../../src/lib/interactions";
+import { deviceNoun, isPad, readableColumn } from "../../src/lib/layout";
+import { isUnsupportedRoute } from "../../src/lib/teams";
+import { colors, fonts, tightTracking } from "../../src/lib/theme";
+import { clearAllWebsiteData } from "../../src/lib/website-data";
 
 const EXPO_TOKEN_KEY = "hark.device.expoPushToken";
 const APNS_TOKEN_KEY = "hark.device.apnsToken";
@@ -165,6 +165,7 @@ export default function SettingsScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
+      <Stack.Screen options={{ headerShown: false }} />
       <StatusBar style="dark" />
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.header}>

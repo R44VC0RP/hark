@@ -2,7 +2,7 @@ import type { EventDto } from "@hark/contracts";
 import Constants from "expo-constants";
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
-import { Redirect, useRouter } from "expo-router";
+import { Redirect, Stack, useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
 import { SymbolView } from "expo-symbols";
@@ -258,11 +258,12 @@ export default function HomeScreen() {
 
   const ready = permission === "granted" && registration === "registered";
 
-  if (__DEV__ && !Device.isDevice) return <Redirect href="/apps" />;
-  if (ready) return <Redirect href="/apps" />;
+  if (__DEV__ && !Device.isDevice) return <Redirect href="/inbox" />;
+  if (ready) return <Redirect href="/inbox" />;
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
+      <Stack.Screen options={{ headerShown: false }} />
       <StatusBar style="dark" />
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.header}>

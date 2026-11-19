@@ -1,6 +1,6 @@
 import type { InboxNotificationDetailDto } from "@hark/contracts";
 import * as Device from "expo-device";
-import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
+import { Redirect, Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { SymbolView } from "expo-symbols";
 import { useCallback, useEffect, useState } from "react";
@@ -14,18 +14,18 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { AppIcon } from "../../src/components/app-icon";
-import { api, classifyNotificationDetailFailure } from "../../src/lib/api";
-import { useSession } from "../../src/lib/auth";
+import { AppIcon } from "../../../../src/components/app-icon";
+import { api, classifyNotificationDetailFailure } from "../../../../src/lib/api";
+import { useSession } from "../../../../src/lib/auth";
 import {
   linkDestinationLabel,
   linkifyBody,
   openBodyLink,
   openTopLevelDestination,
-} from "../../src/lib/inbox-body";
-import { previewNotificationDetail } from "../../src/lib/inbox-preview";
-import { readableColumn } from "../../src/lib/layout";
-import { colors, fonts, tightTracking } from "../../src/lib/theme";
+} from "../../../../src/lib/inbox-body";
+import { previewNotificationDetail } from "../../../../src/lib/inbox-preview";
+import { readableColumn } from "../../../../src/lib/layout";
+import { colors, fonts, tightTracking } from "../../../../src/lib/theme";
 
 export default function NotificationDetailScreen() {
   const { data: session, isPending: sessionPending } = useSession();
@@ -107,6 +107,7 @@ export default function NotificationDetailScreen() {
 
   return (
     <SafeAreaView edges={["top"]} style={styles.container}>
+      <Stack.Screen options={{ headerShown: false }} />
       <StatusBar style="dark" />
       <View style={styles.header}>
         <Pressable

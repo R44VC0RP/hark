@@ -1,7 +1,7 @@
 import type { AppDto, TeamDto } from "@hark/contracts";
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
-import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
 import { SymbolView } from "expo-symbols";
@@ -18,13 +18,13 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { AppIcon } from "../../src/components/app-icon";
-import type { OncallMeDto } from "../../src/lib/api";
-import { loadDirectory, publishDirectory } from "../../src/lib/app-directory";
-import { useSession } from "../../src/lib/auth";
-import { createRefreshSequence } from "../../src/lib/inbox-refresh";
-import { DEVICE_ID_KEY } from "../../src/lib/interactions";
-import { useLayout, useSidebar } from "../../src/lib/layout";
+import { AppIcon } from "../../../../src/components/app-icon";
+import type { OncallMeDto } from "../../../../src/lib/api";
+import { loadDirectory, publishDirectory } from "../../../../src/lib/app-directory";
+import { useSession } from "../../../../src/lib/auth";
+import { createRefreshSequence } from "../../../../src/lib/inbox-refresh";
+import { DEVICE_ID_KEY } from "../../../../src/lib/interactions";
+import { useLayout } from "../../../../src/lib/layout";
 import {
   currentShift,
   groupAppsByTeam,
@@ -33,13 +33,13 @@ import {
   onPageClaimed,
   pagesNeedingResponse,
   pagesNeedYouLabel,
-} from "../../src/lib/teams";
-import { colors, fonts, tightTracking } from "../../src/lib/theme";
+} from "../../../../src/lib/teams";
+import { colors, fonts, tightTracking } from "../../../../src/lib/theme";
 
 const ADD_APP_COMMAND = 'harkctl apps create --name "My app" --url https://…';
 
 export default function AppsScreen() {
-  const { data: session, isPending: sessionPending } = useSession();
+  const { data: session } = useSession();
   const router = useRouter();
   const simulatorPreview = __DEV__ && !Device.isDevice;
   const [deviceId, setDeviceId] = useState<string | undefined>();
@@ -59,7 +59,6 @@ export default function AppsScreen() {
   const highlight = useRef(new Animated.Value(0)).current;
   const refreshSequence = useRef(createRefreshSequence()).current;
   const { regular } = useLayout();
-  const sidebar = useSidebar();
 
   useEffect(() => {
     void SecureStore.getItemAsync(DEVICE_ID_KEY).then((value) =>
@@ -143,9 +142,6 @@ export default function AppsScreen() {
     return () => clearTimeout(timer);
   }, [highlight, highlightReady, highlightTeam]);
 
-  if (!sessionPending && !session && !simulatorPreview) return <Redirect href="/" />;
-  if (deviceId === "") return <Redirect href="/home" />;
-
   const sections = groupAppsByTeam(apps, teams ?? []);
   const hasTeams = sections.teams.length > 0;
   const shift = oncall ? currentShift(oncall.shifts) : null;
@@ -180,6 +176,7 @@ export default function AppsScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
+      <Stack.Screen options={{ headerShown: false }} />
       <StatusBar style="dark" />
       <ScrollView
         contentContainerStyle={styles.scroll}
@@ -193,58 +190,37 @@ export default function AppsScreen() {
         }
         showsVerticalScrollIndicator={false}
       >
-        {sidebar.docked ? (
-          <View style={styles.titleRow}>
-            <Text accessibilityRole="header" style={styles.title}>
-              Apps
-            </Text>
+        <View style={styles.brandRow}>
+          <View style={styles.brandGroup}>
+            <View style={styles.brandMark} />
+            <Text style={styles.brand}>Hark</Text>
           </View>
-        ) : (
-          <View style={styles.brandRow}>
-            <View style={styles.brandGroup}>
-              <View style={styles.brandMark} />
-              <Text style={styles.brand}>Hark</Text>
-            </View>
-            <View style={styles.headerActions}>
-              {sidebar.fits ? (
-                <Pressable
-                  accessibilityLabel="Show sidebar"
-                  accessibilityRole="button"
-                  onPress={sidebar.toggle}
-                  style={({ pressed }) => [
-                    styles.headerButton,
-                    pressed && styles.iconButtonPressed,
-                  ]}
-                >
-                  <SymbolView name="sidebar.left" size={18} tintColor={colors.muted} />
-                </Pressable>
+          <View style={styles.headerActions}>
+            <Pressable
+              accessibilityLabel={unread > 0 ? `Inbox, ${unread} unread` : "Inbox"}
+              accessibilityRole="button"
+              onPress={() => router.push("/inbox")}
+              style={({ pressed }) => [styles.headerButton, pressed && styles.iconButtonPressed]}
+            >
+              <SymbolView name="tray.fill" size={18} tintColor={colors.muted} />
+              {unread > 0 ? (
+                <View style={styles.headerBadge}>
+                  <Text style={styles.headerBadgeText}>{unread > 99 ? "99+" : unread}</Text>
+                </View>
               ) : null}
-              <Pressable
-                accessibilityLabel={unread > 0 ? `Inbox, ${unread} unread` : "Inbox"}
-                accessibilityRole="button"
-                onPress={() => router.push("/inbox")}
-                style={({ pressed }) => [styles.headerButton, pressed && styles.iconButtonPressed]}
-              >
-                <SymbolView name="tray.fill" size={18} tintColor={colors.muted} />
-                {unread > 0 ? (
-                  <View style={styles.headerBadge}>
-                    <Text style={styles.headerBadgeText}>{unread > 99 ? "99+" : unread}</Text>
-                  </View>
-                ) : null}
-              </Pressable>
-              <Pressable
-                accessibilityLabel="Settings"
-                accessibilityRole="button"
-                onPress={() => router.push("/settings")}
-                style={({ pressed }) => [styles.headerButton, pressed && styles.iconButtonPressed]}
-              >
-                <SymbolView name="gearshape.fill" size={17} tintColor={colors.muted} />
-              </Pressable>
-            </View>
+            </Pressable>
+            <Pressable
+              accessibilityLabel="Settings"
+              accessibilityRole="button"
+              onPress={() => router.push("/settings")}
+              style={({ pressed }) => [styles.headerButton, pressed && styles.iconButtonPressed]}
+            >
+              <SymbolView name="gearshape.fill" size={17} tintColor={colors.muted} />
+            </Pressable>
           </View>
-        )}
+        </View>
 
-        {firstPage && !sidebar.docked ? (
+        {firstPage ? (
           <Pressable
             accessibilityHint={needYou.length === 1 ? "Opens the page" : "Shows your open pages"}
             accessibilityLabel={`${pagesNeedYouLabel(needYou.length)}. ${firstPage.title}`}
@@ -397,18 +373,6 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     paddingHorizontal: 24,
     paddingBottom: 48,
-  },
-  titleRow: {
-    minHeight: 60,
-    justifyContent: "flex-end",
-    paddingBottom: 6,
-  },
-  title: {
-    color: colors.ink,
-    fontFamily: fonts.semibold,
-    fontSize: 28,
-    lineHeight: 34,
-    letterSpacing: tightTracking(28),
   },
   brandRow: {
     minHeight: 60,

@@ -1,6 +1,6 @@
 import type { InboxNotificationSummaryDto } from "@hark/contracts";
 import * as Device from "expo-device";
-import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { Redirect, Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { SymbolView } from "expo-symbols";
 import { useCallback, useRef, useState } from "react";
@@ -15,18 +15,18 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { api } from "../../src/lib/api";
-import { useSession } from "../../src/lib/auth";
-import { previewNotifications, previewProjects } from "../../src/lib/inbox-preview";
-import { readableColumn } from "../../src/lib/layout";
+import { api } from "../../../../src/lib/api";
+import { useSession } from "../../../../src/lib/auth";
+import { previewNotifications, previewProjects } from "../../../../src/lib/inbox-preview";
+import { readableColumn } from "../../../../src/lib/layout";
 import {
   canMarkAllRead,
   loadedUnreadCount,
   markLoadedItemsRead,
   normalizeReadThroughToken,
   projectSummaryUnread,
-} from "../../src/lib/project-inbox";
-import { colors, fonts, tightTracking } from "../../src/lib/theme";
+} from "../../../../src/lib/project-inbox";
+import { colors, fonts, tightTracking } from "../../../../src/lib/theme";
 
 const PAGE_SIZE = 30;
 
@@ -175,6 +175,7 @@ export default function ProjectScreen() {
 
   return (
     <SafeAreaView edges={["top"]} style={styles.container}>
+      <Stack.Screen options={{ headerShown: false }} />
       <StatusBar style="dark" />
       <View style={styles.header}>
         <Pressable

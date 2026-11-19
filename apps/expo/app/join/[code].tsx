@@ -1,6 +1,6 @@
 import type { TeamInvitePreviewDto } from "@hark/contracts";
 import * as Device from "expo-device";
-import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
+import { Redirect, Stack, useLocalSearchParams, useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
@@ -87,6 +87,7 @@ export default function JoinTeamScreen() {
 
   return (
     <SafeAreaView edges={["top", "bottom"]} style={ui.container}>
+      <Stack.Screen options={{ headerShown: false }} />
       <StatusBar style="dark" />
       <ScreenHeader />
       {!invite ? (

@@ -1,5 +1,5 @@
 import type { CriticalAlertState } from "@hark/contracts";
-import { useRouter } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { SymbolView } from "expo-symbols";
 import { useEffect, useState } from "react";
@@ -39,6 +39,7 @@ export default function CriticalAlertsScreen() {
 
   return (
     <SafeAreaView edges={["top"]} style={ui.container}>
+      <Stack.Screen options={{ headerShown: false }} />
       <StatusBar style="dark" />
       <ScreenHeader title="Critical Alerts" />
       <ScrollView contentContainerStyle={[ui.scroll, styles.content]}>

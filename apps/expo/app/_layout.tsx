@@ -4,14 +4,12 @@ import {
   InterTight_600SemiBold,
   useFonts,
 } from "@expo-google-fonts/inter-tight";
-import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
-import { router, Stack, usePathname, useSegments } from "expo-router";
+import { router, Stack, ThemeProvider, usePathname, useSegments } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
-import { AppState, Pressable, StyleSheet, View } from "react-native";
-import { KeyboardShortcuts, Sidebar } from "../src/components/sidebar";
+import { AppState } from "react-native";
 import { trackAppEvent } from "../src/lib/analytics";
 import { useSession } from "../src/lib/auth";
 import {
@@ -20,10 +18,10 @@ import {
   handleNotificationResponse,
   registerInteractionCategories,
 } from "../src/lib/interactions";
-import { SidebarProvider, useSidebar } from "../src/lib/layout";
 import { startLiveActivityTokenSync } from "../src/lib/live-activities";
+import { setCurrentPath } from "../src/lib/navigation";
 import { PENDING_JOIN_CODE_KEY } from "../src/lib/teams";
-import { colors } from "../src/lib/theme";
+import { navigationTheme, palette, sheetOptions, stackScreenOptions } from "../src/ui/tokens";
 
 void SplashScreen.preventAutoHideAsync();
 void registerInteractionCategories().catch((error) => {
@@ -91,6 +89,10 @@ export default function RootLayout() {
     };
   }, []);
 
+  useEffect(() => {
+    setCurrentPath(pathname);
+  }, [pathname]);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: each navigation is a view, even within one pattern.
   useEffect(() => {
     void trackAppEvent("screen_view", { path: routePattern });
@@ -120,68 +122,31 @@ export default function RootLayout() {
 
   if (!fontsLoaded && !fontError) return null;
 
-  // The iPad sidebar belongs to the signed-in app, not sign-in or setup.
-  const simulatorPreview = __DEV__ && !Device.isDevice;
-  const sidebarRoute = !["/", "/home", "/la-lab"].includes(pathname);
-  const inApp = Boolean(session || simulatorPreview) && sidebarRoute;
-
   return (
-    <SidebarProvider enabled={inApp}>
-      {inApp ? <KeyboardShortcuts /> : null}
-      <Shell />
-    </SidebarProvider>
-  );
-}
-
-/** The stack, with the sidebar beside it when the window is wide enough. */
-function Shell() {
-  const { open, docked, dismiss } = useSidebar();
-  return (
-    <View style={{ flex: 1, flexDirection: "row", backgroundColor: colors.paper }}>
-      {docked ? <Sidebar /> : null}
-      <View style={{ flex: 1 }}>
-        <Stack
-          screenOptions={({ route }) => ({
-            headerShown: false,
-            contentStyle: { backgroundColor: colors.paper },
-            // Switching from the sidebar swaps the screen in place, like a tab.
-            animation:
-              (route.params as { via?: string } | undefined)?.via === "sidebar"
-                ? "none"
-                : "default",
-          })}
+    <ThemeProvider value={navigationTheme}>
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: palette.background },
+        }}
+      >
+        <Stack.Screen name="index" />
+        <Stack.Screen
+          name="home"
+          options={{ ...stackScreenOptions, headerShown: true, title: "" }}
         />
-      </View>
-      {open && !docked ? (
-        // Too narrow to dock: the sidebar slides over the content until a
-        // choice is made or the dimmed content is tapped.
-        <View style={StyleSheet.absoluteFill}>
-          <Pressable
-            accessibilityLabel="Hide sidebar"
-            onPress={dismiss}
-            style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(23, 23, 19, 0.24)" }]}
-          />
-          <View
-            style={{
-              position: "absolute",
-              top: 0,
-              bottom: 0,
-              left: 0,
-              flexDirection: "row",
-              ...overlayShadow,
-            }}
-          >
-            <Sidebar />
-          </View>
-        </View>
-      ) : null}
-    </View>
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="web/[id]" />
+        <Stack.Screen name="apps/[id]" options={sheetOptions} />
+        <Stack.Screen name="pages/[id]" options={sheetOptions} />
+        <Stack.Screen name="join/[code]" options={sheetOptions} />
+        <Stack.Screen name="critical-alerts" options={sheetOptions} />
+        <Stack.Screen
+          name="settings"
+          options={{ presentation: "formSheet", sheetAllowedDetents: [1], headerShown: false }}
+        />
+        <Stack.Screen name="la-lab" />
+      </Stack>
+    </ThemeProvider>
   );
 }
-
-const overlayShadow = {
-  shadowColor: "#000000",
-  shadowOpacity: 0.18,
-  shadowRadius: 24,
-  shadowOffset: { width: 8, height: 0 },
-} as const;

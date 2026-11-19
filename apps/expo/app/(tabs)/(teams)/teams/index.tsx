@@ -1,6 +1,6 @@
 import type { TeamDto } from "@hark/contracts";
 import * as Device from "expo-device";
-import { Redirect, useFocusEffect, useRouter } from "expo-router";
+import { Redirect, Stack, useFocusEffect, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { SymbolView } from "expo-symbols";
 import { useCallback, useState } from "react";
@@ -21,12 +21,12 @@ import {
   ScreenHeader,
   SectionLabel,
   ui,
-} from "../../src/components/screen-parts";
-import { api } from "../../src/lib/api";
-import { useSession } from "../../src/lib/auth";
-import { previewTeams } from "../../src/lib/inbox-preview";
-import { isUnsupportedRoute, memberCountLabel, roleLabel } from "../../src/lib/teams";
-import { colors } from "../../src/lib/theme";
+} from "../../../../src/components/screen-parts";
+import { api } from "../../../../src/lib/api";
+import { useSession } from "../../../../src/lib/auth";
+import { previewTeams } from "../../../../src/lib/inbox-preview";
+import { isUnsupportedRoute, memberCountLabel, roleLabel } from "../../../../src/lib/teams";
+import { colors } from "../../../../src/lib/theme";
 
 export default function TeamsScreen() {
   const { data: session, isPending } = useSession();
@@ -97,6 +97,7 @@ export default function TeamsScreen() {
 
   return (
     <SafeAreaView edges={["top"]} style={ui.container}>
+      <Stack.Screen options={{ headerShown: false }} />
       <StatusBar style="dark" />
       <ScreenHeader fallback="/settings" title="Teams" />
       <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>

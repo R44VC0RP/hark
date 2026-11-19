@@ -6,7 +6,7 @@ import type {
   TeamRole,
 } from "@hark/contracts";
 import * as Device from "expo-device";
-import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { Redirect, Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { SymbolView } from "expo-symbols";
 import { useCallback, useState } from "react";
@@ -28,16 +28,16 @@ import {
   SecondaryButton,
   SectionLabel,
   ui,
-} from "../../src/components/screen-parts";
-import { api } from "../../src/lib/api";
-import { useSession } from "../../src/lib/auth";
+} from "../../../../src/components/screen-parts";
+import { api } from "../../../../src/lib/api";
+import { useSession } from "../../../../src/lib/auth";
 import {
   previewOncallGroups,
   previewTeamInvites,
   previewTeamMembers,
   previewTeams,
   previewViewer,
-} from "../../src/lib/inbox-preview";
+} from "../../../../src/lib/inbox-preview";
 import {
   canManageTeam,
   formatHandoff,
@@ -46,8 +46,8 @@ import {
   roleLabel,
   seatsFull,
   seatsLabel,
-} from "../../src/lib/teams";
-import { colors } from "../../src/lib/theme";
+} from "../../../../src/lib/teams";
+import { colors } from "../../../../src/lib/theme";
 
 function errorText(cause: unknown): string {
   return cause instanceof Error ? cause.message : "Please try again.";
@@ -319,6 +319,7 @@ export default function TeamDetailScreen() {
 
   return (
     <SafeAreaView edges={["top"]} style={ui.container}>
+      <Stack.Screen options={{ headerShown: false }} />
       <StatusBar style="dark" />
       <ScreenHeader
         fallback="/teams"

@@ -5,7 +5,7 @@ import type {
   OncallSettingsDto,
 } from "@hark/contracts";
 import * as Device from "expo-device";
-import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { Redirect, Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { SymbolView } from "expo-symbols";
 import { useCallback, useEffect, useState } from "react";
@@ -21,21 +21,21 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { PersonAvatar, ScreenHeader, SectionLabel, ui } from "../src/components/screen-parts";
-import { api, type OncallMeDto } from "../src/lib/api";
-import { useSession } from "../src/lib/auth";
+import { PersonAvatar, ScreenHeader, SectionLabel, ui } from "../../../src/components/screen-parts";
+import { api, type OncallMeDto } from "../../../src/lib/api";
+import { useSession } from "../../../src/lib/auth";
 import {
   criticalAlertLabel,
   criticalAlertsEnabled,
   reportCriticalAlertState,
-} from "../src/lib/critical-alerts";
+} from "../../../src/lib/critical-alerts";
 import {
   previewOncallGroups,
   previewOncallMe,
   previewPages,
   previewTeams,
   previewViewer,
-} from "../src/lib/inbox-preview";
+} from "../../../src/lib/inbox-preview";
 import {
   currentShift,
   escalationPolicySummary,
@@ -44,8 +44,8 @@ import {
   onPageClaimed,
   pageStatusLabel,
   timeAgo,
-} from "../src/lib/teams";
-import { colors, fonts, tightTracking } from "../src/lib/theme";
+} from "../../../src/lib/teams";
+import { colors, fonts, tightTracking } from "../../../src/lib/theme";
 
 export default function OncallScreen() {
   const { data: session, isPending } = useSession();
@@ -151,6 +151,7 @@ export default function OncallScreen() {
 
   return (
     <SafeAreaView edges={["top"]} style={ui.container}>
+      <Stack.Screen options={{ headerShown: false }} />
       <StatusBar style="dark" />
       <ScreenHeader title={teamName ? `${teamName} on call` : "On call"} />
       {unsupported ? (
