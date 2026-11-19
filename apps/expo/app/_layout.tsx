@@ -149,7 +149,7 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" options={{ gestureEnabled: false }} />
         <Stack.Screen name="web/[id]" />
         <Stack.Screen name="apps/[id]" options={sheetOptions} />
-        <Stack.Screen name="pages/[id]" options={sheetOptions} />
+        <Stack.Screen name="pages/[id]" options={{ ...sheetOptions, presentation: "pageSheet" }} />
         <Stack.Screen name="join/[code]" options={sheetOptions} />
         <Stack.Screen name="critical-alerts" options={sheetOptions} />
         <Stack.Screen

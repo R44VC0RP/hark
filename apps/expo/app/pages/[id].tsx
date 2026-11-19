@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, StyleSheet, View } from "react-native";
 import { AppIcon } from "../../src/components/app-icon";
 import { closeSheet } from "../../src/components/teams/close-sheet";
-import { LeadingDot } from "../../src/components/teams/page-row";
+import { LeadingDot, unbroken } from "../../src/components/teams/page-row";
 import { PageStatusPill } from "../../src/components/teams/page-status";
 import { ApiError, api } from "../../src/lib/api";
 import { publishDirectory, refreshDirectory, useDirectory } from "../../src/lib/app-directory";
@@ -28,13 +28,39 @@ import { spoken } from "../../src/ui/a11y";
 import { Button } from "../../src/ui/button";
 import { EmptyState, ErrorState, isNetworkError, LoadingState } from "../../src/ui/empty-state";
 import { ActionRow, Cell, LabeledRow, List, Row, Section, useStackedRows } from "../../src/ui/list";
-import { Text } from "../../src/ui/text";
+import { Text, useFontScale } from "../../src/ui/text";
 import { type ColorName, metrics, palette, space } from "../../src/ui/tokens";
 
 const simulatorPreview = __DEV__ && !Device.isDevice;
 /** "next in 4 min" and "12 min ago" move on while the page is open. */
 const TICK_MS = 30_000;
 const APP_ICON = 40;
+/**
+ * From xxxL text up the three toolbar labels no longer fit and UIKit folds
+ * the last item, the prominent one, into "…". This is the toolbar's own
+ * measure, not the row-stacking threshold, which may move (V-08).
+ */
+const TOOLBAR_FOLD_SCALE = 1.35;
+/**
+ * The sheet's content runs under its bottom toolbar; the soft edge fades it
+ * out there instead of leaving crisp text between and behind the buttons
+ * ("automatic" drew nothing at the bottom, V-01).
+ */
+const EDGE_EFFECTS = {
+  top: "soft",
+  bottom: "hard",
+  left: "automatic",
+  right: "automatic",
+} as const;
+
+/** "grafana.example.com" for an app row, like every other app row in Hark. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host || url;
+  } catch {
+    return url;
+  }
+}
 
 type Busy = "acknowledge" | "escalate" | "resolve" | null;
 type LoadFailure = "missing" | "network" | "other";
@@ -74,6 +100,7 @@ const TIMELINE_DOT: Record<OncallPageEventDto["kind"], ColorName> = {
 export default function PageSheet() {
   const { data: session, isPending } = useSession();
   const stacked = useStackedRows();
+  const foldToolbar = useFontScale() >= TOOLBAR_FOLD_SCALE;
   const directory = useDirectory();
   const params = useLocalSearchParams<{ id: string; intent?: string }>();
   const id = String(params.id);
@@ -299,7 +326,7 @@ export default function PageSheet() {
 
   return (
     <>
-      <Stack.Screen options={{ title: page?.groupName ?? "" }} />
+      <Stack.Screen options={{ title: page?.groupName ?? "", scrollEdgeEffects: EDGE_EFFECTS }} />
       <Stack.Toolbar placement="right">
         <Stack.Toolbar.Button
           accessibilityLabel="Close"
@@ -366,6 +393,30 @@ export default function PageSheet() {
               </Section>
             ) : null}
 
+            {/*
+              Who has been paged and who is on it comes before the details:
+              with the actions in the toolbar it is the page's state, so it
+              belongs in the first screenful (V-01).
+            */}
+            {timeline.length > 0 || ringing.length > 0 ? (
+              <Section
+                footer={
+                  ringing.length > 0
+                    ? `Ringing ${ringing.map((ring) => ring.person.name).join(", ")} until someone acknowledges.`
+                    : undefined
+                }
+                title="Timeline"
+              >
+                {timeline.map((event) => (
+                  <TimelineRow
+                    event={event}
+                    key={`${event.at}-${event.kind}-${event.people.map((person) => person.userId).join(",")}`}
+                    now={now}
+                  />
+                ))}
+              </Section>
+            ) : null}
+
             <Section title="Details">
               <LabeledRow label="Group" value={page.groupName} />
               {page.urgency === "low" ? (
@@ -379,8 +430,9 @@ export default function PageSheet() {
               <LabeledRow
                 label="Notified"
                 value={
+                  // A name never breaks across lines; the list wraps between names.
                   page.notified.length > 0
-                    ? page.notified.map((person) => person.name).join(", ")
+                    ? page.notified.map((person) => unbroken(person.name)).join(", ")
                     : "Nobody yet"
                 }
               />
@@ -395,7 +447,7 @@ export default function PageSheet() {
                   style={stacked ? styles.appRowStacked : null}
                 >
                   <View
-                    accessibilityLabel={spoken(page.app.name, page.url ?? page.app.origin)}
+                    accessibilityLabel={spoken(page.app.name, hostOf(page.url ?? page.app.origin))}
                     accessible
                     style={styles.appIdentity}
                   >
@@ -409,7 +461,7 @@ export default function PageSheet() {
                         numberOfLines={stacked ? undefined : 1}
                         variant="footnote"
                       >
-                        {page.url ?? page.app.origin}
+                        {hostOf(page.url ?? page.app.origin)}
                       </Text>
                     </View>
                   </View>
@@ -439,92 +491,64 @@ export default function PageSheet() {
                 />
               </Section>
             ) : null}
-
-            {timeline.length > 0 || ringing.length > 0 ? (
-              <Section
-                footer={
-                  ringing.length > 0
-                    ? `Ringing ${ringing.map((ring) => ring.person.name).join(", ")} until someone acknowledges.`
-                    : undefined
-                }
-                title="Timeline"
-              >
-                {timeline.map((event) => (
-                  <TimelineRow
-                    event={event}
-                    key={`${event.at}-${event.kind}-${event.people.map((person) => person.userId).join(",")}`}
-                    now={now}
-                  />
-                ))}
-              </Section>
-            ) : null}
           </>
         )}
       </List>
       {page && !resolved ? (
         <Stack.Toolbar placement="bottom">
           {/*
-            Escalating needs an open page: the server refuses it once
-            acknowledged (409), so acknowledged pages offer Resolve only.
-            From xxxL text up the three labels no longer fit and UIKit folds
-            the last item, the prominent one, into "…"; there Escalate and
-            Resolve move into a More menu so the next step stays visible.
+            Every action keeps its place in every state, so nothing with a
+            different meaning lands under a finger that just tapped (I-03: a
+            double tap on Acknowledge used to hit the Resolve that took its
+            place). Resolve leads, Escalate follows it while the page is open
+            (the server refuses to escalate an acknowledged page), and the
+            trailing slot is Acknowledge, then a dimmed "Acknowledged". Once
+            acknowledged, Resolve becomes the prominent next step where it
+            already was. Labels never change while a request is out (items
+            are only disabled): a wider label made UIKit fold the bar.
+            From xxxL text Resolve and Escalate fold into a More menu in the
+            same leading place, so the trailing item stays visible.
           */}
-          {triggered && stacked ? (
+          {triggered && foldToolbar ? (
             <Stack.Toolbar.Menu accessibilityLabel="More Actions" icon="ellipsis">
-              <Stack.Toolbar.MenuAction disabled={busy !== null} onPress={() => escalate(page)}>
-                Escalate…
-              </Stack.Toolbar.MenuAction>
               <Stack.Toolbar.MenuAction disabled={busy !== null} onPress={resolve}>
                 Resolve…
               </Stack.Toolbar.MenuAction>
+              <Stack.Toolbar.MenuAction disabled={busy !== null} onPress={() => escalate(page)}>
+                Escalate…
+              </Stack.Toolbar.MenuAction>
             </Stack.Toolbar.Menu>
-          ) : null}
-          {/*
-            Labels stay the same while a request is out (the items are only
-            disabled): a wider "Acknowledging…" no longer fit and UIKit
-            folded the bar into "…" for a moment (seen frame by frame).
-          */}
-          {triggered && !stacked ? (
-            <Stack.Toolbar.Button
-              accessibilityHint="Notifies the next responder now"
-              disabled={busy !== null}
-              onPress={() => escalate(page)}
-            >
-              Escalate
-            </Stack.Toolbar.Button>
-          ) : null}
-          {triggered && !stacked ? (
-            <Stack.Toolbar.Button
-              accessibilityHint="Closes the page for everyone"
-              disabled={busy !== null}
-              onPress={resolve}
-            >
-              Resolve
-            </Stack.Toolbar.Button>
-          ) : null}
-          <Stack.Toolbar.Spacer />
-          {triggered ? (
-            <Stack.Toolbar.Button
-              accessibilityHint="Tells the team you're on it and stops escalation"
-              disabled={busy !== null}
-              onPress={() => void acknowledge()}
-              tintColor={palette.accent}
-              variant="prominent"
-            >
-              Acknowledge
-            </Stack.Toolbar.Button>
           ) : (
             <Stack.Toolbar.Button
               accessibilityHint="Closes the page for everyone"
               disabled={busy !== null}
               onPress={resolve}
-              tintColor={palette.accent}
-              variant="prominent"
+              tintColor={triggered ? undefined : palette.accent}
+              variant={triggered ? "plain" : "prominent"}
             >
               Resolve
             </Stack.Toolbar.Button>
           )}
+          <Stack.Toolbar.Button
+            accessibilityHint="Notifies the next responder now"
+            disabled={busy !== null}
+            hidden={!triggered || foldToolbar}
+            onPress={() => escalate(page)}
+          >
+            Escalate
+          </Stack.Toolbar.Button>
+          <Stack.Toolbar.Spacer />
+          <Stack.Toolbar.Button
+            accessibilityHint={
+              triggered ? "Tells the team you're on it and stops escalation" : undefined
+            }
+            disabled={!triggered || busy !== null}
+            onPress={() => void acknowledge()}
+            tintColor={triggered ? palette.accent : undefined}
+            variant={triggered ? "prominent" : "plain"}
+          >
+            {triggered ? "Acknowledge" : "Acknowledged"}
+          </Stack.Toolbar.Button>
         </Stack.Toolbar>
       ) : null}
     </>
