@@ -2,7 +2,7 @@ import * as Device from "expo-device";
 import { Stack, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { useHeaderHeight, usePreventRemove } from "expo-router/react-navigation";
 import { useRef, useState } from "react";
-import { ActionSheetIOS, StyleSheet, TextInput, View } from "react-native";
+import { StyleSheet, TextInput, View } from "react-native";
 import { alertFailure, haptic } from "../../src/lib/haptics";
 import {
   cachedInteraction,
@@ -13,6 +13,7 @@ import {
 import { submitInteractionResponse } from "../../src/lib/interactions";
 import { useLayout } from "../../src/lib/layout";
 import { SourceAvatar } from "../../src/ui/avatar";
+import { DismissShield, useActionSheet, useShield } from "../../src/ui/dismiss-shield";
 import { EmptyState } from "../../src/ui/empty-state";
 import { List, useStackedRows } from "../../src/ui/list";
 import { Text } from "../../src/ui/text";
@@ -42,6 +43,8 @@ export default function ReplySheet() {
   );
   const stacked = useStackedRows();
   const navigation = useNavigation();
+  const shield = useShield();
+  const showActionSheet = useActionSheet(shield);
   const { id } = useLocalSearchParams<{ id: string }>();
   const cached = cachedInteraction(String(id));
   // The draft outlives the sheet (per request, like Messages): closing it
@@ -64,7 +67,7 @@ export default function ReplySheet() {
     }
     if (busy.current || asking.current) return;
     asking.current = true;
-    ActionSheetIOS.showActionSheetWithOptions(
+    showActionSheet(
       {
         options: ["Delete Draft", "Save Draft", "Keep Editing"],
         destructiveButtonIndex: 0,
@@ -112,7 +115,7 @@ export default function ReplySheet() {
   };
 
   return (
-    <>
+    <DismissShield shield={shield}>
       <Stack.Screen options={{ title: "Reply" }} />
       <Stack.Toolbar placement="left">
         <Stack.Toolbar.Button
@@ -193,7 +196,7 @@ export default function ReplySheet() {
           />
         )}
       </List>
-    </>
+    </DismissShield>
   );
 }
 

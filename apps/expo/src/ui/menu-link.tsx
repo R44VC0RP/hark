@@ -3,6 +3,7 @@ import type { SFSymbol } from "expo-symbols";
 import { cloneElement, type ReactElement } from "react";
 import type { AccessibilityActionEvent, AccessibilityActionInfo } from "react-native";
 import { useScreenReader } from "./a11y";
+import { useDismissShield } from "./dismiss-shield";
 
 export interface MenuLinkAction {
   /** The accessibility action's name; unique within the menu. */
@@ -18,6 +19,7 @@ export interface MenuLinkAction {
 interface TriggerProps {
   accessibilityActions?: readonly AccessibilityActionInfo[];
   onAccessibilityAction?: (event: AccessibilityActionEvent) => void;
+  onLongPress?: () => void;
 }
 
 export interface MenuLinkProps {
@@ -46,6 +48,7 @@ export interface MenuLinkProps {
  */
 export function MenuLink({ href, push, preview, actions, children }: MenuLinkProps) {
   const screenReader = useScreenReader();
+  const shield = useDismissShield();
   const trigger = cloneElement(children, {
     accessibilityActions: actions.map(({ name, label }) => ({ name, label })),
     onAccessibilityAction: (event: AccessibilityActionEvent) => {
@@ -59,9 +62,11 @@ export function MenuLink({ href, push, preview, actions, children }: MenuLinkPro
       </Link>
     );
   }
+  // The hold that opens the menu raises the screen's `DismissShield`, so the
+  // tap that closes it never also opens the row under it (I-07).
   return (
     <Link asChild href={href} push={push}>
-      <Link.Trigger>{trigger}</Link.Trigger>
+      <Link.Trigger>{cloneElement(trigger, { onLongPress: shield.raise })}</Link.Trigger>
       {preview ? <Link.Preview /> : null}
       <Link.Menu>
         {actions.map((action) => (
@@ -69,7 +74,10 @@ export function MenuLink({ href, push, preview, actions, children }: MenuLinkPro
             destructive={action.destructive}
             icon={action.icon}
             key={action.name}
-            onPress={action.onPress}
+            onPress={() => {
+              shield.lower();
+              action.onPress();
+            }}
           >
             {action.label}
           </Link.MenuAction>

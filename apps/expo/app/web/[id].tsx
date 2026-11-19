@@ -7,7 +7,6 @@ import { Alert, Linking, Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 import type { ShouldStartLoadRequest } from "react-native-webview/lib/WebViewTypes";
-import { useActionSheet } from "../../src/components/apps/action-sheet";
 import { ConsentView } from "../../src/components/web/consent-view";
 import { HoldHint } from "../../src/components/web/hold-hint";
 import { LaunchErrorView, SigningInView } from "../../src/components/web/launch-state";
@@ -30,6 +29,7 @@ import {
   resolveLaunchUrl,
 } from "../../src/lib/web-apps";
 import { clearWebsiteDataForOrigin } from "../../src/lib/website-data";
+import { DismissShield, useActionSheet, useShield } from "../../src/ui/dismiss-shield";
 import { palette } from "../../src/ui/tokens";
 
 type Phase = "loading" | "consent" | "ready" | "error";
@@ -270,10 +270,11 @@ export default function WebAppScreen() {
   // the status strip). On iPad the same actions live in the bar; a hold there
   // shows this sheet as a centred popover, with the shield over the page so
   // the tap that closes it never reaches the page.
-  const actionSheet = useActionSheet();
+  const shield = useShield();
+  const showActionSheet = useActionSheet(shield);
   const showMenu = () => {
     if (!app) return;
-    actionSheet.show(
+    showActionSheet(
       {
         title: app.name,
         message: `Signed in with Hark on ${new URL(app.origin).host}`,
@@ -499,13 +500,12 @@ export default function WebAppScreen() {
             <SigningInView app={app} />
           </View>
         )}
-        {actionSheet.shield}
       </View>
     );
   }
 
   return (
-    <>
+    <DismissShield shield={shield}>
       <Stack.Screen options={headerOptions} />
       {chrome === "bar" ? (
         <WebBarItems
@@ -523,7 +523,7 @@ export default function WebAppScreen() {
         />
       ) : null}
       {content}
-    </>
+    </DismissShield>
   );
 }
 

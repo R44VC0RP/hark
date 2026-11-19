@@ -14,7 +14,7 @@ import { Alert, Share, StyleSheet, View } from "react-native";
 import { FactLine } from "../../../../src/components/teams/fact-line";
 import { InviteRow } from "../../../../src/components/teams/invite-row";
 import { type MemberAction, MemberRow } from "../../../../src/components/teams/member-row";
-import { MenuShield, RowMenu } from "../../../../src/components/teams/row-menu";
+import { RowMenu } from "../../../../src/components/teams/row-menu";
 import { SeatLimitNotice } from "../../../../src/components/teams/seat-limit-notice";
 import { ApiError, api } from "../../../../src/lib/api";
 import { refreshDirectory } from "../../../../src/lib/app-directory";
@@ -40,6 +40,7 @@ import {
 } from "../../../../src/lib/teams";
 import { spoken } from "../../../../src/ui/a11y";
 import { Avatar } from "../../../../src/ui/avatar";
+import { DismissShield } from "../../../../src/ui/dismiss-shield";
 import {
   EmptyState,
   ErrorState,
@@ -388,7 +389,7 @@ export default function TeamScreen() {
           <Stack.Toolbar.Button accessibilityLabel="Rename Team" icon="pencil" onPress={rename} />
         </Stack.Toolbar>
       ) : null}
-      <MenuShield>
+      <DismissShield>
         <List
           onRefresh={team || failure ? () => void onRefresh() : undefined}
           refreshing={refreshing}
@@ -546,7 +547,7 @@ export default function TeamScreen() {
             </>
           )}
         </List>
-      </MenuShield>
+      </DismissShield>
     </>
   );
 }

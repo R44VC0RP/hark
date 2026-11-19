@@ -17,6 +17,7 @@ import {
 import { groupAppsByTeam, memberCountLabel } from "../../../../src/lib/teams";
 import { hostOf } from "../../../../src/lib/web-apps";
 import { TabRootToolbar } from "../../../../src/ui/account-button";
+import { DismissShield } from "../../../../src/ui/dismiss-shield";
 import { EmptyState, ErrorState, LoadingState } from "../../../../src/ui/empty-state";
 import { List, Section } from "../../../../src/ui/list";
 import { useReduceMotion } from "../../../../src/ui/motion";
@@ -198,7 +199,7 @@ export default function AppsScreen() {
   const nothingToSearch = directory !== null && apps.length === 0 && !hasTeams;
 
   return (
-    <>
+    <DismissShield>
       {nothingToSearch ? null : (
         <Stack.SearchBar
           autoCapitalize="none"
@@ -217,7 +218,7 @@ export default function AppsScreen() {
       >
         {content}
       </List>
-    </>
+    </DismissShield>
   );
 }
 

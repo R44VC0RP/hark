@@ -22,6 +22,7 @@ import {
   normalizeReadThroughToken,
   projectSummaryUnread,
 } from "../../../../src/lib/project-inbox";
+import { DismissShield } from "../../../../src/ui/dismiss-shield";
 import {
   EmptyState,
   ErrorState,
@@ -246,7 +247,7 @@ export default function ProjectScreen() {
   if (!sessionPending && !session && !simulatorPreview) return <Redirect href="/" />;
 
   return (
-    <>
+    <DismissShield>
       <Stack.Screen options={{ title }} />
       {/*
         Like Mail: one tap on the filter shows unread only (the button reads
@@ -331,7 +332,7 @@ export default function ProjectScreen() {
         style={styles.list}
         windowSize={7}
       />
-    </>
+    </DismissShield>
   );
 }
 

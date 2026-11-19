@@ -16,7 +16,7 @@ import {
   oncallStatus,
 } from "../../../src/components/teams/oncall-status";
 import { PageRow, sortPages } from "../../../src/components/teams/page-row";
-import { MenuShield, RowMenu } from "../../../src/components/teams/row-menu";
+import { RowMenu } from "../../../src/components/teams/row-menu";
 import { api, type OncallMeDto } from "../../../src/lib/api";
 import { refreshDirectory, useDirectory } from "../../../src/lib/app-directory";
 import { useSession } from "../../../src/lib/auth";
@@ -33,6 +33,7 @@ import {
 import { escalationPolicySummary, isUnsupportedRoute, onPageClaimed } from "../../../src/lib/teams";
 import { spoken } from "../../../src/ui/a11y";
 import { Avatar } from "../../../src/ui/avatar";
+import { DismissShield } from "../../../src/ui/dismiss-shield";
 import { EmptyState, ErrorState, isNetworkError, LoadingState } from "../../../src/ui/empty-state";
 import {
   Cell,
@@ -204,7 +205,7 @@ export default function OncallScreen() {
   return (
     <>
       <Stack.Screen options={{ title }} />
-      <MenuShield>
+      <DismissShield>
         <List
           onRefresh={me || failure ? () => void onRefresh() : undefined}
           refreshing={refreshing}
@@ -366,7 +367,7 @@ export default function OncallScreen() {
             </>
           )}
         </List>
-      </MenuShield>
+      </DismissShield>
     </>
   );
 }
