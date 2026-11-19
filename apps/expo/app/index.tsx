@@ -96,7 +96,8 @@ export default function SignInScreen() {
   const [viewportHeight, setViewportHeight] = useState(0);
   // The message runs under the pinned buttons (the largest text sizes on
   // small iPhones): a hairline marks the edge and the indicator flashes once.
-  const scrollable = viewportHeight > 0 && contentHeight > viewportHeight + 1;
+  // The visible area is the scroll view less the status bar inset above it.
+  const scrollable = viewportHeight > 0 && contentHeight > viewportHeight - insets.top + 1;
   useEffect(() => {
     if (scrollable) scrollView.current?.flashScrollIndicators();
   }, [scrollable]);
@@ -157,8 +158,16 @@ export default function SignInScreen() {
       */}
       <ScrollView
         alwaysBounceVertical={false}
-        contentContainerStyle={[styles.content, { paddingTop: insets.top }]}
-        contentInsetAdjustmentBehavior="never"
+        // The status bar is a content inset, not padding inside the content:
+        // padded content sat inside the scroll view's top edge effect at rest,
+        // which blurred the wordmark. With the inset, only content that has
+        // scrolled under the status bar (the largest text sizes) is softened.
+        // "always": "automatic" leaves a scroll view that doesn't bounce and
+        // whose content fits without the inset (checked: the wordmark went
+        // under the status bar). The filler content is the scroll view less
+        // that inset (the bottom margin), or it would scroll by it at rest.
+        contentContainerStyle={[styles.content, { marginBottom: insets.top }]}
+        contentInsetAdjustmentBehavior="always"
         onContentSizeChange={(_, height) => setContentHeight(height)}
         onLayout={(event) => setViewportHeight(event.nativeEvent.layout.height)}
         ref={scrollView}
