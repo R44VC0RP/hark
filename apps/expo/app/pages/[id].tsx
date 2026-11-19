@@ -4,25 +4,26 @@ import { Redirect, Stack, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, StyleSheet, View } from "react-native";
 import { AppIcon } from "../../src/components/app-icon";
-import { closeSheet } from "../../src/components/teams/close-sheet";
-import { LeadingDot, unbroken } from "../../src/components/teams/page-row";
+import { LeadingDot } from "../../src/components/teams/page-row";
 import { PageStatusPill } from "../../src/components/teams/page-status";
 import { ApiError, api } from "../../src/lib/api";
 import { publishDirectory, refreshDirectory, useDirectory } from "../../src/lib/app-directory";
 import { useSession } from "../../src/lib/auth";
 import { formatAgo, formatDateTime, spokenTime } from "../../src/lib/dates";
-import { haptic } from "../../src/lib/haptics";
+import { alertFailure, haptic } from "../../src/lib/haptics";
 import { openTopLevelDestination } from "../../src/lib/inbox-body";
 import { previewPages, previewViewer } from "../../src/lib/inbox-preview";
 import { useLayout } from "../../src/lib/layout";
-import { leaveSheetThenPush } from "../../src/lib/navigation";
+import { backOr, leaveSheetThenPush } from "../../src/lib/navigation";
 import { dismissNotificationsForPage } from "../../src/lib/notification-withdrawals";
 import {
   escalationLabel,
   onPageClaimed,
   pageStatusLabel,
   timelineLabel,
+  unbroken,
 } from "../../src/lib/teams";
+import { hostOf } from "../../src/lib/web-apps";
 import { spoken } from "../../src/ui/a11y";
 import { Button } from "../../src/ui/button";
 import { EmptyState, ErrorState, isNetworkError, LoadingState } from "../../src/ui/empty-state";
@@ -52,26 +53,8 @@ const EDGE_EFFECTS = {
   right: "automatic",
 } as const;
 
-/** "grafana.example.com" for an app row, like every other app row in Hark. */
-function hostOf(url: string): string {
-  try {
-    return new URL(url).host || url;
-  } catch {
-    return url;
-  }
-}
-
 type Busy = "acknowledge" | "escalate" | "resolve" | null;
 type LoadFailure = "missing" | "network" | "other";
-
-function errorText(cause: unknown): string {
-  return cause instanceof Error ? cause.message : "Check your connection, then try again.";
-}
-
-function failed(title: string, cause: unknown): void {
-  haptic.error();
-  Alert.alert(title, errorText(cause));
-}
 
 const TIMELINE_DOT: Record<OncallPageEventDto["kind"], ColorName> = {
   paged: "danger",
@@ -81,7 +64,7 @@ const TIMELINE_DOT: Record<OncallPageEventDto["kind"], ColorName> = {
 
 /**
  * A page (DESIGN.md 5.18), the most urgent thing in Hark: someone is being
- * paged. A form sheet with the status, what happened and who was notified,
+ * paged. A page sheet with the status, what happened and who was notified,
  * and a native bottom toolbar whose prominent item is the next step:
  * Acknowledge while it's open, Resolve once someone is on it. Every change
  * goes straight into the app directory, so the Teams badge and the pages
@@ -228,7 +211,7 @@ export default function PageSheet() {
       apply(next);
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) await alreadyHandled();
-      else failed("Couldn’t Acknowledge", cause);
+      else alertFailure("Couldn’t Acknowledge", cause);
     } finally {
       setBusy(null);
     }
@@ -255,7 +238,7 @@ export default function PageSheet() {
                   apply(next);
                 } catch (cause) {
                   if (cause instanceof ApiError && cause.status === 409) await alreadyHandled();
-                  else failed("Couldn’t Escalate", cause);
+                  else alertFailure("Couldn’t Escalate", cause);
                 } finally {
                   setBusy(null);
                 }
@@ -303,7 +286,7 @@ export default function PageSheet() {
                 apply(next);
               } catch (cause) {
                 if (cause instanceof ApiError && cause.status === 409) await alreadyHandled();
-                else failed("Couldn’t Resolve", cause);
+                else alertFailure("Couldn’t Resolve", cause);
               } finally {
                 setBusy(null);
               }
@@ -328,7 +311,7 @@ export default function PageSheet() {
         <Stack.Toolbar.Button
           accessibilityLabel="Close"
           icon="xmark"
-          onPress={() => closeSheet("/teams")}
+          onPress={() => backOr("/teams")}
         />
       </Stack.Toolbar>
       <List reading>

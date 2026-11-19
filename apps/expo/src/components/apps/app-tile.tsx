@@ -3,6 +3,7 @@ import { router } from "expo-router";
 import { memo, type Ref } from "react";
 import { Linking, Pressable, type PressableProps, StyleSheet, View } from "react-native";
 import { useHover, useLayout } from "../../lib/layout";
+import { hostOf } from "../../lib/web-apps";
 import { Row, useHorizontalSafeArea, useScreenMargin, useStackedRows } from "../../ui/list";
 import { MenuLink, type MenuLinkAction } from "../../ui/menu-link";
 import { Text } from "../../ui/text";
@@ -136,14 +137,6 @@ export function AppGrid({ apps, geometry }: { apps: AppDto[]; geometry: GridGeom
       ))}
     </View>
   );
-}
-
-function hostOf(origin: string): string {
-  try {
-    return new URL(origin).host;
-  } catch {
-    return origin;
-  }
 }
 
 /** An app as a row (accessibility text sizes): icon, name and host, same menu. */

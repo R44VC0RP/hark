@@ -96,7 +96,8 @@ export function publishDirectory(directory: Directory): void {
 
 /**
  * The Inbox refreshes more often than the directory; its counts keep the
- * Inbox tab badge in step with the app icon badge between directory loads.
+ * Inbox tab badge and the app icon badge current between directory loads.
+ * The one place besides directory loads that sets the app icon badge.
  */
 export function publishInboxCounts(counts: { unread: number; waiting: number }): void {
   if (!current) return;
@@ -104,7 +105,9 @@ export function publishInboxCounts(counts: { unread: number; waiting: number }):
   // its unread count waits for the directory load that includes the change.
   const unread = unreadChanges.size > 0 ? current.unread : counts.unread;
   if (current.unread === unread && current.waiting === counts.waiting) return;
-  publishDirectory({ ...current, unread, waiting: counts.waiting });
+  const next = { ...current, unread, waiting: counts.waiting };
+  publishDirectory(next);
+  setAppBadge(next);
 }
 
 /**

@@ -11,7 +11,7 @@ import {
   useDirectory,
   useDirectoryLoadFailed,
 } from "../../../../src/lib/app-directory";
-import { haptic } from "../../../../src/lib/haptics";
+import { alertFailure } from "../../../../src/lib/haptics";
 import { previewTeams } from "../../../../src/lib/inbox-preview";
 import { memberCountLabel, roleLabel } from "../../../../src/lib/teams";
 import { TabRootToolbar } from "../../../../src/ui/account-button";
@@ -88,11 +88,7 @@ export default function TeamsScreen() {
         router.push({ pathname: "/teams/[id]", params: { id: team.id } });
         void refreshDirectory().catch(() => {});
       } catch (cause) {
-        haptic.error();
-        Alert.alert(
-          "Couldn’t Create Team",
-          cause instanceof Error ? cause.message : "Check your connection, then try again.",
-        );
+        alertFailure("Couldn’t Create Team", cause);
       } finally {
         creating.current = false;
       }

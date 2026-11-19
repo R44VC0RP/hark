@@ -13,11 +13,6 @@ import { FactLine } from "./fact-line";
 
 const DOT = 10;
 
-/** Keeps a phrase on one line, so a wrapped subtitle breaks between phrases. */
-export function unbroken(text: string): string {
-  return text.replace(/ /g, "\u00A0");
-}
-
 /**
  * A status dot centered on the first line of the text beside it, at any
  * text size: an invisible one-line `Text` of the same variant sets the

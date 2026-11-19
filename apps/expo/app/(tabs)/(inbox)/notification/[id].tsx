@@ -9,13 +9,13 @@ import {
   useRouter,
 } from "expo-router";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Alert, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { AppIcon } from "../../../../src/components/app-icon";
 import { api, classifyNotificationDetailFailure } from "../../../../src/lib/api";
 import { changeUnreadCount } from "../../../../src/lib/app-directory";
 import { useSession } from "../../../../src/lib/auth";
 import { formatDateTime } from "../../../../src/lib/dates";
-import { haptic } from "../../../../src/lib/haptics";
+import { alertFailure } from "../../../../src/lib/haptics";
 import {
   linkDestinationLabel,
   linkifyBody,
@@ -177,11 +177,7 @@ export default function NotificationDetailScreen() {
         setNotification({ ...notification, readAt: null });
       }
     } catch (error) {
-      haptic.error();
-      Alert.alert(
-        "Couldn’t Update Notification",
-        error instanceof Error ? error.message : "Check your connection, then try again.",
-      );
+      alertFailure("Couldn’t Update Notification", error);
     } finally {
       setTogglingRead(false);
     }

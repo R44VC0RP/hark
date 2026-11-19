@@ -3,13 +3,13 @@ import { Stack } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useEffect, useState } from "react";
 import { AppState, Linking, StyleSheet, View } from "react-native";
-import { closeSheet } from "../src/components/teams/close-sheet";
 import {
   criticalAlertsEnabled,
   readCriticalAlertState,
   requestCriticalAlerts,
 } from "../src/lib/critical-alerts";
 import { deviceNoun } from "../src/lib/layout";
+import { backOr } from "../src/lib/navigation";
 import { List } from "../src/ui/list";
 import { Text } from "../src/ui/text";
 import { colors, metrics, palette, radius, space } from "../src/ui/tokens";
@@ -67,7 +67,7 @@ export default function CriticalAlertsSheet() {
         <Stack.Toolbar.Button
           accessibilityLabel="Close"
           icon="xmark"
-          onPress={() => closeSheet("/oncall")}
+          onPress={() => backOr("/oncall")}
         />
       </Stack.Toolbar>
       <List alwaysBounceVertical={false} reading>
@@ -128,7 +128,7 @@ export default function CriticalAlertsSheet() {
             </Stack.Toolbar.Button>
           ) : (
             <Stack.Toolbar.Button
-              onPress={() => closeSheet("/oncall")}
+              onPress={() => backOr("/oncall")}
               tintColor={palette.accent}
               variant="prominent"
             >

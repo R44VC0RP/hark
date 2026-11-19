@@ -7,7 +7,7 @@ import { trackAppEvent, trackOnboardingCompleted } from "./analytics";
 import { api } from "./api";
 import { authClient } from "./auth";
 import { readCriticalAlertState } from "./critical-alerts";
-import { haptic } from "./haptics";
+import { alertFailure } from "./haptics";
 import {
   clearInteractionResponses,
   DEVICE_ID_KEY,
@@ -143,11 +143,7 @@ async function deleteAccount(): Promise<void> {
     await clearDevice();
     leaveAppTo("/");
   } catch (error) {
-    haptic.error();
-    Alert.alert(
-      "Couldn’t Delete Account",
-      error instanceof Error ? error.message : "Check your connection, then try again.",
-    );
+    alertFailure("Couldn’t Delete Account", error);
   }
 }
 

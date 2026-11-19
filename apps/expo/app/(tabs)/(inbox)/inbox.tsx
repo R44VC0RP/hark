@@ -12,7 +12,7 @@ import {
   useRouter,
 } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AccessibilityInfo, Alert, AppState, Linking } from "react-native";
+import { AccessibilityInfo, AppState, Linking } from "react-native";
 import { ANSWER_LABELS, projectNameFor } from "../../../src/components/inbox/format";
 import { LiveActivityRow } from "../../../src/components/inbox/live-activity-row";
 import { ProjectRow } from "../../../src/components/inbox/project-row";
@@ -20,7 +20,7 @@ import { type RequestAction, RequestRow } from "../../../src/components/inbox/re
 import { ApiError, api } from "../../../src/lib/api";
 import { publishInboxCounts } from "../../../src/lib/app-directory";
 import { useSession } from "../../../src/lib/auth";
-import { haptic } from "../../../src/lib/haptics";
+import { alertFailure, haptic } from "../../../src/lib/haptics";
 import {
   clearAnsweredRequests,
   markInteractionHandled,
@@ -39,7 +39,7 @@ import { animateListChange } from "../../../src/ui/motion";
 const simulatorPreview = __DEV__ && !Device.isDevice;
 /** The Inbox polls while it is mounted (the tabs keep it mounted). */
 const POLL_MS = 15_000;
-/** Relative times ("2m", "13 min left") move on once a minute. */
+/** Relative times ("4 min ago", "13 min left") move on once a minute. */
 const TICK_MS = 60_000;
 /** Where a first-run Inbox points: how to send the first webhook or request. */
 const DOCS_URL = "https://hark.fyi/docs";
@@ -114,10 +114,9 @@ export default function InboxScreen() {
         projects: projectResult?.projects ?? [],
       };
       totalUnread = projectResult?.totalUnread ?? 0;
-      // Badge counts pending requests plus unread notifications; the server
-      // never sends badge values itself.
-      void Notifications.setBadgeCountAsync(next.pending.length + totalUnread).catch(() => {});
     }
+    // Also sets the app icon badge (pending requests plus unread
+    // notifications; the server never sends badge values itself).
     publishInboxCounts({ unread: totalUnread, waiting: next.pending.length });
     setLoadFailure(null);
     // Polling only re-renders when something changed.
@@ -224,11 +223,7 @@ export default function InboxScreen() {
         AccessibilityInfo.announceForAccessibility(ANSWER_LABELS[action]);
         void refresh().catch(() => {});
       } catch (error) {
-        haptic.error();
-        Alert.alert(
-          "Couldn’t Send Response",
-          error instanceof Error ? error.message : "Check your connection, then try again.",
-        );
+        alertFailure("Couldn’t Send Response", error);
       } finally {
         sending.current = null;
         setSendingId(null);

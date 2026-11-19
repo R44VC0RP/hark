@@ -4,13 +4,13 @@ import { Redirect, Stack, useLocalSearchParams, useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { useCallback, useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";
-import { closeSheet } from "../../src/components/teams/close-sheet";
 import { SeatLimitNotice } from "../../src/components/teams/seat-limit-notice";
 import { ApiError, api } from "../../src/lib/api";
 import { refreshDirectory } from "../../src/lib/app-directory";
 import { useSession } from "../../src/lib/auth";
 import { haptic } from "../../src/lib/haptics";
 import { PREVIEW_TEAM_ID, previewInvite } from "../../src/lib/inbox-preview";
+import { backOr } from "../../src/lib/navigation";
 import {
   isSeatLimitError,
   memberCountLabel,
@@ -127,7 +127,7 @@ export default function JoinTeamSheet() {
         <Stack.Toolbar.Button
           accessibilityLabel="Close"
           icon="xmark"
-          onPress={() => closeSheet("/apps")}
+          onPress={() => backOr("/apps")}
         />
       </Stack.Toolbar>
       <List reading>

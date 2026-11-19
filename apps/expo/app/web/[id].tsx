@@ -17,6 +17,7 @@ import { isHttpUrl, openExternalLink } from "../../src/lib/inbox-body";
 import { previewApps } from "../../src/lib/inbox-preview";
 import { onKeyCommand } from "../../src/lib/key-commands";
 import { deviceNoun, useLayout } from "../../src/lib/layout";
+import { backOr } from "../../src/lib/navigation";
 import {
   buildBridgeScript,
   buildResolveScript,
@@ -97,10 +98,7 @@ export default function WebAppScreen() {
   // Other pages keep Hark's status strip and the system's insets.
   const [edgeToEdge, setEdgeToEdge] = useState(() => edgeToEdgeApps.has(id));
 
-  const close = useCallback(() => {
-    if (router.canGoBack()) router.back();
-    else router.replace("/apps");
-  }, [router]);
+  const close = useCallback(() => backOr("/apps"), []);
 
   const issuePass = useCallback(
     async (input: Parameters<typeof api.getAppPass>[1] = {}): Promise<Pass> => {

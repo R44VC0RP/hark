@@ -1,4 +1,5 @@
 import * as Haptics from "expo-haptics";
+import { Alert } from "react-native";
 
 /**
  * The app's three haptics (DESIGN.md 3.9). `success` after a request answer,
@@ -16,3 +17,16 @@ export const haptic = {
   warning: () => notify(Haptics.NotificationFeedbackType.Warning),
   error: () => notify(Haptics.NotificationFeedbackType.Error),
 };
+
+/** What went wrong: the server's message, else the network fallback. */
+export function failureText(cause: unknown): string {
+  return cause instanceof Error && cause.message
+    ? cause.message
+    : "Check your connection, then try again.";
+}
+
+/** A failed action: the error haptic and an alert saying what went wrong (3.9). */
+export function alertFailure(title: string, cause: unknown): void {
+  haptic.error();
+  Alert.alert(title, failureText(cause));
+}

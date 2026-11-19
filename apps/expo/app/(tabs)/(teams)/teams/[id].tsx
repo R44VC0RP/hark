@@ -14,14 +14,13 @@ import { Alert, Share, StyleSheet, View } from "react-native";
 import { FactLine } from "../../../../src/components/teams/fact-line";
 import { InviteRow } from "../../../../src/components/teams/invite-row";
 import { type MemberAction, MemberRow } from "../../../../src/components/teams/member-row";
-import { unbroken } from "../../../../src/components/teams/page-row";
 import { MenuShield, RowMenu } from "../../../../src/components/teams/row-menu";
 import { SeatLimitNotice } from "../../../../src/components/teams/seat-limit-notice";
 import { ApiError, api } from "../../../../src/lib/api";
 import { refreshDirectory } from "../../../../src/lib/app-directory";
 import { useSession } from "../../../../src/lib/auth";
 import { formatUpcoming } from "../../../../src/lib/dates";
-import { haptic } from "../../../../src/lib/haptics";
+import { alertFailure, haptic } from "../../../../src/lib/haptics";
 import {
   previewOncallGroups,
   previewPages,
@@ -30,12 +29,14 @@ import {
   previewTeams,
   previewViewer,
 } from "../../../../src/lib/inbox-preview";
+import { backOr } from "../../../../src/lib/navigation";
 import {
   canManageTeam,
   isSeatLimitError,
   roleLabel,
   seatsFull,
   seatsLabel,
+  unbroken,
 } from "../../../../src/lib/teams";
 import { spoken } from "../../../../src/ui/a11y";
 import { Avatar } from "../../../../src/ui/avatar";
@@ -55,15 +56,6 @@ const AVATAR = 60;
 const CAPSULE = 22;
 
 type LoadFailure = "network" | "other" | "missing";
-
-function errorText(cause: unknown): string {
-  return cause instanceof Error ? cause.message : "Check your connection, then try again.";
-}
-
-function failed(title: string, cause: unknown): void {
-  haptic.error();
-  Alert.alert(title, errorText(cause));
-}
 
 /**
  * "Alex Kim until Thu at 5:00 AM" or "Nobody on call". At accessibility sizes
@@ -211,7 +203,7 @@ export default function TeamScreen() {
         if (isSeatLimitError(cause)) {
           haptic.error();
           setSeatLimitHit(true);
-        } else failed("Couldn’t Create Invite", cause);
+        } else alertFailure("Couldn’t Create Invite", cause);
       } finally {
         setInviting(false);
       }
@@ -230,7 +222,7 @@ export default function TeamScreen() {
           setInvites((current) => current.filter((entry) => entry.id !== item.id));
           if (simulatorPreview) return;
           void api.revokeTeamInvite(team.id, item.id).catch((cause: unknown) => {
-            failed("Couldn’t Revoke Invite", cause);
+            alertFailure("Couldn’t Revoke Invite", cause);
             void load();
           });
         },
@@ -245,7 +237,7 @@ export default function TeamScreen() {
     );
     if (simulatorPreview) return;
     void api.updateTeamMember(team.id, member.userId, role).catch((cause: unknown) => {
-      failed("Couldn’t Change Role", cause);
+      alertFailure("Couldn’t Change Role", cause);
       void load();
     });
   };
@@ -271,7 +263,7 @@ export default function TeamScreen() {
                 void refreshDirectory().catch(() => {});
               })
               .catch((cause: unknown) => {
-                failed("Couldn’t Remove Member", cause);
+                alertFailure("Couldn’t Remove Member", cause);
                 void load();
               });
           },
@@ -327,7 +319,7 @@ export default function TeamScreen() {
                 void refreshDirectory().catch(() => {});
               })
               .catch((cause: unknown) => {
-                failed("Couldn’t Rename Team", cause);
+                alertFailure("Couldn’t Rename Team", cause);
                 setTeam(team);
               });
           },
@@ -341,8 +333,7 @@ export default function TeamScreen() {
   /** After leaving or deleting: back to Teams, which reloads its list. */
   const leaveScreen = () => {
     void refreshDirectory().catch(() => {});
-    if (router.canGoBack()) router.back();
-    else router.replace("/teams");
+    backOr("/teams");
   };
 
   const leave = () => {
@@ -360,7 +351,7 @@ export default function TeamScreen() {
             void api
               .leaveTeam(team.id)
               .then(leaveScreen)
-              .catch((cause: unknown) => failed("Couldn’t Leave Team", cause));
+              .catch((cause: unknown) => alertFailure("Couldn’t Leave Team", cause));
           },
         },
       ],
@@ -382,7 +373,7 @@ export default function TeamScreen() {
             void api
               .deleteTeam(team.id)
               .then(leaveScreen)
-              .catch((cause: unknown) => failed("Couldn’t Delete Team", cause));
+              .catch((cause: unknown) => alertFailure("Couldn’t Delete Team", cause));
           },
         },
       ],

@@ -9,7 +9,7 @@ import * as Device from "expo-device";
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import {
   criticalAlertValue,
   OncallStatusRow,
@@ -22,7 +22,7 @@ import { refreshDirectory, useDirectory } from "../../../src/lib/app-directory";
 import { useSession } from "../../../src/lib/auth";
 import { criticalAlertsEnabled, reportCriticalAlertState } from "../../../src/lib/critical-alerts";
 import { formatHandoffClock, formatUpcoming } from "../../../src/lib/dates";
-import { haptic } from "../../../src/lib/haptics";
+import { alertFailure } from "../../../src/lib/haptics";
 import {
   previewOncallGroups,
   previewOncallMe,
@@ -184,11 +184,7 @@ export default function OncallScreen() {
       setSettings(result.settings);
     } catch (cause) {
       setSettings(previous);
-      haptic.error();
-      Alert.alert(
-        "Couldn’t Save",
-        cause instanceof Error ? cause.message : "Check your connection, then try again.",
-      );
+      alertFailure("Couldn’t Save", cause);
     }
   };
 

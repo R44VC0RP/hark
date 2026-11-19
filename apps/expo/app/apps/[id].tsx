@@ -9,10 +9,10 @@ import { ApiError, api } from "../../src/lib/api";
 import { refreshDirectory, useDirectory } from "../../src/lib/app-directory";
 import { useSession } from "../../src/lib/auth";
 import { formatDateTime } from "../../src/lib/dates";
-import { haptic } from "../../src/lib/haptics";
+import { alertFailure, haptic } from "../../src/lib/haptics";
 import { previewApps, previewViewer } from "../../src/lib/inbox-preview";
 import { leaveSheetThenPush } from "../../src/lib/navigation";
-import { cacheApps, cachedApp } from "../../src/lib/web-apps";
+import { cacheApps, cachedApp, hostOf } from "../../src/lib/web-apps";
 import { spoken } from "../../src/ui/a11y";
 import { Button } from "../../src/ui/button";
 import { EmptyState, ErrorState, isNetworkError, LoadingState } from "../../src/ui/empty-state";
@@ -24,20 +24,6 @@ const simulatorPreview = __DEV__ && !Device.isDevice;
 const ICON_SIZE = 60;
 
 type LoadFailure = "network" | "other" | "missing";
-
-function hostOf(origin: string): string {
-  try {
-    return new URL(origin).host;
-  } catch {
-    return origin;
-  }
-}
-
-function failureMessage(cause: unknown): string {
-  return cause instanceof Error && cause.message
-    ? cause.message
-    : "Check your connection, then try again.";
-}
 
 /**
  * App Info (DESIGN.md 5.9): a form sheet from an app's long-press menu, the
@@ -119,8 +105,7 @@ export default function AppInfoSheet() {
       setApp(result.app);
     } catch (cause) {
       setApp(previous);
-      haptic.error();
-      Alert.alert("Couldn’t Save", failureMessage(cause));
+      alertFailure("Couldn’t Save", cause);
     } finally {
       setSaving(false);
     }
@@ -148,8 +133,7 @@ export default function AppInfoSheet() {
                 changed(result.app);
               })
               .catch((cause: unknown) => {
-                haptic.error();
-                Alert.alert("Couldn’t Stop Signing In", failureMessage(cause));
+                alertFailure("Couldn’t Stop Signing In", cause);
               });
           },
         },
@@ -176,8 +160,7 @@ export default function AppInfoSheet() {
           changed(result.app);
         })
         .catch((cause: unknown) => {
-          haptic.error();
-          Alert.alert(team ? "Couldn’t Share App" : "Couldn’t Move App", failureMessage(cause));
+          alertFailure(team ? "Couldn’t Share App" : "Couldn’t Move App", cause);
         })
         .finally(() => setMoving(false));
     };
@@ -245,8 +228,7 @@ export default function AppInfoSheet() {
                 router.dismissTo("/apps");
               })
               .catch((cause: unknown) => {
-                haptic.error();
-                Alert.alert("Couldn’t Remove App", failureMessage(cause));
+                alertFailure("Couldn’t Remove App", cause);
               });
           },
         },

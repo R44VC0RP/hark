@@ -15,6 +15,7 @@ import {
   useDirectoryLoadFailed,
 } from "../../../../src/lib/app-directory";
 import { groupAppsByTeam, memberCountLabel } from "../../../../src/lib/teams";
+import { hostOf } from "../../../../src/lib/web-apps";
 import { TabRootToolbar } from "../../../../src/ui/account-button";
 import { EmptyState, ErrorState, LoadingState } from "../../../../src/ui/empty-state";
 import { List, Section } from "../../../../src/ui/list";
@@ -25,14 +26,6 @@ import { colors, metrics, radius, space } from "../../../../src/ui/tokens";
 /** How long after the tab first appears its search bar starts hiding on scroll. */
 const SEARCH_SETTLE_MS = 500;
 const ADD_APP_COMMAND = 'harkctl apps create --name "My app" --url https://…';
-
-function hostOf(origin: string): string {
-  try {
-    return new URL(origin).host;
-  } catch {
-    return origin;
-  }
-}
 
 /** Case-insensitive match on the app's name or host. */
 function matches(app: AppDto, query: string): boolean {

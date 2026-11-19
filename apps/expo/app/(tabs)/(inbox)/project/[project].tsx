@@ -2,7 +2,7 @@ import type { InboxNotificationSummaryDto } from "@hark/contracts";
 import * as Device from "expo-device";
 import { Redirect, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useRef, useState } from "react";
-import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, View } from "react-native";
+import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, View } from "react-native";
 import {
   NOTIFICATION_DOT_COLUMN,
   NOTIFICATION_DOT_GAP,
@@ -11,7 +11,7 @@ import {
 import { api } from "../../../../src/lib/api";
 import { changeUnreadCount } from "../../../../src/lib/app-directory";
 import { useSession } from "../../../../src/lib/auth";
-import { haptic } from "../../../../src/lib/haptics";
+import { alertFailure } from "../../../../src/lib/haptics";
 import { openTopLevelDestination } from "../../../../src/lib/inbox-body";
 import { previewNotifications, previewProjects } from "../../../../src/lib/inbox-preview";
 import { openWebApp } from "../../../../src/lib/navigation";
@@ -168,11 +168,7 @@ export default function ProjectScreen() {
       // this refresh if a newer one starts first.
       if (!simulatorPreview) void loadFirstPage(unreadOnly);
     } catch (error) {
-      haptic.error();
-      Alert.alert(
-        "Couldn’t Mark All as Read",
-        error instanceof Error ? error.message : "Check your connection, then try again.",
-      );
+      alertFailure("Couldn’t Mark All as Read", error);
     } finally {
       setMarkingAll(false);
     }
@@ -199,11 +195,7 @@ export default function ProjectScreen() {
         count === null ? null : Math.max(0, count + (markRead ? -1 : 1)),
       );
     } catch (error) {
-      haptic.error();
-      Alert.alert(
-        "Couldn’t Update Notification",
-        error instanceof Error ? error.message : "Check your connection, then try again.",
-      );
+      alertFailure("Couldn’t Update Notification", error);
     }
   }, []);
   const onToggleRead = useCallback(

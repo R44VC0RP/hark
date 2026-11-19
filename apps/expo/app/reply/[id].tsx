@@ -2,8 +2,8 @@ import * as Device from "expo-device";
 import { Stack, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { useHeaderHeight, usePreventRemove } from "expo-router/react-navigation";
 import { useRef, useState } from "react";
-import { ActionSheetIOS, Alert, StyleSheet, TextInput, View } from "react-native";
-import { haptic } from "../../src/lib/haptics";
+import { ActionSheetIOS, StyleSheet, TextInput, View } from "react-native";
+import { alertFailure, haptic } from "../../src/lib/haptics";
 import {
   cachedInteraction,
   markInteractionHandled,
@@ -105,11 +105,7 @@ export default function ReplySheet() {
       sent.current = true;
       router.back();
     } catch (error) {
-      haptic.error();
-      Alert.alert(
-        "Couldn’t Send Reply",
-        error instanceof Error ? error.message : "Check your connection, then try again.",
-      );
+      alertFailure("Couldn’t Send Reply", error);
       busy.current = false;
       setSending(false);
     }

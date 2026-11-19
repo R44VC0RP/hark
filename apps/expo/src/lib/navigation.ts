@@ -25,6 +25,16 @@ export function openWebApp(id: string, url?: string): void {
 }
 
 /**
+ * Goes back (closes a sheet or web app, pops a screen). When there is
+ * nothing to go back to, e.g. after a reload restored the URL, `fallback`
+ * replaces it instead, so Close never does nothing.
+ */
+export function backOr(fallback: Href): void {
+  if (router.canGoBack()) router.back();
+  else router.replace(fallback);
+}
+
+/**
  * Closes the sheet this is called from, then opens `href` from the screen
  * underneath (a sheet that opens a web app or another route).
  */
@@ -52,7 +62,7 @@ interface NavigatorState {
   preloadedRoutes?: unknown[];
 }
 
-/** Root routes presented as form sheets (`app/_layout.tsx`). */
+/** Root routes presented as sheets (`app/_layout.tsx`). */
 export const SHEET_ROUTES: ReadonlySet<string> = new Set([
   "apps/[id]",
   "pages/[id]",

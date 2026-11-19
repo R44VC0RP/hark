@@ -135,6 +135,11 @@ export function escalationLabel(
   return `${step} · next ${formatTimeUntil(page.nextEscalationAt, now)}`;
 }
 
+/** Keeps a phrase on one line ("Priya Shah"), so wrapped text breaks between phrases. */
+export function unbroken(text: string): string {
+  return text.replace(/ /g, "\u00A0");
+}
+
 /**
  * One timeline line in plain words: "Paged Ana", "Escalated to Ben",
  * "Cal escalated to Ben", "Paged Ana again" (the policy started over),
@@ -142,7 +147,7 @@ export function escalationLabel(
  */
 export function timelineLabel(event: OncallPageEventDto): string {
   // A name never breaks across lines (no-break spaces); a list wraps between names.
-  const names = event.people.map((person) => person.name.replace(/ /g, "\u00A0")).join(", ");
+  const names = event.people.map((person) => unbroken(person.name)).join(", ");
   if (event.kind === "acknowledged") return `Acknowledged by ${names}`;
   if (event.kind === "resolved") return `Resolved by ${names}`;
   const who = names || "nobody";
