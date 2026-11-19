@@ -195,11 +195,14 @@ export const stackScreenOptions = {
 
 /**
  * Root-level form sheets (3.12, 5.0). Header visibility is fixed here; never
- * toggle it at runtime (that remounts the sheet). Never set `sheetCornerRadius`.
+ * toggle it from a screen: react-native-screens remounts the sheet and keeps
+ * the header (checked in the simulator). Screens set `title` in-page; the
+ * default is none. Never set `sheetCornerRadius`.
  */
 export const sheetOptions = {
   presentation: "formSheet",
   headerShown: true,
+  title: "",
   headerTransparent: true,
   headerBackButtonDisplayMode: "minimal",
   headerTintColor: palette.label,

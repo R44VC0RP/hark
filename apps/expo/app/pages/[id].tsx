@@ -1,6 +1,6 @@
 import type { OncallPageDto } from "@hark/contracts";
 import * as Device from "expo-device";
-import { Redirect, Stack, useLocalSearchParams, useRouter } from "expo-router";
+import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { SymbolView } from "expo-symbols";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -201,7 +201,6 @@ export default function PageDetailScreen() {
 
   return (
     <SafeAreaView edges={["top", "bottom"]} style={ui.container}>
-      <Stack.Screen options={{ headerShown: false }} />
       <StatusBar style="dark" />
       <ScreenHeader />
       {!page ? (

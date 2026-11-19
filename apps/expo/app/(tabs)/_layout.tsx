@@ -14,7 +14,12 @@ import { colors, palette } from "../../src/ui/tokens";
 
 const simulatorPreview = __DEV__ && !Device.isDevice;
 
-function countLabel(count: number): string {
+/**
+ * Badge text, or nothing at zero: expo-router 57 shows any badge that has
+ * children, even with `hidden` (checked in the simulator: "0" appeared).
+ */
+function countLabel(count: number): string | undefined {
+  if (count <= 0) return undefined;
   return count > 99 ? "99+" : String(count);
 }
 

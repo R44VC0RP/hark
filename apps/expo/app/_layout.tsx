@@ -5,10 +5,17 @@ import {
   useFonts,
 } from "@expo-google-fonts/inter-tight";
 import * as Notifications from "expo-notifications";
-import { router, Stack, ThemeProvider, usePathname, useSegments } from "expo-router";
+import {
+  router,
+  Stack,
+  ThemeProvider,
+  usePathname,
+  useRootNavigationState,
+  useSegments,
+} from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import * as SplashScreen from "expo-splash-screen";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { AppState } from "react-native";
 import { trackAppEvent } from "../src/lib/analytics";
 import { useSession } from "../src/lib/auth";
@@ -53,18 +60,14 @@ export default function RootLayout() {
     InterTight_600SemiBold,
   });
 
+  const navigatorReady = fontsLoaded || Boolean(fontError);
   useEffect(() => {
-    if (fontsLoaded || fontError) void SplashScreen.hideAsync();
-  }, [fontsLoaded, fontError]);
+    if (navigatorReady) void SplashScreen.hideAsync();
+  }, [navigatorReady]);
 
   useEffect(() => {
     void trackAppEvent("app_open");
-    // Handle both a cold launch from a notification and taps while the app is running.
-    const initialResponse = Notifications.getLastNotificationResponse();
-    if (initialResponse) {
-      void handleNotificationResponse(initialResponse);
-      void Notifications.clearLastNotificationResponseAsync();
-    }
+    // Taps while the app is running.
     void flushInteractionResponses();
     void flushPageAcknowledgements();
 
@@ -120,10 +123,11 @@ export default function RootLayout() {
     });
   }, [signedIn]);
 
-  if (!fontsLoaded && !fontError) return null;
+  if (!navigatorReady) return null;
 
   return (
     <ThemeProvider value={navigationTheme}>
+      <LaunchNotificationResponse />
       <Stack
         screenOptions={{
           headerShown: false,
@@ -142,6 +146,15 @@ export default function RootLayout() {
         <Stack.Screen name="join/[code]" options={sheetOptions} />
         <Stack.Screen name="critical-alerts" options={sheetOptions} />
         <Stack.Screen
+          name="reply/[id]"
+          options={{
+            ...sheetOptions,
+            sheetAllowedDetents: [0.5, 1],
+            sheetGrabberVisible: true,
+            contentStyle: { backgroundColor: "transparent" },
+          }}
+        />
+        <Stack.Screen
           name="settings"
           options={{ presentation: "formSheet", sheetAllowedDetents: [1], headerShown: false }}
         />
@@ -149,4 +162,47 @@ export default function RootLayout() {
       </Stack>
     </ThemeProvider>
   );
+}
+
+/** The parts of a navigator state this file reads. */
+type StackState = { index?: number; routes?: { name: string; state?: unknown }[] } | undefined;
+
+/**
+ * True once whatever is on top of the root stack can take a push: the tabs
+ * mount their navigators only after their gate passes, and a push into the
+ * Inbox stack before that would add a second copy of the tabs.
+ */
+function rootReady(stack: StackState): boolean {
+  const top = stack?.routes?.[stack.index ?? 0];
+  if (!top) return false;
+  return top.name !== "(tabs)" || Boolean(top.state);
+}
+
+/**
+ * A cold launch from a notification tap, delivered once there is somewhere
+ * to deliver it (each step checked in the simulator): after the Stack has
+ * mounted (earlier navigation re-mounts the root layout in a loop), after
+ * Sign In's redirects to Set Up and the Inbox (their queued `replace` would
+ * replace the pushed screen), and after the tabs' navigators exist. Signed
+ * out it goes at once; those screens handle it. Taps while running use the
+ * listener in the root layout.
+ */
+function LaunchNotificationResponse() {
+  const { data: session, isPending } = useSession();
+  const pathname = usePathname();
+  const stack = useRootNavigationState()?.routes?.[0]?.state as StackState;
+  const pending = useRef<Notifications.NotificationResponse | null | undefined>(undefined);
+  if (pending.current === undefined) {
+    pending.current = Notifications.getLastNotificationResponse() ?? null;
+    if (pending.current) void Notifications.clearLastNotificationResponseAsync();
+  }
+  const signedOut = !isPending && !session;
+  const ready = signedOut || (pathname !== "/" && pathname !== "/home" && rootReady(stack));
+  useEffect(() => {
+    const response = pending.current;
+    if (!ready || !response) return;
+    pending.current = null;
+    void handleNotificationResponse(response);
+  }, [ready]);
+  return null;
 }

@@ -67,6 +67,16 @@ export function publishDirectory(directory: Directory): void {
   if (changed) notify();
 }
 
+/**
+ * The Inbox refreshes more often than the directory; its counts keep the
+ * Inbox tab badge in step with the app icon badge between directory loads.
+ */
+export function publishInboxCounts(counts: { unread: number; waiting: number }): void {
+  if (!current) return;
+  if (current.unread === counts.unread && current.waiting === counts.waiting) return;
+  publishDirectory({ ...current, ...counts });
+}
+
 export function useDirectory(): Directory | null {
   return useSyncExternalStore(subscribe, () => current);
 }

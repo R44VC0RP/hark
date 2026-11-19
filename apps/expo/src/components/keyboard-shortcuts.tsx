@@ -1,5 +1,5 @@
 import type { AppDto } from "@hark/contracts";
-import { router, usePathname } from "expo-router";
+import { router, usePathname, useRootNavigationState } from "expo-router";
 import { useEffect, useRef } from "react";
 import { type Directory, useDirectory } from "../lib/app-directory";
 import { type KeyCommand, onKeyCommand, setKeyCommands } from "../lib/key-commands";
@@ -13,9 +13,14 @@ export function orderedApps(directory: Directory | null): AppDto[] {
   return [...grouped.personal, ...grouped.teams.flatMap((team) => team.apps)];
 }
 
-/** Selects a tab; React Navigation closes any web app or sheet on top of the tabs. */
-function showTab(href: "/inbox" | "/apps"): void {
-  router.navigate(href);
+/**
+ * Selects a tab. With a web app or sheet above the tabs, `navigate` would
+ * push a second copy of the tabs (checked in the simulator), so it pops back
+ * to the existing one instead.
+ */
+function showTab(href: "/inbox" | "/apps", tabsOnTop: boolean): void {
+  if (tabsOnTop) router.navigate(href);
+  else router.dismissTo(href);
 }
 
 /**
@@ -27,6 +32,9 @@ function showTab(href: "/inbox" | "/apps"): void {
 export function KeyboardShortcuts() {
   const pathname = usePathname();
   const directory = useDirectory();
+  // expo-router nests the root layout's Stack under its own `__root` route.
+  const stackState = useRootNavigationState()?.routes?.[0]?.state;
+  const tabsOnTop = stackState?.routes?.[stackState.index ?? 0]?.name === "(tabs)";
   const apps = orderedApps(directory).slice(0, 9);
   const inWebApp = pathname.startsWith("/web/");
   const appKey = apps.map((app) => `${app.id}:${app.name}`).join("|");
@@ -55,15 +63,18 @@ export function KeyboardShortcuts() {
     setKeyCommands(commands);
   }, [appKey, inWebApp]);
 
-  // Settings opens over whatever is showing; navigate keeps a second ⌘, from stacking it.
+  // Read at key-press time; the subscriptions below only change with the apps.
   const pathRef = useRef(pathname);
   pathRef.current = pathname;
+  const tabsOnTopRef = useRef(tabsOnTop);
+  tabsOnTopRef.current = tabsOnTop;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: appKey stands in for apps.
   useEffect(() => {
     const subscriptions = [
-      onKeyCommand("apps", () => showTab("/apps")),
-      onKeyCommand("inbox", () => showTab("/inbox")),
+      onKeyCommand("apps", () => showTab("/apps", tabsOnTopRef.current)),
+      onKeyCommand("inbox", () => showTab("/inbox", tabsOnTopRef.current)),
+      // Settings opens over whatever is showing, once.
       onKeyCommand("settings", () => {
         if (!pathRef.current.startsWith("/settings")) router.push("/settings");
       }),

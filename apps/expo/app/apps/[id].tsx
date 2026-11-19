@@ -1,6 +1,6 @@
 import type { AppDto, TeamDto } from "@hark/contracts";
 import * as Device from "expo-device";
-import { Stack, useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { SymbolView } from "expo-symbols";
 import { useEffect, useState } from "react";
@@ -229,7 +229,6 @@ export default function AppDetailScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
-      <Stack.Screen options={{ headerShown: false }} />
       <StatusBar style="dark" />
       <View style={styles.header}>
         <Pressable
