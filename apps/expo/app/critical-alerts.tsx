@@ -80,24 +80,26 @@ export default function CriticalAlertsSheet() {
               tintColor={colors.danger}
             />
           </View>
-          <Text accessibilityRole="header" align="center" variant="title2">
-            Never Sleep Through a Page
+          {/*
+            The same hero as Join (V-18): title1, one centred paragraph in
+            secondary ink; the fine print below it reads left-aligned, like
+            Join's footnote, instead of a second centred block.
+          */}
+          <Text accessibilityRole="header" align="center" variant="title1">
+            {"Never Sleep Through a\u00A0Page"}
           </Text>
-          <Text align="center" variant="body">
+          <Text align="center" color="secondaryLabel" variant="body">
             {`Critical Alerts let on-call pages ring at full volume even when your ${deviceNoun} is on silent or in a Focus like Sleep or Do Not Disturb.`}
           </Text>
-          <Text align="center" variant="body">
+        </View>
+        <View style={styles.notes}>
+          <Text color="secondaryLabel" variant="footnote">
             Hark only uses them for on-call pages sent to you. Every other notification keeps your
             normal sound settings. You can turn them off any time in Settings › Notifications ›
             Hark.
           </Text>
           {line ? (
-            <Text
-              accessibilityLiveRegion="polite"
-              align="center"
-              color="secondaryLabel"
-              variant="footnote"
-            >
+            <Text accessibilityLiveRegion="polite" color="secondaryLabel" variant="footnote">
               {line}
             </Text>
           ) : null}
@@ -143,7 +145,12 @@ export default function CriticalAlertsSheet() {
 const styles = StyleSheet.create({
   hero: {
     alignItems: "center",
-    gap: space.m,
+    gap: space.s,
+    marginTop: space.l,
+    paddingHorizontal: metrics.rowPaddingHorizontal,
+  },
+  notes: {
+    gap: space.xs,
     marginTop: space.l,
     paddingHorizontal: metrics.rowPaddingHorizontal,
   },
