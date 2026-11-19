@@ -1,438 +1,189 @@
-import {
-  getAppIconName,
-  setAlternateAppIcon,
-  supportsAlternateIcons,
-} from "expo-alternate-app-icons";
+import { getAppIconName } from "expo-alternate-app-icons";
+import Constants from "expo-constants";
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
-import { Redirect, Stack, useRouter } from "expo-router";
+import { Stack, useFocusEffect, useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
-import { StatusBar } from "expo-status-bar";
 import { SymbolView } from "expo-symbols";
-import { useEffect, useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  Linking,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { HeaderLeading } from "../../src/components/screen-parts";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AppState, Linking, StyleSheet, View } from "react-native";
+import { confirmDeleteAccount, confirmSignOut } from "../../src/lib/account";
 import { api } from "../../src/lib/api";
-import { type AppIconOption, appIconLabel, appIconOptions } from "../../src/lib/app-icons";
-import { authClient, useSession } from "../../src/lib/auth";
-import { previewTeams } from "../../src/lib/inbox-preview";
-import { clearInteractionResponses, DEVICE_ID_KEY } from "../../src/lib/interactions";
-import { deviceNoun, isPad, readableColumn } from "../../src/lib/layout";
-import { isUnsupportedRoute } from "../../src/lib/teams";
-import { colors, fonts, tightTracking } from "../../src/lib/theme";
-import { clearAllWebsiteData } from "../../src/lib/website-data";
+import { appIconLabel } from "../../src/lib/app-icons";
+import { useSession } from "../../src/lib/auth";
+import { previewViewer } from "../../src/lib/inbox-preview";
+import { DEVICE_ID_KEY } from "../../src/lib/interactions";
+import { deviceNoun, isPad } from "../../src/lib/layout";
+import { leaveAppTo } from "../../src/lib/navigation";
+import { spoken } from "../../src/ui/a11y";
+import { Avatar } from "../../src/ui/avatar";
+import { ActionRow, Cell, List, Row, Section } from "../../src/ui/list";
+import { Text } from "../../src/ui/text";
+import { colors, metrics, space } from "../../src/ui/tokens";
 
-const EXPO_TOKEN_KEY = "hark.device.expoPushToken";
-const APNS_TOKEN_KEY = "hark.device.apnsToken";
+const simulatorPreview = __DEV__ && !Device.isDevice;
+const AVATAR = 56;
 
+/**
+ * Settings (DESIGN.md 5.10): the Account sheet every tab root opens. Who is
+ * signed in, how this device is set up, the app icon, recent deliveries,
+ * and signing out. Teams moved to their own tab.
+ */
 export default function SettingsScreen() {
-  const { data: session, isPending } = useSession();
   const router = useRouter();
-  const simulatorPreview = __DEV__ && !Device.isDevice;
+  const { data: session } = useSession();
+  // Signing out ends the session while this sheet slides away: keep showing
+  // who was signed in so the sheet's content doesn't jump as it leaves.
+  const lastUser = useRef<{ name: string; email: string; image?: string | null } | null>(null);
+  if (session?.user) lastUser.current = session.user;
+  const user =
+    lastUser.current ?? (simulatorPreview ? { name: previewViewer.name, email: "" } : null);
   const [notificationsAllowed, setNotificationsAllowed] = useState<boolean | null>(null);
   const [registered, setRegistered] = useState<boolean | null>(null);
   const [liveActivitiesCapable, setLiveActivitiesCapable] = useState<boolean | null>(null);
-  const [currentAppIcon, setCurrentAppIcon] = useState<string | null>(() => getAppIconName());
-  const [iconPickerOpen, setIconPickerOpen] = useState(false);
-  const [changingAppIcon, setChangingAppIcon] = useState<string | null>(null);
-  const [teamNames, setTeamNames] = useState<string[] | null>(null);
-  const [teamsSupported, setTeamsSupported] = useState(true);
+  const [appIcon, setAppIcon] = useState(() => appIconLabel(getAppIconName()));
+
+  const checkPermission = useCallback(() => {
+    void Notifications.getPermissionsAsync().then((permission) =>
+      setNotificationsAllowed(permission.granted),
+    );
+  }, []);
 
   useEffect(() => {
-    if (simulatorPreview) {
-      setTeamNames(previewTeams.map((team) => team.name));
-      return;
-    }
-    void api
-      .listTeams()
-      .then((result) => setTeamNames(result.teams.map((team) => team.name)))
-      .catch((cause: unknown) => {
-        // Older servers don't have teams; hide the row there.
-        if (isUnsupportedRoute(cause)) setTeamsSupported(false);
-      });
-  }, [simulatorPreview]);
-
-  useEffect(() => {
+    checkPermission();
     void Promise.all([
-      Notifications.getPermissionsAsync(),
       SecureStore.getItemAsync(DEVICE_ID_KEY),
       api.listDevices().catch(() => ({ devices: [] })),
-    ]).then(([permission, deviceId, result]) => {
-      setNotificationsAllowed(permission.granted);
+    ]).then(([deviceId, result]) => {
       setRegistered(Boolean(deviceId));
       setLiveActivitiesCapable(
         result.devices.find((registeredDevice) => registeredDevice.id === deviceId)
           ?.liveActivitiesCapable ?? false,
       );
     });
-  }, []);
+    // Back from the Settings app, where notifications may have been turned on.
+    const appState = AppState.addEventListener("change", (state) => {
+      if (state === "active") checkPermission();
+    });
+    return () => appState.remove();
+  }, [checkPermission]);
 
-  if (!isPending && !session && !simulatorPreview) return <Redirect href="/" />;
-
-  const clearDevice = async () => {
-    await Promise.all([
-      SecureStore.deleteItemAsync(EXPO_TOKEN_KEY),
-      SecureStore.deleteItemAsync(APNS_TOKEN_KEY),
-      SecureStore.deleteItemAsync(DEVICE_ID_KEY),
-      clearInteractionResponses(),
-      Notifications.setBadgeCountAsync(0),
-      clearAllWebsiteData(),
-    ]);
-  };
-
-  const signOut = () => {
-    Alert.alert("Sign out", "This device will stop receiving notifications.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Sign out",
-        style: "destructive",
-        onPress: () => {
-          void (async () => {
-            const expoPushToken = await SecureStore.getItemAsync(EXPO_TOKEN_KEY);
-            try {
-              if (expoPushToken) await api.unregisterDevice({ expoPushToken });
-            } catch {
-              // Best effort; stale tokens are also deactivated server-side.
-            }
-            await clearDevice();
-            await authClient.signOut();
-            router.replace("/");
-          })();
-        },
-      },
-    ]);
-  };
-
-  const deleteAccount = () => {
-    Alert.alert(
-      "Delete account",
-      "This permanently deletes your services, activity history, and registered devices.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete account",
-          style: "destructive",
-          onPress: () => {
-            void (async () => {
-              try {
-                const expoPushToken = await SecureStore.getItemAsync(EXPO_TOKEN_KEY);
-                if (expoPushToken) await api.unregisterDevice({ expoPushToken });
-                const result = await authClient.deleteUser();
-                if (result.error) {
-                  throw new Error(result.error.message ?? "Account deletion was not completed");
-                }
-                await clearDevice();
-                router.replace("/");
-              } catch (error) {
-                Alert.alert(
-                  "Could not delete account",
-                  error instanceof Error ? error.message : "Please try again.",
-                );
-              }
-            })();
-          },
-        },
-      ],
-    );
-  };
-
-  const changeAppIcon = async (option: AppIconOption) => {
-    if (option.alternateName === currentAppIcon || changingAppIcon) return;
-    setChangingAppIcon(option.id);
-    try {
-      const selected = await setAlternateAppIcon(option.alternateName);
-      setCurrentAppIcon(selected);
-    } catch (error) {
-      Alert.alert(
-        "Could not change app icon",
-        error instanceof Error ? error.message : "Please try again.",
-      );
-    } finally {
-      setChangingAppIcon(null);
-    }
-  };
-
-  return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
-      <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar style="dark" />
-      <ScrollView contentContainerStyle={styles.scroll}>
-        <View style={styles.header}>
-          <HeaderLeading
-            onBack={() => (router.canGoBack() ? router.back() : router.replace("/apps"))}
-          />
-          <Text style={styles.headerTitle}>Settings</Text>
-          <View style={styles.iconButton} />
-        </View>
-
-        <SettingsRow
-          icon="bell.fill"
-          label="Notifications"
-          value={
-            notificationsAllowed === null ? "Checking…" : notificationsAllowed ? "Allowed" : "Off"
-          }
-          onPress={notificationsAllowed === false ? () => void Linking.openSettings() : undefined}
-        />
-        <SettingsRow
-          icon={isPad ? "ipad" : "iphone"}
-          label={`This ${deviceNoun}`}
-          value={registered === null ? "Checking…" : registered ? "Registered" : "Not registered"}
-          onPress={registered === false ? () => router.replace("/home") : undefined}
-        />
-        <SettingsRow
-          icon="waveform.path.ecg"
-          label="Live Activities"
-          value={
-            isPad
-              ? "iPhone only"
-              : liveActivitiesCapable === null
-                ? "Checking…"
-                : liveActivitiesCapable
-                  ? "Available"
-                  : "Not available"
-          }
-        />
-        <SettingsRow
-          icon="app.fill"
-          label="App icon"
-          value={supportsAlternateIcons ? appIconLabel(currentAppIcon) : "Unavailable"}
-          onPress={
-            supportsAlternateIcons
-              ? () => setIconPickerOpen((currentlyOpen) => !currentlyOpen)
-              : undefined
-          }
-        />
-        {iconPickerOpen && supportsAlternateIcons ? (
-          <View style={styles.appIconGrid}>
-            {appIconOptions.map((option) => {
-              const selected = option.alternateName === currentAppIcon;
-              const changing = changingAppIcon === option.id;
-              return (
-                <Pressable
-                  accessibilityLabel={`${option.label} app icon`}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected, disabled: changingAppIcon !== null }}
-                  disabled={changingAppIcon !== null}
-                  key={option.id}
-                  onPress={() => void changeAppIcon(option)}
-                  style={({ pressed }) => [
-                    styles.appIconOption,
-                    selected && styles.appIconOptionSelected,
-                    pressed && styles.appIconOptionPressed,
-                  ]}
-                >
-                  <View style={styles.appIconPreviewFrame}>
-                    <Image source={option.image} style={styles.appIconPreview} />
-                    {changing ? (
-                      <View style={styles.appIconSpinner}>
-                        <ActivityIndicator color="#FFFFFF" />
-                      </View>
-                    ) : null}
-                  </View>
-                  <Text style={[styles.appIconName, selected && styles.appIconNameSelected]}>
-                    {option.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        ) : null}
-
-        {teamsSupported ? (
-          <SettingsRow
-            icon="person.2.fill"
-            label="Teams"
-            value={
-              teamNames === null
-                ? ""
-                : teamNames.length === 0
-                  ? "Create or join"
-                  : teamNames.length === 1
-                    ? (teamNames[0] ?? "")
-                    : `${teamNames.length} teams`
-            }
-            onPress={() => router.push("/teams")}
-          />
-        ) : null}
-        <SettingsRow icon="person.fill" label="Signed in as" value={session?.user.email ?? ""} />
-        <Pressable accessibilityRole="button" onPress={signOut} style={styles.accountAction}>
-          <Text style={styles.accountActionText}>Sign out</Text>
-        </Pressable>
-        <Pressable accessibilityRole="button" onPress={deleteAccount} style={styles.accountAction}>
-          <Text style={styles.deleteText}>Delete account</Text>
-        </Pressable>
-      </ScrollView>
-    </SafeAreaView>
+  // Back from App Icon: show the icon chosen there.
+  useFocusEffect(
+    useCallback(() => {
+      setAppIcon(appIconLabel(getAppIconName()));
+    }, []),
   );
-}
 
-function SettingsRow({
-  icon,
-  label,
-  value,
-  onPress,
-}: {
-  icon: Parameters<typeof SymbolView>[0]["name"];
-  label: string;
-  value: string;
-  onPress?: () => void;
-}) {
+  const liveActivities = isPad
+    ? "iPhone Only"
+    : liveActivitiesCapable === null
+      ? undefined
+      : liveActivitiesCapable
+        ? "Available"
+        : "Not Available";
+
   return (
-    <Pressable
-      accessibilityRole={onPress ? "button" : undefined}
-      disabled={!onPress}
-      onPress={onPress}
-      style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-    >
-      <View style={styles.rowIcon}>
-        <SymbolView name={icon} size={16} tintColor={colors.accent} />
-      </View>
-      <Text style={styles.rowLabel}>{label}</Text>
-      <Text style={styles.rowValue} numberOfLines={1}>
-        {value}
-      </Text>
-      {onPress ? <SymbolView name="chevron.right" size={12} tintColor={colors.soft} /> : null}
-    </Pressable>
+    <>
+      <Stack.Toolbar placement="right">
+        <Stack.Toolbar.Button
+          accessibilityLabel="Close"
+          icon="xmark"
+          onPress={() => router.back()}
+        />
+      </Stack.Toolbar>
+      <List>
+        {user ? (
+          <Section>
+            <Cell
+              accessibilityLabel={spoken(user.name, user.email)}
+              accessible
+              minHeight={AVATAR + space.m}
+              separatorInset={metrics.rowPaddingHorizontal + AVATAR + metrics.rowAccessoryGap}
+            >
+              <Avatar image={user.image} name={user.name} size={AVATAR} />
+              <View style={styles.identity}>
+                <Text variant="title3">{user.name}</Text>
+                {user.email ? (
+                  <Text color="secondaryLabel" variant="subheadline">
+                    {user.email}
+                  </Text>
+                ) : null}
+              </View>
+            </Cell>
+          </Section>
+        ) : null}
+
+        <Section title={`This ${deviceNoun}`}>
+          <Row
+            accessibilityHint={
+              notificationsAllowed === false ? "Opens Hark in the Settings app" : undefined
+            }
+            onPress={notificationsAllowed === false ? () => void Linking.openSettings() : undefined}
+            symbol="bell.badge"
+            title="Notifications"
+            trailing={
+              notificationsAllowed === false ? (
+                <SymbolView name="arrow.up.forward.app" size={17} tintColor={colors.placeholder} />
+              ) : undefined
+            }
+            value={notificationsAllowed === null ? undefined : notificationsAllowed ? "On" : "Off"}
+          />
+          <Row
+            accessibilityHint={registered === false ? `Sets up this ${deviceNoun}` : undefined}
+            chevron={registered === false}
+            onPress={registered === false ? () => leaveAppTo("/home") : undefined}
+            symbol={isPad ? "ipad" : "iphone"}
+            title="Registration"
+            value={registered === null ? undefined : registered ? "Registered" : "Not Registered"}
+          />
+          <Row
+            symbol="platter.filled.bottom.iphone"
+            title="Live Activities"
+            value={liveActivities}
+          />
+        </Section>
+
+        <Section title="Appearance">
+          <Row
+            chevron
+            onPress={() => router.push("/settings/app-icon")}
+            symbol="app.badge.checkmark"
+            title="App Icon"
+            value={appIcon}
+          />
+        </Section>
+
+        <Section title="Activity">
+          <Row
+            accessibilityHint="Shows the webhooks Hark received and where they went"
+            chevron
+            onPress={() => router.push("/settings/deliveries")}
+            symbol="paperplane"
+            title="Recent Deliveries"
+          />
+        </Section>
+
+        <Section>
+          <ActionRow destructive onPress={confirmSignOut} title="Sign Out" />
+          <ActionRow destructive onPress={confirmDeleteAccount} title="Delete Account" />
+        </Section>
+
+        <Text align="center" color="tertiaryLabel" style={styles.version} variant="footnote">
+          Hark {Constants.expoConfig?.version ?? ""}
+        </Text>
+      </List>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.paper },
-  scroll: { ...readableColumn, paddingHorizontal: 24, paddingBottom: 48 },
-  header: {
-    minHeight: 64,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  iconButton: {
-    width: 44,
-    height: 44,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 22,
-  },
-  headerTitle: {
-    color: colors.ink,
-    fontFamily: fonts.semibold,
-    fontSize: 17,
-    letterSpacing: tightTracking(17),
-  },
-  row: {
-    minHeight: 58,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.line,
-  },
-  rowPressed: { opacity: 0.65 },
-  rowIcon: {
-    width: 30,
-    height: 30,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 15,
-    backgroundColor: colors.accentSoft,
-  },
-  rowLabel: {
-    color: colors.ink,
-    fontFamily: fonts.medium,
-    fontSize: 14,
-    letterSpacing: tightTracking(14),
-  },
-  rowValue: {
+  identity: {
     minWidth: 0,
     flex: 1,
-    color: colors.soft,
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    textAlign: "right",
-    letterSpacing: tightTracking(13),
+    gap: 2,
   },
-  appIconGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-    rowGap: 12,
-    paddingVertical: 14,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.line,
-  },
-  appIconOption: {
-    flexBasis: "30%",
-    alignItems: "center",
-    gap: 6,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: "transparent",
-    borderRadius: 14,
-  },
-  appIconOptionSelected: {
-    borderColor: colors.accent,
-    backgroundColor: colors.accentSoft,
-  },
-  appIconOptionPressed: {
-    opacity: 0.65,
-    transform: [{ scale: 0.96 }],
-  },
-  appIconPreviewFrame: {
-    width: 44,
-    height: 44,
-    borderRadius: 10,
-    overflow: "hidden",
-  },
-  appIconPreview: {
-    width: 44,
-    height: 44,
-  },
-  appIconSpinner: {
-    position: "absolute",
-    inset: 0,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(0, 0, 0, 0.28)",
-  },
-  appIconName: {
-    color: colors.muted,
-    fontFamily: fonts.medium,
-    fontSize: 12,
-    letterSpacing: tightTracking(12),
-  },
-  appIconNameSelected: {
-    color: colors.accent,
-  },
-  accountAction: {
-    minHeight: 52,
-    justifyContent: "center",
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.line,
-  },
-  accountActionText: {
-    color: colors.ink,
-    fontFamily: fonts.medium,
-    fontSize: 14,
-    letterSpacing: tightTracking(14),
-  },
-  deleteText: {
-    color: colors.danger,
-    fontFamily: fonts.medium,
-    fontSize: 14,
-    letterSpacing: tightTracking(14),
-  },
-  pressed: {
-    backgroundColor: "#F0EFEC",
-    transform: [{ scale: 0.96 }],
+  version: {
+    marginTop: metrics.sectionGap,
   },
 });
