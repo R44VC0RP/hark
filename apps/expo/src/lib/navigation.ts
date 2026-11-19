@@ -17,11 +17,28 @@ export function setCurrentPath(path: string): void {
 /**
  * Opens a web app. From inside a web app it replaces the open one (⌘1–9,
  * Switch App), so the stack never piles up apps; anywhere else it pushes.
+ * Never inside a sheet: pushed over one (⌘1 with Settings up) it opened in
+ * the sheet, where each change of its header remounted it, in a loop for an
+ * app that asks before signing in ("Maximum update depth exceeded", then a
+ * blank app). Like a link, it closes the sheet first, after Reply's draft
+ * prompt when there is one.
  */
 export function openWebApp(id: string, url?: string): void {
   const href = { pathname: "/web/[id]", params: { id, ...(url ? { url } : {}) } } as const;
-  if (currentPath.startsWith("/web/")) router.replace(href);
-  else router.push(href);
+  const stack = rootStack();
+  const sheet = topSheet();
+  const below = stack?.routes[(stack.index ?? stack.routes.length - 1) - (sheet ? 1 : 0)];
+  const inWebApp = stack ? below?.name === "web/[id]" : currentPath.startsWith("/web/");
+  const open = () => (inWebApp ? router.replace(href) : router.push(href));
+  const guard = guardOfTopSheet();
+  if (guard) {
+    void guard.ask().then((closed) => {
+      if (closed) open();
+    });
+    return;
+  }
+  closeTopSheet();
+  open();
 }
 
 /**

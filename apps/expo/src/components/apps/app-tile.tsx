@@ -4,7 +4,13 @@ import { memo, type Ref } from "react";
 import { Linking, Pressable, type PressableProps, StyleSheet, View } from "react-native";
 import { useHover, useLayout } from "../../lib/layout";
 import { hostOf } from "../../lib/web-apps";
-import { Row, useHorizontalSafeArea, useScreenMargin, useStackedRows } from "../../ui/list";
+import {
+  Row,
+  useHorizontalSafeArea,
+  useLargeText,
+  useScreenMargin,
+  useStackedRows,
+} from "../../ui/list";
 import { MenuLink, type MenuLinkAction } from "../../ui/menu-link";
 import { Text } from "../../ui/text";
 import { colors, space } from "../../ui/tokens";
@@ -16,7 +22,8 @@ import { AppIcon } from "../app-icon";
  * that wrap, 72-pt icons, `footnote` labels. Rows are 24 pt apart. Either
  * way the first icon sits 16 pt inside the content margin, where section
  * headers start. At accessibility text sizes the grid becomes a list, so
- * names are never cut to a few letters.
+ * names are never cut to a few letters; on iPhone widths already from
+ * xxxLarge, where four columns kept 6–8 letters ("Home C…", SS-03).
  */
 
 const COMPACT_COLUMNS = 4;
@@ -31,7 +38,7 @@ const LIST_ICON = 44;
 const TILE_RADIUS = 16;
 
 export interface GridGeometry {
-  /** True at accessibility text sizes: apps are rows, not tiles. */
+  /** True at accessibility text sizes (iPhone widths: from xxxLarge): apps are rows, not tiles. */
   list: boolean;
   regular: boolean;
   tileWidth: number;
@@ -44,7 +51,9 @@ export function useGridGeometry(): GridGeometry {
   const margin = useScreenMargin();
   // `List` pads the content by the margin and the horizontal safe area.
   const safeArea = useHorizontalSafeArea();
-  const list = useStackedRows();
+  const stacked = useStackedRows();
+  const largeText = useLargeText();
+  const list = stacked || (!regular && largeText);
   if (regular) {
     return { list, regular, tileWidth: REGULAR_TILE, iconSize: REGULAR_ICON };
   }

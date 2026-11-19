@@ -1,7 +1,7 @@
 import * as AppleAuthentication from "expo-apple-authentication";
 import * as Device from "expo-device";
 import { Redirect } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AccessibilityInfo,
   ActivityIndicator,
@@ -91,6 +91,16 @@ export default function SignInScreen() {
   const insets = useSafeAreaInsets();
   const [busy, setBusy] = useState<"apple" | "google" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const scrollView = useRef<ScrollView>(null);
+  const [contentHeight, setContentHeight] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(0);
+  // The message runs under the pinned buttons (the largest text sizes on
+  // small iPhones): a hairline marks the edge and the indicator flashes once.
+  // The visible area is the scroll view less the status bar inset above it.
+  const scrollable = viewportHeight > 0 && contentHeight > viewportHeight - insets.top + 1;
+  useEffect(() => {
+    if (scrollable) scrollView.current?.flashScrollIndicators();
+  }, [scrollable]);
 
   // VoiceOver reads a failure without moving focus (iOS ignores
   // `accessibilityLiveRegion`, which only Android supports).
@@ -139,38 +149,64 @@ export default function SignInScreen() {
   };
 
   return (
-    <ScrollView
-      alwaysBounceVertical={false}
-      contentContainerStyle={[
-        styles.content,
-        { paddingTop: insets.top, paddingBottom: insets.bottom + space.m },
-      ]}
-      contentInsetAdjustmentBehavior="never"
-      style={styles.screen}
-    >
-      <View accessibilityLabel="Hark" accessibilityRole="header" accessible style={styles.wordmark}>
-        <View style={styles.dot} />
-        {/* The dot doesn't scale, so the wordmark grows only so far. */}
-        <Text maxFontSizeMultiplier={WORDMARK_MAX_SCALE} variant="brandMark">
-          Hark
-        </Text>
-      </View>
-
-      <View style={styles.hero}>
-        <Text style={styles.headline} variant="brandHero">
-          Let the important things find you.
-        </Text>
-        <Text
-          color="secondaryLabel"
-          lineBreakStrategyIOS="standard"
-          style={styles.message}
-          variant="body"
+    <View style={styles.screen}>
+      {/*
+        Only the wordmark and the message scroll; the sign-in buttons stay
+        pinned above the bottom safe area, as on Apple's own welcome screens,
+        so at the largest text sizes they are never below the first screen
+        with nothing hinting they are there (SS-01).
+      */}
+      <ScrollView
+        alwaysBounceVertical={false}
+        // The status bar is a content inset, not padding inside the content:
+        // padded content sat inside the scroll view's top edge effect at rest,
+        // which blurred the wordmark. With the inset, only content that has
+        // scrolled under the status bar (the largest text sizes) is softened.
+        // "always": "automatic" leaves a scroll view that doesn't bounce and
+        // whose content fits without the inset (checked: the wordmark went
+        // under the status bar). The filler content is the scroll view less
+        // that inset (the bottom margin), or it would scroll by it at rest.
+        contentContainerStyle={[styles.content, { marginBottom: insets.top }]}
+        contentInsetAdjustmentBehavior="always"
+        onContentSizeChange={(_, height) => setContentHeight(height)}
+        onLayout={(event) => setViewportHeight(event.nativeEvent.layout.height)}
+        ref={scrollView}
+        style={styles.scroll}
+      >
+        <View
+          accessibilityLabel="Hark"
+          accessibilityRole="header"
+          accessible
+          style={styles.wordmark}
         >
-          Sign in to receive source-branded notifications from every service you connect.
-        </Text>
-      </View>
+          <View style={styles.dot} />
+          {/* The dot doesn't scale, so the wordmark grows only so far. */}
+          <Text maxFontSizeMultiplier={WORDMARK_MAX_SCALE} variant="brandMark">
+            Hark
+          </Text>
+        </View>
 
-      <View style={styles.footer}>
+        <View style={styles.hero}>
+          <Text style={styles.headline} variant="brandHero">
+            Let the important things find you.
+          </Text>
+          <Text
+            color="secondaryLabel"
+            lineBreakStrategyIOS="standard"
+            style={styles.message}
+            variant="body"
+          >
+            Sign in to receive source-branded notifications from every service you connect.
+          </Text>
+        </View>
+      </ScrollView>
+      <View
+        style={[
+          styles.footer,
+          scrollable && styles.footerEdge,
+          { paddingBottom: insets.bottom + space.m },
+        ]}
+      >
         {/*
           The error sits above the buttons, where the hero's flexible space
           absorbs it, so the buttons never move under a finger.
@@ -245,7 +281,7 @@ export default function SignInScreen() {
           </>
         )}
       </View>
-    </ScrollView>
+    </View>
   );
 }
 
@@ -259,6 +295,9 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  scroll: {
+    flex: 1,
   },
   content: {
     flexGrow: 1,
@@ -291,7 +330,14 @@ const styles = StyleSheet.create({
   },
   footer: {
     ...column,
+    maxWidth: COLUMN_WIDTH + space.xl * 2,
     gap: space.s,
+    paddingTop: space.m,
+    paddingHorizontal: space.xl,
+  },
+  footerEdge: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
   },
   pending: {
     minHeight: BUTTON_HEIGHT * 2 + space.s,

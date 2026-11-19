@@ -32,8 +32,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLayout } from "../lib/layout";
 import { spoken } from "./a11y";
 import { Button } from "./button";
-import { Text, useFontScale } from "./text";
-import { type ColorName, colors, metrics, palette, radius, space } from "./tokens";
+import { breakableText, Text, useFontScale } from "./text";
+import { type ColorName, colors, metrics, palette, radius, space, typography } from "./tokens";
 
 /**
  * Lists and rows (DESIGN.md 3.6, 3.11). Grouped screens are
@@ -64,6 +64,17 @@ export function useStackedRows(): boolean {
 }
 
 /**
+ * True at accessibility sizes on iPhone widths, where a row's leading symbol
+ * or avatar goes above its title so the title has the whole row (SS-02).
+ * Regular widths keep it beside the title: they have the room.
+ */
+export function useLeadingAbove(): boolean {
+  const stacked = useStackedRows();
+  const { regular } = useLayout();
+  return stacked && !regular;
+}
+
+/**
  * The wide-row rule (DESIGN.md 3.6, V-24). On regular widths sections and
  * rows still stretch to the window, but a row's text stops at the 600-pt
  * measure; everything trailing (time, value, count, badge, result, answers,
@@ -87,6 +98,35 @@ export function useTextMeasure(): ViewStyle | null {
 export function useRowSymbol(): { size: number; column: number } {
   const size = Math.round(20 * Math.min(useFontScale(), 2));
   return { size, column: Math.max(metrics.rowSymbolColumn, size + 8) };
+}
+
+/**
+ * What a row's text sits beside at most, in points: the list margins, the
+ * row's padding and a chevron. Its line is the window less this.
+ */
+const ROW_CHROME = 90;
+/**
+ * The width of a letter of `body` text, in ems, on the wide side: SF Pro's
+ * letters run from about 0.38 em ("Notificatio") to 0.55 em with Bold Text
+ * ("Acknowledg"), and a word that gets break points only uses them when it
+ * doesn't fit.
+ */
+const LETTER_EM = 0.5;
+
+/**
+ * Row text at accessibility sizes, where a long word can be wider than its
+ * line on a narrow iPhone (SS-02): words longer than the row's line holds get
+ * break points (`breakableText`); everything else is unchanged.
+ */
+export function useBreakable(): (text: string) => string {
+  const { width, fontScale } = useWindowDimensions();
+  const stacked = fontScale >= metrics.accessibilityFontScale;
+  return useMemo(() => {
+    if (!stacked) return (text: string) => text;
+    const letter = typography.body.fontSize * LETTER_EM * fontScale;
+    const letters = Math.floor((width - ROW_CHROME) / letter);
+    return (text: string) => breakableText(text, letters);
+  }, [fontScale, stacked, width]);
 }
 
 /** True from xxxLarge up, for layouts that check whether their text still fits. */
@@ -402,7 +442,14 @@ export interface RowProps extends Omit<CellProps, "children"> {
   chevron?: boolean;
 }
 
-/** The standard row: leading symbol or avatar, title, subtitle, value, chevron. */
+/**
+ * The standard row: leading symbol or avatar, title, subtitle, value, chevron.
+ * At accessibility sizes the value goes under the title and, on iPhone
+ * widths, the symbol or avatar above it, so the title has the row's whole
+ * width (SS-02: beside a
+ * 48-pt symbol column "Notifications" broke inside the word on a 375-pt
+ * iPhone); words still wider than the row break between syllables.
+ */
 export function Row({
   title,
   subtitle,
@@ -420,35 +467,40 @@ export function Row({
   ...props
 }: RowProps) {
   const stacked = useStackedRows();
+  const above = useLeadingAbove();
   const measure = useTextMeasure();
+  const breakable = useBreakable();
   const symbolSize = useRowSymbol();
   const leadWidth = leading ? (leadingWidth ?? metrics.rowSymbolColumn) : symbolSize.column;
   const hasLeading = Boolean(symbol || leading);
   const navigates = Boolean(chevron || props.onPress);
+  const leadingView = hasLeading ? (
+    <View style={above ? styles.leadingStacked : [styles.leading, { width: leadWidth }]}>
+      {leading ?? (
+        <SymbolView
+          name={symbol as SFSymbol}
+          size={symbolSize.size}
+          tintColor={colors[symbolColor ?? (navigates ? "accent" : "secondaryLabel")]}
+        />
+      )}
+    </View>
+  ) : null;
   return (
     <Cell
       accessibilityLabel={accessibilityLabel ?? spoken(title, subtitle, value)}
       accessible
       minHeight={subtitle ? metrics.rowMinHeightSubtitle : metrics.rowMinHeight}
       separatorInset={
-        metrics.rowPaddingHorizontal + (hasLeading ? leadWidth + metrics.rowAccessoryGap : 0)
+        metrics.rowPaddingHorizontal +
+        (hasLeading && !above ? leadWidth + metrics.rowAccessoryGap : 0)
       }
       {...props}
     >
-      {hasLeading ? (
-        <View style={[styles.leading, { width: leadWidth }]}>
-          {leading ?? (
-            <SymbolView
-              name={symbol as SFSymbol}
-              size={symbolSize.size}
-              tintColor={colors[symbolColor ?? (navigates ? "accent" : "secondaryLabel")]}
-            />
-          )}
-        </View>
-      ) : null}
+      {above ? null : leadingView}
       <View style={[styles.copy, measure]}>
+        {above ? leadingView : null}
         <Text color={titleColor} variant={titleVariant}>
-          {title}
+          {breakable(title)}
         </Text>
         {subtitle ? (
           <Text
@@ -456,12 +508,12 @@ export function Row({
             numberOfLines={stacked ? undefined : subtitleLines}
             variant="subheadline"
           >
-            {subtitle}
+            {breakable(subtitle)}
           </Text>
         ) : null}
         {value && stacked ? (
           <Text color="secondaryLabel" variant="body">
-            {value}
+            {breakable(value)}
           </Text>
         ) : null}
       </View>
@@ -533,17 +585,19 @@ export interface LabeledRowProps extends Omit<CellProps, "children"> {
 /** A label with its value on the trailing edge ("Received", "Mar 3, 9:41 AM"). */
 export function LabeledRow({ label, value, selectable, ...props }: LabeledRowProps) {
   const stacked = useStackedRows();
+  const breakable = useBreakable();
   return (
     <Cell accessibilityLabel={spoken(label, value)} accessible {...props}>
       <View style={[styles.labeled, stacked && styles.labeledStacked]}>
-        <Text variant="body">{label}</Text>
+        <Text variant="body">{breakable(label)}</Text>
         <Text
           color="secondaryLabel"
           selectable={selectable}
           style={stacked ? null : styles.labeledValue}
           variant="body"
         >
-          {value}
+          {/* A copy of a selectable value must be the value itself. */}
+          {selectable ? value : breakable(value)}
         </Text>
       </View>
     </Cell>
@@ -612,6 +666,19 @@ export function ActionRow({
 }: ActionRowProps) {
   const tint: ColorName = destructive ? "danger" : "accent";
   const symbolSize = useRowSymbol();
+  // Like `Row`: at accessibility sizes on iPhone widths the symbol goes above the title.
+  const above = useLeadingAbove();
+  const breakable = useBreakable();
+  const symbolView = symbol ? (
+    <View style={above ? styles.leadingStacked : [styles.leading, { width: symbolSize.column }]}>
+      <SymbolView name={symbol} size={symbolSize.size} tintColor={colors[tint]} />
+    </View>
+  ) : null;
+  const label = (
+    <Text color={tint} style={above ? null : styles.copy} variant="body">
+      {breakable(title)}
+    </Text>
+  );
   return (
     <Cell
       accessibilityLabel={accessibilityLabel ?? title}
@@ -619,19 +686,23 @@ export function ActionRow({
       accessible
       disabled={disabled}
       separatorInset={
-        metrics.rowPaddingHorizontal + (symbol ? symbolSize.column + metrics.rowAccessoryGap : 0)
+        metrics.rowPaddingHorizontal +
+        (symbol && !above ? symbolSize.column + metrics.rowAccessoryGap : 0)
       }
       style={disabled ? styles.disabled : null}
       {...props}
     >
-      {symbol ? (
-        <View style={[styles.leading, { width: symbolSize.column }]}>
-          <SymbolView name={symbol} size={symbolSize.size} tintColor={colors[tint]} />
+      {above && symbolView ? (
+        <View style={styles.copy}>
+          {symbolView}
+          {label}
         </View>
-      ) : null}
-      <Text color={tint} style={styles.copy} variant="body">
-        {title}
-      </Text>
+      ) : (
+        <>
+          {symbolView}
+          {label}
+        </>
+      )}
       {trailingSymbol ? (
         <SymbolView name={trailingSymbol} size={17} tintColor={colors.placeholder} />
       ) : null}
@@ -708,6 +779,10 @@ const styles = StyleSheet.create({
   leading: {
     alignItems: "center",
     justifyContent: "center",
+  },
+  leadingStacked: {
+    alignSelf: "flex-start",
+    marginBottom: space.xxs,
   },
   copy: {
     minWidth: 0,

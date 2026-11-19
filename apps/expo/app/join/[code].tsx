@@ -3,7 +3,7 @@ import * as Device from "expo-device";
 import { Redirect, Stack, useLocalSearchParams, useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { useCallback, useEffect, useState } from "react";
-import { StyleSheet, View } from "react-native";
+import { StyleSheet, useWindowDimensions, View } from "react-native";
 import { SeatLimitNotice } from "../../src/components/teams/seat-limit-notice";
 import { ApiError, api } from "../../src/lib/api";
 import { refreshDirectory } from "../../src/lib/app-directory";
@@ -25,6 +25,14 @@ import { metrics, palette, space } from "../../src/ui/tokens";
 
 const simulatorPreview = __DEV__ && !Device.isDevice;
 const AVATAR = 64;
+/**
+ * Short iPhones (SE, 667 pt): a smaller avatar, title and message, tighter
+ * and with no space above, so the details and their footnote end above the
+ * Join button at rest instead of under it (SS-05, the rule V-01 set for the
+ * Page sheet).
+ */
+const SHORT_SCREEN = 700;
+const SHORT_AVATAR = 40;
 
 type LoadFailure = { kind: "unavailable" | "network" | "other"; message?: string };
 
@@ -45,6 +53,7 @@ export default function JoinTeamSheet() {
   const [joinError, setJoinError] = useState<string | null>(null);
   const [alreadyMember, setAlreadyMember] = useState<{ id: string; name: string } | null>(null);
   const signedOut = !isPending && !session && !simulatorPreview;
+  const short = useWindowDimensions().height < SHORT_SCREEN;
 
   useEffect(() => {
     // Remember the invite so it reopens right after sign-in.
@@ -148,12 +157,12 @@ export default function JoinTeamSheet() {
           )
         ) : (
           <>
-            <View style={styles.hero}>
-              <Avatar name={invite.teamName} size={AVATAR} />
-              <Text accessibilityRole="header" align="center" variant="title1">
+            <View style={[styles.hero, short && styles.heroShort]}>
+              <Avatar name={invite.teamName} size={short ? SHORT_AVATAR : AVATAR} />
+              <Text accessibilityRole="header" align="center" variant={short ? "title2" : "title1"}>
                 {`Join ${invite.teamName} on Hark`}
               </Text>
-              <Text align="center" color="secondaryLabel" variant="body">
+              <Text align="center" color="secondaryLabel" variant={short ? "subheadline" : "body"}>
                 {`${invite.invitedBy} invited you. You’ll see ${invite.teamName}’s apps in Hark and can be added to its on-call rotations.`}
               </Text>
             </View>
@@ -226,6 +235,10 @@ const styles = StyleSheet.create({
     gap: space.s,
     marginTop: space.l,
     paddingHorizontal: metrics.rowPaddingHorizontal,
+  },
+  heroShort: {
+    gap: space.xxs,
+    marginTop: 0,
   },
   error: {
     marginTop: space.s,

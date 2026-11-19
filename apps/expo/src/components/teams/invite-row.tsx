@@ -5,7 +5,7 @@ import { Pressable, StyleSheet, View } from "react-native";
 import { formatUpcoming } from "../../lib/dates";
 import { roleLabel } from "../../lib/teams";
 import { spoken } from "../../ui/a11y";
-import { Cell, useStackedRows, useTextMeasure } from "../../ui/list";
+import { Cell, useBreakable, useStackedRows, useTextMeasure } from "../../ui/list";
 import { Text } from "../../ui/text";
 import { colors, metrics, space } from "../../ui/tokens";
 import { FactLine } from "./fact-line";
@@ -25,6 +25,8 @@ export const InviteRow = memo(function InviteRow({
 }) {
   const stacked = useStackedRows();
   const measure = useTextMeasure();
+  // An address breaks after "@", not inside a word, at accessibility sizes (SS-02).
+  const breakable = useBreakable();
   const title = invite.email ?? "Invite Link";
   const facts = [roleLabel(invite.role), `from ${invite.invitedBy}`];
   const expires = `Expires ${formatUpcoming(invite.expiresAt)}`;
@@ -46,7 +48,7 @@ export const InviteRow = memo(function InviteRow({
         </View>
         <View style={[styles.copy, measure]}>
           <Text numberOfLines={stacked ? undefined : 1} variant="body">
-            {title}
+            {breakable(title)}
           </Text>
           {/* The inviter's name gives way before the role. */}
           <FactLine facts={facts} shrink={1} />

@@ -91,7 +91,8 @@ export const PageRow = memo(function PageRow({ page, now }: { page: OncallPageDt
       >
         <LeadingDot color={open ? "danger" : "accent"} variant={open ? "headline" : "body"} />
         <View style={[styles.copy, measure]}>
-          <Text numberOfLines={stacked ? undefined : 1} variant={open ? "headline" : "body"}>
+          {/* The title is the alert itself: two lines keep its number (SS-04). */}
+          <Text numberOfLines={stacked ? undefined : 2} variant={open ? "headline" : "body"}>
             {page.title}
           </Text>
           <FactLine facts={[page.groupName, ago]} />

@@ -46,7 +46,14 @@ import {
   isNetworkError,
   LoadingState,
 } from "../../../../src/ui/empty-state";
-import { ActionRow, List, Row, Section, useStackedRows } from "../../../../src/ui/list";
+import {
+  ActionRow,
+  List,
+  Row,
+  Section,
+  useLargeText,
+  useStackedRows,
+} from "../../../../src/ui/list";
 import { animateListChange } from "../../../../src/ui/motion";
 import { Text } from "../../../../src/ui/text";
 import { colors, metrics, radius, space } from "../../../../src/ui/tokens";
@@ -60,14 +67,21 @@ type LoadFailure = "network" | "other" | "missing";
 /**
  * "Alex Kim until Thu at 5:00 AM" or "Nobody on call". At accessibility sizes
  * the open-page count goes on its own line instead of squeezing the name
- * beside a capsule, and the handoff may wrap.
+ * beside a capsule. From xxxLarge the handoff may wrap between its words:
+ * kept in one piece it no longer fit beside the capsule on a 375-pt iPhone
+ * and its time was cut ("until Fri at 5:00…", SS-09).
  */
-function groupSubtitle(group: OncallGroupDto, viewerId: string | undefined, stacked: boolean) {
+function groupSubtitle(
+  group: OncallGroupDto,
+  viewerId: string | undefined,
+  stacked: boolean,
+  wrap: boolean,
+) {
   const open = stacked && group.openPageCount > 0 ? `\n${group.openPageCount} open` : "";
   if (!group.current) return `Nobody on call${open}`;
   const who = group.current.person.userId === viewerId ? "You" : group.current.person.name;
   const until = `until ${formatUpcoming(group.current.endsAt)}`;
-  return `${who} ${stacked ? until : unbroken(until)}${open}`;
+  return `${who} ${wrap ? until : unbroken(until)}${open}`;
 }
 
 /** "Owner", "5 seats", "Team plan": one line, or one fact per line at AX sizes. */
@@ -88,6 +102,7 @@ export default function TeamScreen() {
   const { data: session } = useSession();
   const router = useRouter();
   const stacked = useStackedRows();
+  const largeText = useLargeText();
   const { id: rawId } = useLocalSearchParams<{ id: string }>();
   const id = String(rawId);
   const viewerId = simulatorPreview ? previewViewer.userId : session?.user.id;
@@ -481,7 +496,8 @@ export default function TeamScreen() {
                         params: { team: team.id, name: team.name },
                       })
                     }
-                    subtitle={groupSubtitle(group, viewerId, stacked)}
+                    subtitle={groupSubtitle(group, viewerId, stacked, stacked || largeText)}
+                    subtitleLines={largeText ? 4 : 2}
                     symbol="bell"
                     title={group.name}
                     trailing={

@@ -25,7 +25,13 @@ import { colors, metrics, radius, space } from "../../../../src/ui/tokens";
 
 /** How long after the tab first appears its search bar starts hiding on scroll. */
 const SEARCH_SETTLE_MS = 500;
-const ADD_APP_COMMAND = 'harkctl apps create --name "My app" --url https://…';
+/**
+ * One argument per line, joined the shell's way, so lines break between
+ * arguments: left to wrap, a 375-pt iPhone split `--url` into "--" and
+ * "url", and larger text split "My app" (SS-07). A copy still runs as one
+ * command.
+ */
+const ADD_APP_COMMAND = 'harkctl apps create \\\n  --name "My app" \\\n  --url https://…';
 
 /** Case-insensitive match on the app's name or host. */
 function matches(app: AppDto, query: string): boolean {
