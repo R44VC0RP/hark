@@ -1,9 +1,9 @@
 import type { InboxNotificationSummaryDto } from "@hark/contracts";
-import { Link } from "expo-router";
 import { memo, useMemo } from "react";
-import { type AccessibilityActionEvent, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { spoken } from "../ui/a11y";
 import { Cell, useStackedRows } from "../ui/list";
+import { MenuLink, type MenuLinkAction } from "../ui/menu-link";
 import { Text } from "../ui/text";
 import { colors, space } from "../ui/tokens";
 import { formatActivityTime } from "./inbox/format";
@@ -51,94 +51,87 @@ export const NotificationRow = memo(function NotificationRow({
       {time}
     </Text>
   );
-  const onAccessibilityAction = (event: AccessibilityActionEvent) => {
-    const name = event.nativeEvent.actionName;
-    if (name === "toggleRead") onToggleRead(item);
-    else if (name === "openLink") onOpenLink(item);
-    else if (name === "openApp") onOpenApp(item);
-  };
+  // Read state first, then the link or the app the notification opens.
+  const actions: MenuLinkAction[] = [
+    {
+      name: "toggleRead",
+      label: toggleLabel,
+      icon: unread ? "envelope.open" : "envelope.badge",
+      onPress: () => onToggleRead(item),
+    },
+  ];
+  if (linkOnly) {
+    actions.push({
+      name: "openLink",
+      label: "Open Link",
+      icon: "safari",
+      onPress: () => onOpenLink(item),
+    });
+  }
+  if (item.app) {
+    const app = item.app;
+    actions.push({
+      name: "openApp",
+      label: `Open ${app.name}`,
+      icon: "square.grid.2x2",
+      onPress: () => onOpenApp(item),
+    });
+  }
 
   return (
-    <Link asChild href={{ pathname: "/notification/[id]", params: { id: item.id } }}>
-      <Link.Trigger>
-        <Cell
-          accessibilityActions={[
-            { name: "toggleRead", label: toggleLabel },
-            ...(linkOnly ? [{ name: "openLink", label: "Open Link" }] : []),
-            ...(item.app ? [{ name: "openApp", label: `Open ${item.app.name}` }] : []),
-          ]}
-          accessibilityHint="Shows the notification"
-          accessibilityLabel={spoken(
-            unread ? "Unread" : null,
-            item.title,
-            item.preview,
-            item.sourceName,
-            time,
-          )}
-          accessibilityRole="button"
-          accessible
-          minHeight={MIN_HEIGHT}
-          onAccessibilityAction={onAccessibilityAction}
-          separatorInset={margin + NOTIFICATION_DOT_COLUMN + NOTIFICATION_DOT_GAP}
-          style={rowStyle}
-        >
-          <View style={styles.dotColumn}>
-            {/* One line of the title's style, so the dot sits on the first line at every text size. */}
-            <View style={styles.dotLine}>
-              <Text
-                accessibilityElementsHidden
-                importantForAccessibility="no"
-                variant={titleVariant}
-              >
-                {"​"}
-              </Text>
-              <View style={[styles.dot, unread ? null : styles.dotHidden]} />
-            </View>
-          </View>
-          <View style={styles.copy}>
-            <View style={styles.titleLine}>
-              <Text
-                numberOfLines={stacked ? undefined : 1}
-                style={styles.title}
-                variant={titleVariant}
-              >
-                {item.title}
-              </Text>
-              {stacked ? null : timeText}
-            </View>
-            {item.preview ? (
-              <Text color="secondaryLabel" numberOfLines={stacked ? 4 : 2} variant="subheadline">
-                {item.preview}
-              </Text>
-            ) : null}
-            <Text color="tertiaryLabel" numberOfLines={stacked ? undefined : 1} variant="footnote">
-              {item.sourceName}
+    <MenuLink
+      actions={actions}
+      href={{ pathname: "/notification/[id]", params: { id: item.id } }}
+      preview
+    >
+      <Cell
+        accessibilityHint="Shows the notification"
+        accessibilityLabel={spoken(
+          unread ? "Unread" : null,
+          item.title,
+          item.preview,
+          item.sourceName,
+          time,
+        )}
+        accessibilityRole="button"
+        accessible
+        minHeight={MIN_HEIGHT}
+        separatorInset={margin + NOTIFICATION_DOT_COLUMN + NOTIFICATION_DOT_GAP}
+        style={rowStyle}
+      >
+        <View style={styles.dotColumn}>
+          {/* One line of the title's style, so the dot sits on the first line at every text size. */}
+          <View style={styles.dotLine}>
+            <Text accessibilityElementsHidden importantForAccessibility="no" variant={titleVariant}>
+              {"​"}
             </Text>
-            {/* At accessibility sizes the time stacks under the text (3.6). */}
-            {stacked ? timeText : null}
+            <View style={[styles.dot, unread ? null : styles.dotHidden]} />
           </View>
-        </Cell>
-      </Link.Trigger>
-      <Link.Preview />
-      <Link.Menu>
-        <Link.MenuAction
-          icon={unread ? "envelope.open" : "envelope.badge"}
-          onPress={() => onToggleRead(item)}
-        >
-          {toggleLabel}
-        </Link.MenuAction>
-        {linkOnly ? (
-          <Link.MenuAction icon="safari" onPress={() => onOpenLink(item)}>
-            Open Link
-          </Link.MenuAction>
-        ) : null}
-        {item.app ? (
-          <Link.MenuAction icon="square.grid.2x2" onPress={() => onOpenApp(item)}>
-            {`Open ${item.app.name}`}
-          </Link.MenuAction>
-        ) : null}
-      </Link.Menu>
-    </Link>
+        </View>
+        <View style={styles.copy}>
+          <View style={styles.titleLine}>
+            <Text
+              numberOfLines={stacked ? undefined : 1}
+              style={styles.title}
+              variant={titleVariant}
+            >
+              {item.title}
+            </Text>
+            {stacked ? null : timeText}
+          </View>
+          {item.preview ? (
+            <Text color="secondaryLabel" numberOfLines={stacked ? 4 : 2} variant="subheadline">
+              {item.preview}
+            </Text>
+          ) : null}
+          <Text color="tertiaryLabel" numberOfLines={stacked ? undefined : 1} variant="footnote">
+            {item.sourceName}
+          </Text>
+          {/* At accessibility sizes the time stacks under the text (3.6). */}
+          {stacked ? timeText : null}
+        </View>
+      </Cell>
+    </MenuLink>
   );
 });
 

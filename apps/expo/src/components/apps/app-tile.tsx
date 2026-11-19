@@ -1,17 +1,10 @@
 import type { AppDto } from "@hark/contracts";
-import { Link, router } from "expo-router";
-import { memo, type Ref, useSyncExternalStore } from "react";
-import {
-  type AccessibilityActionEvent,
-  AccessibilityInfo,
-  Linking,
-  Pressable,
-  type PressableProps,
-  StyleSheet,
-  View,
-} from "react-native";
+import { router } from "expo-router";
+import { memo, type Ref } from "react";
+import { Linking, Pressable, type PressableProps, StyleSheet, View } from "react-native";
 import { useHover, useLayout } from "../../lib/layout";
 import { Row, useHorizontalSafeArea, useScreenMargin, useStackedRows } from "../../ui/list";
+import { MenuLink, type MenuLinkAction } from "../../ui/menu-link";
 import { Text } from "../../ui/text";
 import { colors, space } from "../../ui/tokens";
 import { AppIcon } from "../app-icon";
@@ -58,35 +51,6 @@ export function useGridGeometry(): GridGeometry {
   return { list, regular, tileWidth: content / COMPACT_COLUMNS, iconSize: COMPACT_ICON };
 }
 
-/**
- * VoiceOver state, shared by every tile. `Link.Menu` mounts its trigger
- * under a zero-size (`display: contents`) native view, and iOS leaves that
- * whole subtree out of the accessibility tree (checked with the simulator's
- * accessibility hierarchy: no tile was listed). With VoiceOver on, tiles are
- * plain links and offer the menu's actions as VoiceOver actions instead.
- */
-let screenReader = false;
-const screenReaderListeners = new Set<() => void>();
-function setScreenReader(enabled: boolean) {
-  if (enabled === screenReader) return;
-  screenReader = enabled;
-  for (const listener of screenReaderListeners) listener();
-}
-void AccessibilityInfo.isScreenReaderEnabled().then(setScreenReader);
-AccessibilityInfo.addEventListener("screenReaderChanged", setScreenReader);
-
-function useScreenReader(): boolean {
-  return useSyncExternalStore(
-    (listener) => {
-      screenReaderListeners.add(listener);
-      return () => {
-        screenReaderListeners.delete(listener);
-      };
-    },
-    () => screenReader,
-  );
-}
-
 function openAppInfo(app: AppDto) {
   router.push({ pathname: "/apps/[id]", params: { id: app.id } });
 }
@@ -95,33 +59,12 @@ function openInSafari(app: AppDto) {
   void Linking.openURL(app.url);
 }
 
-/** VoiceOver gets the context menu's two actions as custom actions. */
-const ACCESSIBILITY_ACTIONS = [
-  { name: "info", label: "App Info" },
-  { name: "safari", label: "Open in Safari" },
-];
-
-function onAccessibilityAction(app: AppDto, event: AccessibilityActionEvent) {
-  if (event.nativeEvent.actionName === "info") openAppInfo(app);
-  else if (event.nativeEvent.actionName === "safari") openInSafari(app);
-}
-
-/**
- * The long-press menu every tile and row shares (2 actions, most common
- * first). A plain function, not a component: `Link` only finds its menu
- * when `Link.Menu` is a direct child.
- */
-function appMenu(app: AppDto) {
-  return (
-    <Link.Menu>
-      <Link.MenuAction icon="info.circle" onPress={() => openAppInfo(app)}>
-        App Info
-      </Link.MenuAction>
-      <Link.MenuAction icon="safari" onPress={() => openInSafari(app)}>
-        Open in Safari
-      </Link.MenuAction>
-    </Link.Menu>
-  );
+/** The long-press menu every tile and row shares (2 actions, most common first). */
+function appActions(app: AppDto): MenuLinkAction[] {
+  return [
+    { name: "info", label: "App Info", icon: "info.circle", onPress: () => openAppInfo(app) },
+    { name: "safari", label: "Open in Safari", icon: "safari", onPress: () => openInSafari(app) },
+  ];
 }
 
 interface TileButtonProps extends Omit<PressableProps, "style" | "children"> {
@@ -139,11 +82,9 @@ function TileButton({ app, geometry, ref, ...props }: TileButtonProps) {
   const { hovered, hoverProps } = useHover();
   return (
     <Pressable
-      accessibilityActions={ACCESSIBILITY_ACTIONS}
       accessibilityHint="Opens the app"
       accessibilityLabel={app.name}
       accessibilityRole="button"
-      onAccessibilityAction={(event) => onAccessibilityAction(app, event)}
       ref={ref}
       {...hoverProps}
       {...props}
@@ -175,22 +116,14 @@ export const AppTile = memo(function AppTile({
   app: AppDto;
   geometry: GridGeometry;
 }) {
-  const href = { pathname: "/web/[id]", params: { id: app.id } } as const;
-  const screenReaderOn = useScreenReader();
-  if (screenReaderOn) {
-    return (
-      <Link asChild href={href} push>
-        <TileButton app={app} geometry={geometry} />
-      </Link>
-    );
-  }
   return (
-    <Link asChild href={href} push>
-      <Link.Trigger>
-        <TileButton app={app} geometry={geometry} />
-      </Link.Trigger>
-      {appMenu(app)}
-    </Link>
+    <MenuLink
+      actions={appActions(app)}
+      href={{ pathname: "/web/[id]", params: { id: app.id } }}
+      push
+    >
+      <TileButton app={app} geometry={geometry} />
+    </MenuLink>
   );
 });
 
@@ -215,31 +148,20 @@ function hostOf(origin: string): string {
 
 /** An app as a row (accessibility text sizes): icon, name and host, same menu. */
 export const AppListRow = memo(function AppListRow({ app }: { app: AppDto }) {
-  const href = { pathname: "/web/[id]", params: { id: app.id } } as const;
-  const row = (
-    <Row
-      accessibilityActions={ACCESSIBILITY_ACTIONS}
-      accessibilityHint="Opens the app"
-      leading={<AppIcon iconUrl={app.iconUrl} name={app.name} size={LIST_ICON} />}
-      leadingWidth={LIST_ICON}
-      onAccessibilityAction={(event) => onAccessibilityAction(app, event)}
-      subtitle={hostOf(app.origin)}
-      title={app.name}
-    />
-  );
-  const screenReaderOn = useScreenReader();
-  if (screenReaderOn) {
-    return (
-      <Link asChild href={href} push>
-        {row}
-      </Link>
-    );
-  }
   return (
-    <Link asChild href={href} push>
-      <Link.Trigger>{row}</Link.Trigger>
-      {appMenu(app)}
-    </Link>
+    <MenuLink
+      actions={appActions(app)}
+      href={{ pathname: "/web/[id]", params: { id: app.id } }}
+      push
+    >
+      <Row
+        accessibilityHint="Opens the app"
+        leading={<AppIcon iconUrl={app.iconUrl} name={app.name} size={LIST_ICON} />}
+        leadingWidth={LIST_ICON}
+        subtitle={hostOf(app.origin)}
+        title={app.name}
+      />
+    </MenuLink>
   );
 });
 
