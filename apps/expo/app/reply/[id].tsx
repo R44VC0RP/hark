@@ -6,6 +6,7 @@ import { Alert, StyleSheet, TextInput, View } from "react-native";
 import { haptic } from "../../src/lib/haptics";
 import { cachedInteraction, markInteractionHandled } from "../../src/lib/inbox-cache";
 import { submitInteractionResponse } from "../../src/lib/interactions";
+import { useLayout } from "../../src/lib/layout";
 import { SourceAvatar } from "../../src/ui/avatar";
 import { EmptyState } from "../../src/ui/empty-state";
 import { List, useStackedRows } from "../../src/ui/list";
@@ -15,6 +16,13 @@ import { colors, palette, space, typography } from "../../src/ui/tokens";
 const simulatorPreview = __DEV__ && !Device.isDevice;
 
 /**
+ * The sheet header's height on iOS 26 (measured in the simulator). The
+ * header height hook first reports 56 and corrects itself about 0.3 s later,
+ * which slid the request down 8 to 14 pt while the sheet was opening.
+ */
+const SHEET_HEADER_HEIGHT = { compact: 70, regular: 64 } as const;
+
+/**
  * Reply to a request (DESIGN.md 5.5): a form sheet at half height that the
  * Inbox opens. Cancel leads, Send Reply is the prominent trailing item. The
  * request comes from the Inbox's cache, so a relaunch shows "Request
@@ -22,7 +30,11 @@ const simulatorPreview = __DEV__ && !Device.isDevice;
  */
 export default function ReplySheet() {
   const router = useRouter();
-  const headerHeight = useHeaderHeight();
+  const { regular } = useLayout();
+  const headerHeight = Math.max(
+    useHeaderHeight(),
+    SHEET_HEADER_HEIGHT[regular ? "regular" : "compact"],
+  );
   const stacked = useStackedRows();
   const { id } = useLocalSearchParams<{ id: string }>();
   const cached = cachedInteraction(String(id));
