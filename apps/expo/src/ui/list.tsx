@@ -269,11 +269,16 @@ function PressableCell({
       highlight.stopAnimation();
       highlight.setValue(1);
     } else {
+      // JavaScript-driven on purpose: each frame is committed through React,
+      // so the shadow tree always holds the current opacity. With the native
+      // driver React kept the pressed value (1), and a row that changed
+      // height on tap (History, Recent Deliveries) got it re-applied by the
+      // 300 ms layout animation after the 100 ms fade: the row stayed grey.
       Animated.timing(highlight, {
         toValue: 0,
         duration: 100,
         easing: Easing.out(Easing.quad),
-        useNativeDriver: true,
+        useNativeDriver: false,
       }).start();
     }
   };

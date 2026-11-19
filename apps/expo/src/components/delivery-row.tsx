@@ -4,6 +4,7 @@ import { StyleSheet, View } from "react-native";
 import { spoken } from "../ui/a11y";
 import { SourceAvatar } from "../ui/avatar";
 import { Cell, useStackedRows } from "../ui/list";
+import { animateListChange } from "../ui/motion";
 import { StatusDot } from "../ui/status-dot";
 import { Text } from "../ui/text";
 import { type ColorName, colors, metrics, space } from "../ui/tokens";
@@ -69,10 +70,14 @@ export const DeliveryRow = memo(function DeliveryRow({
       accessibilityState={expandable ? { expanded } : undefined}
       accessible
       minHeight={metrics.rowMinHeightSubtitle}
-      // Expands without `animateListChange()`: its 300-ms layout animation
-      // ends after the row's pressed-highlight fade and puts the highlight
-      // back (checked in the simulator: collapsing a long row left it grey).
-      onPress={expandable ? () => setExpanded((current) => !current) : undefined}
+      onPress={
+        expandable
+          ? () => {
+              animateListChange();
+              setExpanded((current) => !current);
+            }
+          : undefined
+      }
       separatorInset={
         (margin ?? metrics.rowPaddingHorizontal) + DELIVERY_AVATAR + metrics.rowAccessoryGap
       }
