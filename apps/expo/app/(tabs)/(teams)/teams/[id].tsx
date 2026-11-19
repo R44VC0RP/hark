@@ -382,7 +382,12 @@ export default function TeamScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: team?.name ?? "" }} />
+      {/*
+        No bar title: the identity block right under the bar names the team,
+        as Contacts and Apple Account do; a title as well showed the name
+        twice at rest (V2-08).
+      */}
+      <Stack.Screen options={{ title: "" }} />
       {admin ? (
         <Stack.Toolbar placement="right">
           <Stack.Toolbar.Button accessibilityLabel="Rename Team" icon="pencil" onPress={rename} />
@@ -415,14 +420,13 @@ export default function TeamScreen() {
           <>
             <View
               accessibilityLabel={spoken(team.name, ...identityFacts(team))}
+              accessibilityRole="header"
               accessible
               style={[styles.identity, stacked && styles.identityStacked]}
             >
               <Avatar name={team.name} size={AVATAR} />
               <View style={styles.identityCopy}>
-                <Text accessibilityRole="header" variant="title3">
-                  {team.name}
-                </Text>
+                <Text variant="title3">{team.name}</Text>
                 <FactLine facts={identityFacts(team)} />
               </View>
             </View>
@@ -432,6 +436,7 @@ export default function TeamScreen() {
                 footer={"You’ll get a link to send. It works once and expires in 7\u00A0days."}
               >
                 <RowMenu
+                  anchor="leading"
                   disabled={inviting}
                   hint="Creates a join link and opens the share sheet"
                   label={inviting ? "Creating Link…" : "Invite People…"}

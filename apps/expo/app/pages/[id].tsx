@@ -1,8 +1,17 @@
 import type { OncallPageDto, OncallPageEventDto } from "@hark/contracts";
 import * as Device from "expo-device";
 import { Redirect, Stack, useLocalSearchParams } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, StyleSheet, View } from "react-native";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import {
+  AccessibilityInfo,
+  Alert,
+  AppState,
+  type LayoutChangeEvent,
+  Text as NativeText,
+  StyleSheet,
+  View,
+} from "react-native";
+import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppIcon } from "../../src/components/app-icon";
 import { LeadingDot } from "../../src/components/teams/page-row";
 import { PageStatusPill } from "../../src/components/teams/page-status";
@@ -13,7 +22,7 @@ import { formatAgo, formatDateTime, spokenTime } from "../../src/lib/dates";
 import { alertFailure, haptic } from "../../src/lib/haptics";
 import { openTopLevelDestination } from "../../src/lib/inbox-body";
 import { previewPages, previewViewer } from "../../src/lib/inbox-preview";
-import { useLayout } from "../../src/lib/layout";
+import { isPad, useLayout } from "../../src/lib/layout";
 import { backOr, leaveSheetThenPush } from "../../src/lib/navigation";
 import { dismissNotificationsForPage } from "../../src/lib/notification-withdrawals";
 import {
@@ -36,15 +45,46 @@ const simulatorPreview = __DEV__ && !Device.isDevice;
 const TICK_MS = 30_000;
 const APP_ICON = 40;
 /**
- * From xxxL text up the three toolbar labels no longer fit and UIKit folds
- * the last item, the prominent one, into "…". This is the toolbar's own
- * measure, not the row-stacking threshold, which may move (V-08).
+ * The bottom toolbar's text items as UIKit draws them (iOS 27.2): 17-pt
+ * medium in the body text style, growing with the text size until about
+ * xxLarge, a little bolder with Bold Text. The invisible copies that measure
+ * them are a step heavier (semibold, bold with Bold Text) and stop growing a
+ * bit later, so they never come out narrower than the real labels (checked
+ * from Large to AX5, with and without Bold Text).
  */
-const TOOLBAR_FOLD_SCALE = 1.35;
+const BAR_LABEL = { fontSize: 17, fontWeight: "600" } as const;
+const BAR_LABEL_BOLD = { fontSize: 17, fontWeight: "700" } as const;
+const BAR_LABEL_MAX_SCALE = 1.25;
 /**
- * The sheet's content runs under its bottom toolbar; the soft edge fades it
- * out there instead of leaving crisp text between and behind the buttons
- * ("automatic" drew nothing at the bottom, V-01).
+ * What a toolbar needs besides its labels, in points: both margins, each
+ * item's padding, the prominent item's extra padding and the gap between
+ * items, as UIKit lays them out when there is room (iOS 27.2). When the
+ * items don't fit, UIKit first squeezes the margins (33 to 29 pt on a
+ * 402-pt iPhone, where the three labels only just fit at the default text
+ * size) and then moves the trailing item, the prominent one, into an
+ * unlabelled "⋯" (V2-01). The sheet folds its secondary actions before the
+ * bar would need squeezing, so a slightly narrower phone, larger or bolder
+ * text, or another iOS release can't push the primary action out.
+ */
+const BAR_METRICS = isPad
+  ? { margins: 28, padding: 24, prominent: 2, gap: 20 }
+  : { margins: 66, padding: 22, prominent: 1.5, gap: 22 };
+type BarLabel = "Resolve" | "Escalate" | "Acknowledge" | "Acknowledged";
+const BAR_LABELS: readonly BarLabel[] = ["Resolve", "Escalate", "Acknowledge", "Acknowledged"];
+const OPEN_TOOLBAR = [
+  { label: "Resolve" },
+  { label: "Escalate" },
+  { label: "Acknowledge", prominent: true },
+] as const;
+const ACKNOWLEDGED_TOOLBAR = [
+  { label: "Resolve", prominent: true },
+  { label: "Acknowledged" },
+] as const;
+/**
+ * The list ends where the bottom toolbar starts (V2-03); should content
+ * still reach the bar (before the sheet knows its height), the hard edge
+ * hides it instead of leaving crisp text between the buttons ("automatic"
+ * drew nothing at the bottom, V-01).
  */
 const EDGE_EFFECTS = {
   top: "soft",
@@ -62,6 +102,95 @@ const TIMELINE_DOT: Record<OncallPageEventDto["kind"], ColorName> = {
   resolved: "placeholder",
 };
 
+/** Bold Text as last reported, so a sheet opened later knows it on its first render. */
+let boldTextEnabled: boolean | null = null;
+
+function useBoldText(): boolean | null {
+  const [bold, setBold] = useState(boldTextEnabled);
+  useEffect(() => {
+    const update = (value: boolean) => {
+      boldTextEnabled = value;
+      setBold(value);
+    };
+    const subscription = AccessibilityInfo.addEventListener("boldTextChanged", update);
+    void AccessibilityInfo.isBoldTextEnabled().then(update);
+    return () => subscription.remove();
+  }, []);
+  return bold;
+}
+
+interface BarItem {
+  label: BarLabel;
+  prominent?: boolean;
+}
+
+/**
+ * Whether toolbar items fit side by side in the sheet (V2-01). It decides
+ * from the space the sheet has and the room its labels take now, at the
+ * current text size and with or without Bold Text, instead of from a list of
+ * settings: an invisible copy of each label (`measure`, rendered after the
+ * list) reports its width. Until both are known nothing fits, so the
+ * primary action is never the item UIKit hides.
+ */
+function useToolbarRoom(): { fits: (items: readonly BarItem[]) => boolean; measure: ReactNode } {
+  const bold = useBoldText();
+  const fontScale = useFontScale();
+  // A new key draws the labels again: React Native keeps a measured text's
+  // size until its props change, and its fonts don't follow Bold Text.
+  const key = `${fontScale}-${bold}`;
+  const [available, setAvailable] = useState(0);
+  const [measured, setMeasured] = useState<{
+    key: string;
+    widths: Partial<Record<BarLabel, number>>;
+  }>({ key: "", widths: {} });
+  const onLabelLayout = (label: BarLabel) => (event: LayoutChangeEvent) => {
+    const width = event.nativeEvent.layout.width;
+    setMeasured((current) =>
+      current.key !== key
+        ? { key, widths: { [label]: width } }
+        : current.widths[label] === width
+          ? current
+          : { key, widths: { ...current.widths, [label]: width } },
+    );
+  };
+  const fits = (items: readonly BarItem[]) => {
+    if (available === 0 || measured.key !== key) return false;
+    let needed = BAR_METRICS.margins + BAR_METRICS.gap * (items.length - 1);
+    for (const item of items) {
+      const width = measured.widths[item.label];
+      if (width === undefined) return false;
+      needed += width + BAR_METRICS.padding + (item.prominent ? BAR_METRICS.prominent : 0);
+    }
+    return needed <= available + 0.5;
+  };
+  const measure =
+    bold === null ? null : (
+      <View
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        onLayout={(event) => setAvailable(event.nativeEvent.layout.width)}
+        pointerEvents="none"
+        style={styles.barMeasure}
+      >
+        <View key={key} style={styles.barMeasureRow}>
+          {BAR_LABELS.map((label) => (
+            <NativeText
+              dynamicTypeRamp="body"
+              key={label}
+              maxFontSizeMultiplier={BAR_LABEL_MAX_SCALE}
+              numberOfLines={1}
+              onLayout={onLabelLayout(label)}
+              style={bold ? BAR_LABEL_BOLD : BAR_LABEL}
+            >
+              {label}
+            </NativeText>
+          ))}
+        </View>
+      </View>
+    );
+  return { fits, measure };
+}
+
 /**
  * A page (DESIGN.md 5.18), the most urgent thing in Hark: someone is being
  * paged. A page sheet with the status, what happened and who was notified,
@@ -73,7 +202,8 @@ const TIMELINE_DOT: Record<OncallPageEventDto["kind"], ColorName> = {
 export default function PageSheet() {
   const { data: session, isPending } = useSession();
   const stacked = useStackedRows();
-  const foldToolbar = useFontScale() >= TOOLBAR_FOLD_SCALE;
+  const toolbar = useToolbarRoom();
+  const [bottomInset, setBottomInset] = useState(0);
   const directory = useDirectory();
   const params = useLocalSearchParams<{ id: string; intent?: string }>();
   const id = String(params.id);
@@ -83,10 +213,16 @@ export default function PageSheet() {
   const [now, setNow] = useState(() => Date.now());
   const intentHandled = useRef(false);
   const directoryRef = useRef(directory);
+  const viewerId = simulatorPreview ? previewViewer.userId : session?.user.id;
+  const viewerRef = useRef(viewerId);
 
   useEffect(() => {
     directoryRef.current = directory;
   }, [directory]);
+
+  useEffect(() => {
+    viewerRef.current = viewerId;
+  }, [viewerId]);
 
   const load = useCallback(async (): Promise<OncallPageDto | null> => {
     if (simulatorPreview) {
@@ -120,6 +256,15 @@ export default function PageSheet() {
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  // Back in the app: show what happened meanwhile, on another device too
+  // (P2-04), before an action meets a page that moved on.
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") void load();
+    });
+    return () => subscription.remove();
   }, [load]);
 
   // Someone else claimed it: show who, without waiting for a pull to refresh.
@@ -171,12 +316,17 @@ export default function PageSheet() {
   }, []);
 
   /**
-   * Someone else got there first (409): show the page as it is now and who
-   * has it. The server only escalates pages nobody has acknowledged.
+   * Someone got there first (409): show the page as it is now and, when it
+   * was someone else, who has it. The server only escalates pages nobody
+   * has acknowledged.
    */
   const alreadyHandled = useCallback(async () => {
     const latest = await load();
     if (latest) apply(latest);
+    // You did it yourself, on another device: the sheet now shows it, and
+    // "someone else is on it" would be wrong (P2-04).
+    const by = latest?.status === "resolved" ? latest.resolvedBy : latest?.acknowledgedBy;
+    if (by && by.userId === viewerRef.current) return;
     haptic.warning();
     if (latest?.status === "resolved") {
       const who = latest.resolvedBy?.name;
@@ -301,6 +451,11 @@ export default function PageSheet() {
   if (!isPending && !session && !simulatorPreview) return <Redirect href="/" />;
 
   const resolved = page?.status === "resolved";
+  // The primary action is always on the bar itself: when the three items
+  // don't fit, Resolve and Escalate fold into More Actions; once
+  // acknowledged, the dimmed "Acknowledged" gives way before Resolve would.
+  const foldToolbar = triggered && !toolbar.fits(OPEN_TOOLBAR);
+  const showAcknowledged = triggered || toolbar.fits(ACKNOWLEDGED_TOOLBAR);
   const ringing = page?.ringing ?? [];
   const timeline = page?.timeline ?? [];
 
@@ -314,7 +469,11 @@ export default function PageSheet() {
           onPress={() => backOr("/teams")}
         />
       </Stack.Toolbar>
-      <List reading>
+      {/*
+        While the toolbar is up the list ends where it starts, so nothing
+        rests under it: a row there read as a ghost toolbar item (V2-03).
+      */}
+      <List reading style={page && !resolved ? { marginBottom: bottomInset } : undefined}>
         {!page ? (
           failure === "missing" ? (
             <EmptyState
@@ -474,6 +633,10 @@ export default function PageSheet() {
           </>
         )}
       </List>
+      {toolbar.measure}
+      <SafeAreaProvider pointerEvents="none" style={StyleSheet.absoluteFill}>
+        <BottomInset onChange={setBottomInset} />
+      </SafeAreaProvider>
       {page && !resolved ? (
         <Stack.Toolbar placement="bottom">
           {/*
@@ -486,7 +649,8 @@ export default function PageSheet() {
             acknowledged, Resolve becomes the prominent next step where it
             already was. Labels never change while a request is out (items
             are only disabled): a wider label made UIKit fold the bar.
-            From xxxL text Resolve and Escalate fold into a More menu in the
+            When the three don't fit the sheet (narrow iPhones, larger text,
+            Bold Text), Resolve and Escalate fold into a More menu in the
             same leading place, so the trailing item stays visible.
           */}
           {triggered && foldToolbar ? (
@@ -523,6 +687,7 @@ export default function PageSheet() {
               triggered ? "Tells the team you’re on it and stops escalation" : undefined
             }
             disabled={!triggered || busy !== null}
+            hidden={!showAcknowledged}
             onPress={() => void acknowledge()}
             tintColor={triggered ? palette.accent : undefined}
             variant={triggered ? "prominent" : "plain"}
@@ -533,6 +698,16 @@ export default function PageSheet() {
       ) : null}
     </>
   );
+}
+
+/**
+ * The sheet's bottom safe area, which includes its toolbar: a provider
+ * inside the sheet reports the insets of its own view, not the window's.
+ */
+function BottomInset({ onChange }: { onChange: (bottom: number) => void }) {
+  const { bottom } = useSafeAreaInsets();
+  useEffect(() => onChange(bottom), [bottom, onChange]);
+  return null;
 }
 
 /** One line of the page's history: who was paged, claimed or resolved it, and when. */
@@ -565,6 +740,23 @@ function TimelineRow({ event, now }: { event: OncallPageEventDto; now: number })
 }
 
 const styles = StyleSheet.create({
+  barMeasure: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 0,
+    overflow: "hidden",
+    opacity: 0,
+  },
+  barMeasureRow: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    width: 4096,
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
   hero: {
     gap: space.xs,
     marginTop: space.s,
