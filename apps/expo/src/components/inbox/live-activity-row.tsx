@@ -1,6 +1,7 @@
 import type { InboxLiveActivityDto } from "@hark/contracts";
 import { memo } from "react";
 import { StyleSheet, View } from "react-native";
+import { useLayout } from "../../lib/layout";
 import { spoken } from "../../ui/a11y";
 import { SourceAvatar } from "../../ui/avatar";
 import { Cell, useStackedRows } from "../../ui/list";
@@ -17,9 +18,17 @@ export const LiveActivityRow = memo(function LiveActivityRow({
   item: InboxLiveActivityDto;
 }) {
   const stacked = useStackedRows();
+  // iPad: text and bar keep the Inbox's reading measure and the percent
+  // moves to the row's trailing edge, where requests and projects keep theirs.
+  const wide = useLayout().regular && !stacked;
   const progress = item.props.progress;
   const percent = progress !== undefined ? Math.round(progress * 100) : null;
   const detail = `${item.sourceName} · ${item.props.detail ?? item.props.status}`;
+  const percentText = (
+    <Text color="accent" tabular variant="subheadline" weight="600">
+      {`${percent}%`}
+    </Text>
+  );
   return (
     <Cell
       accessibilityLabel={spoken(
@@ -32,7 +41,7 @@ export const LiveActivityRow = memo(function LiveActivityRow({
       separatorInset={metrics.rowPaddingHorizontal + AVATAR + metrics.rowAccessoryGap}
     >
       <SourceAvatar name={item.sourceName} size={AVATAR} url={item.sourceImageUrl} />
-      <View style={styles.copy}>
+      <View style={[styles.copy, wide && styles.copyWide]}>
         <View style={styles.titleLine}>
           <Text
             numberOfLines={stacked ? undefined : 2}
@@ -42,11 +51,7 @@ export const LiveActivityRow = memo(function LiveActivityRow({
           >
             {item.props.title}
           </Text>
-          {percent !== null ? (
-            <Text color="accent" tabular variant="subheadline" weight="600">
-              {`${percent}%`}
-            </Text>
-          ) : null}
+          {percent !== null && !wide ? percentText : null}
         </View>
         <Text color="secondaryLabel" numberOfLines={stacked ? 2 : 1} variant="subheadline">
           {detail}
@@ -57,6 +62,7 @@ export const LiveActivityRow = memo(function LiveActivityRow({
           </View>
         ) : null}
       </View>
+      {percent !== null && wide ? <View style={styles.trailingWide}>{percentText}</View> : null}
     </Cell>
   );
 });
@@ -66,6 +72,15 @@ const styles = StyleSheet.create({
     minWidth: 0,
     flex: 1,
     gap: 2,
+  },
+  copyWide: {
+    flexGrow: 0,
+    flexBasis: metrics.measureWidth,
+  },
+  trailingWide: {
+    alignSelf: "flex-start",
+    marginLeft: "auto",
+    paddingTop: 2,
   },
   titleLine: {
     flexDirection: "row",

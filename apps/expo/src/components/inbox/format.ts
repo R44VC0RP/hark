@@ -26,6 +26,23 @@ export function timeRemainingSpoken(value: string, now = Date.now()): string {
   return timeRemaining(value, now).replace(" min ", " minutes ");
 }
 
+/**
+ * A request's answer as History words it ("Approved", "Denied", "Yes",
+ * "No", "Replied"), so the Inbox and History say the same thing.
+ */
+export const ANSWER_LABELS = {
+  approve: "Approved",
+  deny: "Denied",
+  yes: "Yes",
+  no: "No",
+  reply: "Replied",
+} as const;
+
+/** Denied and No read as a refusal, not a success: no green check (V-10). */
+export function isRefusal(result: string): boolean {
+  return result === ANSWER_LABELS.deny || result === ANSWER_LABELS.no;
+}
+
 export function activityKindLabel(kind: InboxActivityKind): string {
   if (kind === "live_activity") return "Live Activity";
   if (kind === "response") return "Response";

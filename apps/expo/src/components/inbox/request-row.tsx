@@ -2,15 +2,23 @@ import type { InboxInteractionDto } from "@hark/contracts";
 import { SymbolView } from "expo-symbols";
 import { memo } from "react";
 import { type AccessibilityActionEvent, StyleSheet, View } from "react-native";
+import type { RequestAnswer } from "../../lib/inbox-cache";
+import { useLayout } from "../../lib/layout";
 import { spoken } from "../../ui/a11y";
 import { SourceAvatar } from "../../ui/avatar";
 import { Button } from "../../ui/button";
 import { Cell, useStackedRows } from "../../ui/list";
 import { Text, useFontScale } from "../../ui/text";
 import { colors, metrics, space } from "../../ui/tokens";
-import { relativeTime, timeRemaining, timeRemainingSpoken } from "./format";
+import {
+  ANSWER_LABELS,
+  isRefusal,
+  relativeTime,
+  timeRemaining,
+  timeRemainingSpoken,
+} from "./format";
 
-export type RequestAction = "approve" | "deny" | "yes" | "no";
+export type RequestAction = Exclude<RequestAnswer, "reply">;
 
 interface RequestRowProps {
   item: InboxInteractionDto;
@@ -19,6 +27,8 @@ interface RequestRowProps {
   sending: boolean;
   /** Any response is being sent: every action waits. */
   busy: boolean;
+  /** Answered in this session: the answer shows where the buttons were. */
+  answer: RequestAnswer | null;
   /** Re-renders the relative times; pass the Inbox's minute tick. */
   now: number;
   onRespond: (item: InboxInteractionDto, action: RequestAction) => void;
@@ -29,17 +39,23 @@ interface RequestRowProps {
  * A request waiting on you (DESIGN.md 5.3): who asks, what, how long is
  * left, and its answers as flat buttons. The text is one VoiceOver element
  * with the answers as actions; the buttons stay separate elements.
+ *
+ * Once answered, the row keeps its exact size and shows the answer
+ * ("Approved") over the space its buttons held, which no longer take
+ * touches. Nothing moves, so a second tap can't land on the next request.
  */
 export const RequestRow = memo(function RequestRow({
   item,
   projectName,
   sending,
   busy,
+  answer,
   now,
   onRespond,
   onReply,
 }: RequestRowProps) {
   const stacked = useStackedRows();
+  const wide = useLayout().regular && !stacked;
   const scale = useFontScale();
   const answers =
     item.kind === "approval"
@@ -55,77 +71,92 @@ export const RequestRow = memo(function RequestRow({
         : null;
 
   const source = projectName ? `${item.sourceName}, ${projectName}` : item.sourceName;
-  const label = spoken(item.title, item.prompt, source, timeRemainingSpoken(item.expiresAt, now));
-  const actions = answers
-    ? [
-        { name: answers.primary.action, label: answers.primary.label },
-        { name: answers.secondary.action, label: answers.secondary.label },
-      ]
-    : [{ name: "reply", label: "Reply" }];
+  const result = answer ? ANSWER_LABELS[answer] : null;
+  const label = spoken(
+    item.title,
+    item.prompt,
+    source,
+    result ?? timeRemainingSpoken(item.expiresAt, now),
+  );
+  const actions = answer
+    ? undefined
+    : answers
+      ? [
+          { name: answers.primary.action, label: answers.primary.label },
+          { name: answers.secondary.action, label: answers.secondary.label },
+        ]
+      : [{ name: "reply", label: "Reply" }];
   const time = (
     <Text color="tertiaryLabel" tabular variant="footnote">
       {relativeTime(item.createdAt, now)}
     </Text>
   );
+  const inactive = busy || answer !== null;
   const onAccessibilityAction = (event: AccessibilityActionEvent) => {
     const name = event.nativeEvent.actionName;
-    if (busy) return;
+    if (inactive) return;
     if (name === "reply") onReply(item, projectName);
     else if (answers && (name === answers.primary.action || name === answers.secondary.action)) {
       onRespond(item, name);
     }
   };
 
-  return (
-    <Cell style={styles.row}>
-      <View
-        accessibilityActions={actions}
-        accessibilityLabel={label}
-        accessible
-        onAccessibilityAction={onAccessibilityAction}
-        style={[stacked ? styles.full : styles.column, styles.copy]}
-      >
-        <View style={styles.sourceLine}>
-          <SourceAvatar name={item.sourceName} size={24} url={item.sourceImageUrl} />
-          <Text
-            color="secondaryLabel"
-            numberOfLines={stacked ? undefined : 1}
-            style={styles.source}
-            variant="footnote"
-          >
-            <Text color="secondaryLabel" variant="footnote" weight="600">
-              {item.sourceName}
-            </Text>
-            {projectName ? ` · ${projectName}` : ""}
+  const copy = (
+    <View
+      accessibilityActions={actions}
+      accessibilityLabel={label}
+      accessible
+      onAccessibilityAction={onAccessibilityAction}
+      style={[wide ? styles.copyWide : styles.full, styles.copy]}
+    >
+      <View style={styles.sourceLine}>
+        <SourceAvatar name={item.sourceName} size={24} url={item.sourceImageUrl} />
+        <Text
+          color="secondaryLabel"
+          numberOfLines={stacked ? undefined : 1}
+          style={styles.source}
+          variant="footnote"
+        >
+          <Text color="secondaryLabel" variant="footnote" weight="600">
+            {item.sourceName}
           </Text>
-          {stacked ? null : time}
-        </View>
-        {/* At accessibility sizes the time stacks under the source (3.6). */}
-        {stacked ? time : null}
-        <Text numberOfLines={stacked ? undefined : 2} variant="headline">
-          {item.title}
+          {projectName ? ` · ${projectName}` : ""}
         </Text>
-        <Text color="secondaryLabel" numberOfLines={stacked ? undefined : 6} variant="subheadline">
-          {item.prompt}
-        </Text>
-        <View style={styles.meta}>
-          <SymbolView name="clock" size={Math.round(12 * scale)} tintColor={colors.tertiaryLabel} />
-          <Text color="tertiaryLabel" tabular variant="footnote">
-            {timeRemaining(item.expiresAt, now)}
-          </Text>
-        </View>
+        {stacked || wide ? null : time}
       </View>
+      {/* At accessibility sizes the time stacks under the source (3.6). */}
+      {stacked ? time : null}
+      <Text numberOfLines={stacked ? undefined : 2} variant="headline">
+        {item.title}
+      </Text>
+      <Text color="secondaryLabel" numberOfLines={stacked ? undefined : 6} variant="subheadline">
+        {item.prompt}
+      </Text>
+      <View style={styles.meta}>
+        <SymbolView name="clock" size={Math.round(12 * scale)} tintColor={colors.tertiaryLabel} />
+        <Text color="tertiaryLabel" tabular variant="footnote">
+          {timeRemaining(item.expiresAt, now)}
+        </Text>
+      </View>
+    </View>
+  );
+  const buttons = (
+    <View style={styles.full}>
+      {/*
+        Answered: the buttons keep their space (so the row keeps its
+        height) but are invisible, hidden from VoiceOver and take no
+        touches; the answer sits on top of that space.
+      */}
       <View
-        style={[
-          stacked ? styles.full : styles.column,
-          styles.actions,
-          stacked && styles.actionsStacked,
-        ]}
+        accessibilityElementsHidden={answer !== null}
+        importantForAccessibility={answer ? "no-hide-descendants" : "auto"}
+        pointerEvents={answer ? "none" : "auto"}
+        style={[styles.actions, stacked && styles.actionsStacked, answer && styles.spent]}
       >
         {answers ? (
           <>
             <Button
-              disabled={busy}
+              disabled={inactive}
               onPress={() => onRespond(item, answers.secondary.action)}
               style={stacked ? null : styles.action}
               title={answers.secondary.label}
@@ -134,7 +165,7 @@ export const RequestRow = memo(function RequestRow({
             <Button
               busy={sending}
               busyTitle="Sending…"
-              disabled={busy}
+              disabled={inactive}
               onPress={() => onRespond(item, answers.primary.action)}
               style={stacked ? null : styles.action}
               title={answers.primary.label}
@@ -144,7 +175,7 @@ export const RequestRow = memo(function RequestRow({
         ) : (
           <Button
             accessibilityHint="Opens a reply sheet"
-            disabled={busy}
+            disabled={inactive}
             onPress={() => onReply(item, projectName)}
             style={stacked ? null : styles.action}
             symbol="arrowshape.turn.up.left"
@@ -153,9 +184,48 @@ export const RequestRow = memo(function RequestRow({
           />
         )}
       </View>
+      {result ? <AnswerLine result={result} scale={scale} /> : null}
+    </View>
+  );
+
+  // Regular width: the text keeps its reading measure on the leading side,
+  // and the time and the answers take a fixed column on the trailing edge,
+  // which Projects and In Progress share for their time, badge and percent.
+  if (wide) {
+    return (
+      <Cell style={[styles.row, styles.rowWide]}>
+        {copy}
+        <View style={styles.trailing}>
+          <View style={styles.timeWide}>{time}</View>
+          {buttons}
+        </View>
+      </Cell>
+    );
+  }
+  return (
+    <Cell style={styles.row}>
+      {copy}
+      {buttons}
     </Cell>
   );
 });
+
+/** "✓ Approved" (accent) or "✕ Denied" (secondary), centred where the buttons were. */
+function AnswerLine({ result, scale }: { result: string; scale: number }) {
+  const refusal = isRefusal(result);
+  return (
+    <View importantForAccessibility="no-hide-descendants" style={styles.answer}>
+      <SymbolView
+        name={refusal ? "xmark.circle.fill" : "checkmark.circle.fill"}
+        size={Math.round(17 * scale)}
+        tintColor={refusal ? colors.secondaryLabel : colors.accent}
+      />
+      <Text color={refusal ? "secondaryLabel" : "accent"} variant="subheadline" weight="600">
+        {result}
+      </Text>
+    </View>
+  );
+}
 
 const styles = StyleSheet.create({
   row: {
@@ -163,17 +233,36 @@ const styles = StyleSheet.create({
     alignItems: "stretch",
     gap: space.s,
     paddingVertical: space.s,
+    // Opaque like a table cell: when a row is removed, the rows sliding up
+    // cover it while it fades, instead of their text crossing its text.
+    backgroundColor: colors.cell,
   },
   /**
-   * On wide windows the whole request is one column (about 88 characters of
-   * prompt per line) and the answers fill the same width, so text, time and
-   * buttons share one right edge. A no-op on iPhone widths. At accessibility
-   * text sizes the cap would leave about 25 characters per line, so the
-   * request uses the full width instead.
+   * Wide windows: text on the leading side at the reading measure (about 88
+   * characters of prompt per line), time and answers in a fixed trailing
+   * column on the row's trailing edge. At accessibility text sizes the
+   * request stacks at full width instead, like on iPhone.
    */
-  column: {
-    width: "100%",
-    maxWidth: metrics.measureWidth,
+  rowWide: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    gap: space.xl,
+  },
+  copyWide: {
+    flexGrow: 0,
+    flexShrink: 1,
+    flexBasis: metrics.measureWidth,
+  },
+  trailing: {
+    width: metrics.trailingColumnWidth,
+    marginLeft: "auto",
+    justifyContent: "space-between",
+    alignItems: "flex-end",
+  },
+  /** The time sits on the source line's centre (the 24-pt avatar). */
+  timeWide: {
+    minHeight: 24,
+    justifyContent: "center",
   },
   full: {
     width: "100%",
@@ -206,5 +295,15 @@ const styles = StyleSheet.create({
   },
   action: {
     flex: 1,
+  },
+  spent: {
+    opacity: 0,
+  },
+  answer: {
+    ...StyleSheet.absoluteFill,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: space.xs,
   },
 });

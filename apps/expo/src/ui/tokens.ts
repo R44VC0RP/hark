@@ -92,10 +92,13 @@ export const metrics = {
   /** Detail screens (notification, page, consent, join, critical alerts) on iPad. */
   readingWidth: 680,
   /**
-   * Text-and-action blocks in full-width lists on iPad (Inbox requests):
-   * about 88 characters per line at 15 pt, buttons as wide as the text.
+   * The longest text line in full-width lists on iPad (Inbox): about 88
+   * characters per line at 15 pt. Times, badges and answers sit past it, in
+   * the trailing column.
    */
   measureWidth: 600,
+  /** The Inbox's trailing column on iPad: two 120-pt answer buttons. */
+  trailingColumnWidth: 248,
   hitTarget: 44,
   /** At or above this `fontScale` rows stack their value under the label (3.6). */
   accessibilityFontScale: 1.35,

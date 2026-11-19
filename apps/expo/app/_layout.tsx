@@ -162,7 +162,9 @@ export default function RootLayout() {
             // the title ends up under the header (checked in the simulator).
             sheetInitialDetentIndex: largeText ? 1 : 0,
             sheetGrabberVisible: true,
-            contentStyle: { backgroundColor: "transparent" },
+            // The sheets' warm grey (from `sheetOptions`) at both heights: on
+            // glass at half height the composer sat on blurred thumbnails and
+            // green buttons, and at full height the sheet turned white.
           }}
         />
         <Stack.Screen

@@ -2,6 +2,7 @@ import type { InboxProjectSummaryDto } from "@hark/contracts";
 import { Link } from "expo-router";
 import { memo } from "react";
 import { StyleSheet, View } from "react-native";
+import { useLayout } from "../../lib/layout";
 import { spoken } from "../../ui/a11y";
 import { Thumbnail } from "../../ui/avatar";
 import { Cell, useStackedRows } from "../../ui/list";
@@ -25,6 +26,7 @@ export const ProjectRow = memo(function ProjectRow({
   now: number;
 }) {
   const stacked = useStackedRows();
+  const wide = useLayout().regular && !stacked;
   const unread = item.unreadCount > 0;
   const preview = item.latestPreview ?? "No notifications yet";
   const count = item.unreadCount > 99 ? "99+" : String(item.unreadCount);
@@ -48,7 +50,7 @@ export const ProjectRow = memo(function ProjectRow({
         separatorInset={metrics.rowPaddingHorizontal + THUMB + metrics.rowAccessoryGap}
       >
         <Thumbnail name={item.name} size={THUMB} url={item.latestImageUrl} />
-        <View style={styles.copy}>
+        <View style={[styles.copy, wide && styles.copyWide]}>
           <Text numberOfLines={stacked ? undefined : 1} variant={unread ? "headline" : "body"}>
             {item.name}
           </Text>
@@ -56,7 +58,7 @@ export const ProjectRow = memo(function ProjectRow({
             {preview}
           </Text>
         </View>
-        <View style={styles.trailing}>
+        <View style={[styles.trailing, wide && styles.trailingWide]}>
           {item.latestAt ? (
             <Text color="tertiaryLabel" tabular variant="footnote">
               {relativeTime(item.latestAt, now)}
@@ -87,9 +89,23 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 2,
   },
+  /** iPad: the Inbox's reading measure; time and badge stay on the trailing edge. */
+  copyWide: {
+    flexGrow: 0,
+    flexBasis: metrics.measureWidth,
+  },
+  /**
+   * The time lines up with the title's first line whether or not a badge
+   * follows (centred, a read row's time sat lower than an unread row's).
+   */
   trailing: {
+    alignSelf: "flex-start",
     alignItems: "flex-end",
     gap: space.xxs,
+    paddingTop: 2,
+  },
+  trailingWide: {
+    marginLeft: "auto",
   },
   badge: {
     minWidth: BADGE,

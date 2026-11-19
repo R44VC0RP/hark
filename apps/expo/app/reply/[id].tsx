@@ -1,10 +1,15 @@
 import * as Device from "expo-device";
-import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { useHeaderHeight } from "expo-router/react-navigation";
-import { useState } from "react";
-import { Alert, StyleSheet, TextInput, View } from "react-native";
+import { Stack, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
+import { useHeaderHeight, usePreventRemove } from "expo-router/react-navigation";
+import { useRef, useState } from "react";
+import { ActionSheetIOS, Alert, StyleSheet, TextInput, View } from "react-native";
 import { haptic } from "../../src/lib/haptics";
-import { cachedInteraction, markInteractionHandled } from "../../src/lib/inbox-cache";
+import {
+  cachedInteraction,
+  markInteractionHandled,
+  replyDraft,
+  saveReplyDraft,
+} from "../../src/lib/inbox-cache";
 import { submitInteractionResponse } from "../../src/lib/interactions";
 import { useLayout } from "../../src/lib/layout";
 import { SourceAvatar } from "../../src/ui/avatar";
@@ -36,14 +41,52 @@ export default function ReplySheet() {
     SHEET_HEADER_HEIGHT[regular ? "regular" : "compact"],
   );
   const stacked = useStackedRows();
+  const navigation = useNavigation();
   const { id } = useLocalSearchParams<{ id: string }>();
   const cached = cachedInteraction(String(id));
-  const [text, setText] = useState("");
+  // The draft outlives the sheet (per request, like Messages): closing it
+  // and opening the same request again brings the text back.
+  const [text, setText] = useState(() => replyDraft(String(id)));
   const [sending, setSending] = useState(false);
   const response = text.trim();
+  const busy = useRef(false);
+  const sent = useRef(false);
+  const asking = useRef(false);
+
+  // With unsent text the sheet can't be swiped or tapped away by accident
+  // (`preventNativeDismiss`, UIKit's `isModalInPresentation`). Cancel, a
+  // swipe, a tap outside or a link that would close it asks first, as Mail
+  // does: delete the draft, keep it for later, or keep editing.
+  usePreventRemove(Boolean(cached && response), ({ data }) => {
+    if (sent.current) {
+      navigation.dispatch(data.action);
+      return;
+    }
+    if (busy.current || asking.current) return;
+    asking.current = true;
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        options: ["Delete Draft", "Save Draft", "Keep Editing"],
+        destructiveButtonIndex: 0,
+        cancelButtonIndex: 2,
+      },
+      (index) => {
+        asking.current = false;
+        if (index === 2) return;
+        if (index === 0) saveReplyDraft(String(id), "");
+        navigation.dispatch(data.action);
+      },
+    );
+  });
+
+  const edit = (value: string) => {
+    setText(value);
+    saveReplyDraft(String(id), value);
+  };
 
   const send = async () => {
-    if (!cached || sending || !response) return;
+    if (!cached || busy.current || !response) return;
+    busy.current = true;
     setSending(true);
     try {
       const { interaction } = cached;
@@ -57,8 +100,9 @@ export default function ReplySheet() {
       haptic.success();
       // No list animation here: this sheet is closing, and Fabric's
       // LayoutAnimation aborts the app when the same commit removes the sheet
-      // (checked in the simulator). The Inbox row just goes.
-      markInteractionHandled(interaction.id);
+      // (checked in the simulator). The Inbox row shows "Replied" in place.
+      markInteractionHandled(interaction, "reply");
+      sent.current = true;
       router.back();
     } catch (error) {
       haptic.error();
@@ -66,6 +110,7 @@ export default function ReplySheet() {
         "Couldn't Send Reply",
         error instanceof Error ? error.message : "Check your connection, then try again.",
       );
+      busy.current = false;
       setSending(false);
     }
   };
@@ -103,7 +148,6 @@ export default function ReplySheet() {
         contentContainerStyle={{ paddingTop: headerHeight + space.m }}
         contentInsetAdjustmentBehavior="never"
         scrollIndicatorInsets={{ top: headerHeight }}
-        style={styles.transparent}
       >
         {cached ? (
           <>
@@ -136,7 +180,7 @@ export default function ReplySheet() {
               autoFocus
               editable={!sending}
               multiline
-              onChangeText={setText}
+              onChangeText={edit}
               placeholder="Write a reply"
               placeholderTextColor={colors.placeholder}
               scrollEnabled={false}
@@ -158,9 +202,6 @@ export default function ReplySheet() {
 }
 
 const styles = StyleSheet.create({
-  transparent: {
-    backgroundColor: "transparent",
-  },
   context: {
     gap: space.xxs,
   },

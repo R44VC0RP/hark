@@ -5,10 +5,15 @@ import type {
 } from "@hark/contracts";
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
-import { useFocusEffect, useRouter } from "expo-router";
+import {
+  type NativeStackNavigationProp,
+  useFocusEffect,
+  useNavigation,
+  useRouter,
+} from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, AppState } from "react-native";
-import { projectNameFor } from "../../../src/components/inbox/format";
+import { AccessibilityInfo, Alert, AppState, Linking } from "react-native";
+import { ANSWER_LABELS, projectNameFor } from "../../../src/components/inbox/format";
 import { LiveActivityRow } from "../../../src/components/inbox/live-activity-row";
 import { ProjectRow } from "../../../src/components/inbox/project-row";
 import { type RequestAction, RequestRow } from "../../../src/components/inbox/request-row";
@@ -17,8 +22,10 @@ import { publishInboxCounts } from "../../../src/lib/app-directory";
 import { useSession } from "../../../src/lib/auth";
 import { haptic } from "../../../src/lib/haptics";
 import {
+  clearAnsweredRequests,
   markInteractionHandled,
   rememberInteraction,
+  useAnsweredRequests,
   useHandledInteractionIds,
 } from "../../../src/lib/inbox-cache";
 import { previewActive, previewPending, previewProjects } from "../../../src/lib/inbox-preview";
@@ -34,6 +41,8 @@ const simulatorPreview = __DEV__ && !Device.isDevice;
 const POLL_MS = 15_000;
 /** Relative times ("2m", "13 min left") move on once a minute. */
 const TICK_MS = 60_000;
+/** Where a first-run Inbox points: how to send the first webhook or request. */
+const DOCS_URL = "https://hark.fyi/docs";
 
 interface Summary {
   pending: InboxInteractionDto[];
@@ -54,6 +63,7 @@ type LoadFailure = "network" | "other";
 export default function InboxScreen() {
   const { data: session } = useSession();
   const router = useRouter();
+  const navigation = useNavigation<NativeStackNavigationProp<Record<string, object | undefined>>>();
   const ready = Boolean(session || simulatorPreview);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loadFailure, setLoadFailure] = useState<LoadFailure | null>(null);
@@ -61,6 +71,7 @@ export default function InboxScreen() {
   const [sendingId, setSendingId] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const handled = useHandledInteractionIds();
+  const answered = useAnsweredRequests();
   const summaryJson = useRef("");
   const sending = useRef<string | null>(null);
   // Older/self-hosted servers without /api/inbox keep the legacy layout.
@@ -131,6 +142,7 @@ export default function InboxScreen() {
     const received = Notifications.addNotificationReceivedListener(quiet);
     const appState = AppState.addEventListener("change", (state) => {
       if (state === "active") quiet();
+      else if (state === "background") clearAnsweredRequests();
     });
     return () => {
       clearInterval(timer);
@@ -138,6 +150,22 @@ export default function InboxScreen() {
       appState.remove();
     };
   }, [load, ready, refresh]);
+
+  // Answered requests stay in place with their answer and leave only while
+  // nobody can be tapping them: once a pushed screen or another tab has
+  // fully covered the Inbox, in the background, or on pull to refresh. A
+  // row that left under a finger let a double tap answer the next request.
+  useEffect(() => {
+    // Fires once the Inbox is fully covered: a push or another tab (checked).
+    // A sheet only blurs it, and the rows stay in view behind the sheet.
+    const unsubscribe = navigation.addListener("transitionEnd", (event) => {
+      if (event.data.closing) clearAnsweredRequests();
+    });
+    return () => {
+      unsubscribe();
+      clearAnsweredRequests();
+    };
+  }, [navigation]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), TICK_MS);
@@ -171,6 +199,11 @@ export default function InboxScreen() {
       // Keep showing the last data; only an empty screen shows the failure.
       if (!summaryJson.current) setLoadFailure(isNetworkError(error) ? "network" : "other");
     } finally {
+      // A pull is a drag, not a tap on a button: answered rows can go now.
+      if (answered.size > 0) {
+        animateListChange();
+        clearAnsweredRequests();
+      }
       setRefreshing(false);
     }
   };
@@ -185,8 +218,10 @@ export default function InboxScreen() {
           await submitInteractionResponse(item.id, { action, actionDigest: item.actionDigest });
         }
         haptic.success();
-        animateListChange();
-        markInteractionHandled(item.id);
+        // No list animation: the row stays and shows the answer where its
+        // buttons were, so nothing moves under the finger that tapped.
+        markInteractionHandled(item, action);
+        AccessibilityInfo.announceForAccessibility(ANSWER_LABELS[action]);
         void refresh().catch(() => {});
       } catch (error) {
         haptic.error();
@@ -212,14 +247,22 @@ export default function InboxScreen() {
 
   const projects = summary?.projects ?? [];
   const active = summary?.active ?? [];
-  const pending = useMemo(
+  // Open requests plus the ones answered here, each in its own place.
+  const requests = useMemo(
     () =>
-      (summary?.pending ?? [])
-        .filter((item) => !handled.has(item.id))
-        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)),
-    [handled, summary],
+      [
+        ...(summary?.pending ?? [])
+          .filter((item) => !handled.has(item.id))
+          .map((item) => ({ item, answer: null })),
+        ...[...answered.values()].map(({ interaction, answer }) => ({
+          item: interaction,
+          answer,
+        })),
+      ].sort((a, b) => Date.parse(b.item.createdAt) - Date.parse(a.item.createdAt)),
+    [answered, handled, summary],
   );
-  const empty = pending.length === 0 && active.length === 0 && projects.length === 0;
+  const waiting = requests.filter((request) => request.answer === null).length;
+  const empty = requests.length === 0 && active.length === 0 && projects.length === 0;
 
   return (
     <>
@@ -240,10 +283,15 @@ export default function InboxScreen() {
           )
         ) : (
           <>
-            {pending.length > 0 ? (
-              <Section detail={String(pending.length)} prominent title="Needs You">
-                {pending.map((item) => (
+            {requests.length > 0 ? (
+              <Section
+                detail={waiting > 0 ? String(waiting) : undefined}
+                prominent
+                title="Needs You"
+              >
+                {requests.map(({ item, answer }) => (
                   <RequestRow
+                    answer={answer}
                     busy={sendingId !== null}
                     item={item}
                     key={item.id}
@@ -272,7 +320,9 @@ export default function InboxScreen() {
             ) : null}
             {empty ? (
               <EmptyState
+                actionTitle="How to Connect a Service"
                 message="Requests, progress and notifications from your agents and scripts show up here."
+                onAction={() => void Linking.openURL(DOCS_URL).catch(() => {})}
                 symbol="tray"
                 title="Your Inbox Is Empty"
               />
