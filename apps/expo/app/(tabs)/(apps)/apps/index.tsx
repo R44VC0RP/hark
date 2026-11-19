@@ -61,12 +61,16 @@ export default function AppsScreen() {
   // the tab has appeared, then turning hiding on, keeps it visible on arrival
   // (like Settings) and still tucks it away on scroll. Native tabs mount in
   // the background and focus before the tab is on screen, so hiding turns on
-  // a moment after the first focus (a frame was too soon on iPad).
+  // a moment after each focus (a frame was too soon on iPad); leaving the tab
+  // turns it off again, or the next visit would start with search hidden.
   const [hideSearchOnScroll, setHideSearchOnScroll] = useState(false);
   useFocusEffect(
     useCallback(() => {
       const timer = setTimeout(() => setHideSearchOnScroll(true), SEARCH_SETTLE_MS);
-      return () => clearTimeout(timer);
+      return () => {
+        clearTimeout(timer);
+        setHideSearchOnScroll(false);
+      };
     }, []),
   );
   const [refreshing, setRefreshing] = useState(false);
@@ -133,6 +137,7 @@ export default function AppsScreen() {
           symbol="square.grid.2x2"
           title="Your Apps Live Here"
         />
+        {/* The text fills the block, so a long press anywhere on it offers Copy. */}
         <View style={styles.command}>
           <Text selectable style={styles.commandText} variant="footnote">
             {ADD_APP_COMMAND}
@@ -196,22 +201,26 @@ export default function AppsScreen() {
     return () => clearTimeout(timer);
   }, [highlightReady, highlightTeam]);
 
+  // Nothing to search before the first app exists.
+  const nothingToSearch = directory !== null && apps.length === 0 && !hasTeams;
+
   return (
     <>
-      <Stack.SearchBar
-        autoCapitalize="none"
-        hideWhenScrolling={hideSearchOnScroll}
-        onCancelButtonPress={() => setQuery("")}
-        onChangeText={(event) => setQuery(event.nativeEvent.text)}
-        placeholder="Search Apps"
-        placement="stacked"
-      />
+      {nothingToSearch ? null : (
+        <Stack.SearchBar
+          autoCapitalize="none"
+          hideWhenScrolling={hideSearchOnScroll}
+          onCancelButtonPress={() => setQuery("")}
+          onChangeText={(event) => setQuery(event.nativeEvent.text)}
+          placeholder="Search Apps"
+          placement="stacked"
+        />
+      )}
       <TabRootToolbar />
       <List
         onRefresh={directory || loadFailed ? () => void onRefresh() : undefined}
         ref={scrollView}
         refreshing={refreshing}
-        variant="plain"
       >
         {content}
       </List>
@@ -267,13 +276,14 @@ const styles = StyleSheet.create({
   command: {
     alignSelf: "center",
     maxWidth: 480,
-    paddingHorizontal: space.m,
-    paddingVertical: space.s,
     borderRadius: radius.code,
     borderCurve: "continuous",
-    backgroundColor: colors.fill,
+    // `fill` disappears on the grouped background; a cell's white doesn't.
+    backgroundColor: colors.cell,
   },
   commandText: {
+    paddingHorizontal: space.m,
+    paddingVertical: space.s,
     fontFamily: "Menlo",
     fontSize: 13,
     lineHeight: 18,
