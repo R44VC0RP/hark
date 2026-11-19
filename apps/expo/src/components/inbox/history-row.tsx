@@ -6,7 +6,7 @@ import { StyleSheet, View } from "react-native";
 import { formatListDate } from "../../lib/dates";
 import { spoken } from "../../ui/a11y";
 import { SourceAvatar } from "../../ui/avatar";
-import { Cell, Chevron, useStackedRows, useTextMeasure } from "../../ui/list";
+import { Cell, Chevron, useLargeText, useStackedRows, useTextMeasure } from "../../ui/list";
 import { animateListChange } from "../../ui/motion";
 import { Text, useFontScale } from "../../ui/text";
 import { colors, space } from "../../ui/tokens";
@@ -33,24 +33,30 @@ export const HistoryRow = memo(function HistoryRow({
   const router = useRouter();
   const [expanded, setExpanded] = useState(false);
   const stacked = useStackedRows();
+  // From xxxLarge the meta line wraps: one line cut its only date (V2-07).
+  const largeText = useLargeText();
   const measure = useTextMeasure();
   const scale = useFontScale();
   // A notification's ID is the detail screen's ("event:…", "notification:…").
   const opens = item.kind === "notification";
   const expandable = !opens && Boolean(item.detail);
   const meta = `${item.sourceName} · ${activityKindLabel(item.kind)} · ${formatListDate(item.createdAt)}`;
-  // Denied and No are answers, not successes: grey, with a cross.
+  // Only answers wear a mark: ✓ in accent, or ✕ in grey for Denied and No.
+  // A Live Activity's "Started" or "Updated" is plain grey text (V2-10).
+  const answer = item.kind === "response";
   const refusal = item.result ? isRefusal(item.result) : false;
   const result = item.result ? (
     <View style={styles.result}>
-      <SymbolView
-        name={refusal ? "xmark" : "checkmark"}
-        size={Math.round(12 * scale)}
-        tintColor={refusal ? colors.secondaryLabel : colors.accent}
-        weight="semibold"
-      />
+      {answer ? (
+        <SymbolView
+          name={refusal ? "xmark" : "checkmark"}
+          size={Math.round(12 * scale)}
+          tintColor={refusal ? colors.secondaryLabel : colors.accent}
+          weight="semibold"
+        />
+      ) : null}
       <Text
-        color={refusal ? "secondaryLabel" : "accent"}
+        color={answer && !refusal ? "accent" : "secondaryLabel"}
         numberOfLines={stacked ? undefined : 1}
         variant="footnote"
       >
@@ -102,7 +108,11 @@ export const HistoryRow = memo(function HistoryRow({
             {item.detail}
           </Text>
         ) : null}
-        <Text color="tertiaryLabel" numberOfLines={stacked ? undefined : 1} variant="footnote">
+        <Text
+          color="tertiaryLabel"
+          numberOfLines={stacked || largeText ? undefined : 1}
+          variant="footnote"
+        >
           {meta}
         </Text>
         {stacked ? result : null}
