@@ -2,7 +2,6 @@ import type { InboxInteractionDto } from "@hark/contracts";
 import { SymbolView } from "expo-symbols";
 import { memo } from "react";
 import { type AccessibilityActionEvent, StyleSheet, View } from "react-native";
-import { useLayout } from "../../lib/layout";
 import { spoken } from "../../ui/a11y";
 import { SourceAvatar } from "../../ui/avatar";
 import { Button } from "../../ui/button";
@@ -41,7 +40,6 @@ export const RequestRow = memo(function RequestRow({
   onReply,
 }: RequestRowProps) {
   const stacked = useStackedRows();
-  const { regular } = useLayout();
   const answers =
     item.kind === "approval"
       ? {
@@ -79,7 +77,7 @@ export const RequestRow = memo(function RequestRow({
         accessibilityLabel={label}
         accessible
         onAccessibilityAction={onAccessibilityAction}
-        style={styles.copy}
+        style={[styles.column, styles.copy]}
       >
         <View style={styles.sourceLine}>
           <SourceAvatar name={item.sourceName} size={24} url={item.sourceImageUrl} />
@@ -93,15 +91,10 @@ export const RequestRow = memo(function RequestRow({
             {relativeTime(item.createdAt, now)}
           </Text>
         </View>
-        <Text numberOfLines={stacked ? undefined : 2} style={styles.measure} variant="headline">
+        <Text numberOfLines={stacked ? undefined : 2} variant="headline">
           {item.title}
         </Text>
-        <Text
-          color="secondaryLabel"
-          numberOfLines={stacked ? undefined : 6}
-          style={styles.measure}
-          variant="subheadline"
-        >
+        <Text color="secondaryLabel" numberOfLines={stacked ? undefined : 6} variant="subheadline">
           {item.prompt}
         </Text>
         <View style={styles.meta}>
@@ -111,9 +104,7 @@ export const RequestRow = memo(function RequestRow({
           </Text>
         </View>
       </View>
-      <View
-        style={[styles.actions, regular && styles.actionsRegular, stacked && styles.actionsStacked]}
-      >
+      <View style={[styles.column, styles.actions, stacked && styles.actionsStacked]}>
         {answers ? (
           <>
             <Button
@@ -156,12 +147,17 @@ const styles = StyleSheet.create({
     gap: space.s,
     paddingVertical: space.s,
   },
+  /**
+   * On wide windows the whole request is one column (about 88 characters of
+   * prompt per line) and the answers fill the same width, so text, time and
+   * buttons share one right edge. A no-op on iPhone widths.
+   */
+  column: {
+    width: "100%",
+    maxWidth: metrics.measureWidth,
+  },
   copy: {
     gap: 2,
-  },
-  /** Long text keeps a readable line length on iPad. */
-  measure: {
-    maxWidth: metrics.measureWidth,
   },
   sourceLine: {
     flexDirection: "row",
@@ -182,11 +178,6 @@ const styles = StyleSheet.create({
   actions: {
     flexDirection: "row",
     gap: space.xs,
-  },
-  /** Two answers stay button-sized on wide windows. */
-  actionsRegular: {
-    width: "100%",
-    maxWidth: 480,
   },
   actionsStacked: {
     flexDirection: "column-reverse",

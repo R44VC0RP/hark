@@ -91,8 +91,11 @@ export const metrics = {
   rowAccessoryGap: 12,
   /** Detail screens (notification, page, consent, join, critical alerts) on iPad. */
   readingWidth: 680,
-  /** Request prompts and other long text on iPad. */
-  measureWidth: 680,
+  /**
+   * Text-and-action blocks in full-width lists on iPad (Inbox requests):
+   * about 88 characters per line at 15 pt, buttons as wide as the text.
+   */
+  measureWidth: 600,
   hitTarget: 44,
   /** At or above this `fontScale` rows stack their value under the label (3.6). */
   accessibilityFontScale: 1.35,
@@ -182,14 +185,18 @@ export const navigationTheme: Theme = {
 
 /**
  * Every native-stack screen (3.12): transparent header so content scrolls
- * under the glass bar with the system scroll-edge effect, minimal back
- * button, ink bar items. Never add `headerStyle.backgroundColor`,
+ * under the glass bar with the system's soft scroll-edge effect, minimal
+ * back button, ink bar items. Never add `headerStyle.backgroundColor`,
  * `headerBlurEffect` or `headerShadowVisible`.
  */
 export const stackScreenOptions = {
   headerTransparent: true,
   headerBackButtonDisplayMode: "minimal",
   headerTintColor: palette.label,
+  // The soft edge is explicit: "automatic" draws nothing under the iPad top
+  // tab bar, so scrolled rows ran crisp under the status bar there (checked
+  // in the simulator). iPhone's automatic style was already soft.
+  scrollEdgeEffects: { top: "soft", bottom: "automatic", left: "automatic", right: "automatic" },
   contentStyle: { backgroundColor: palette.background },
 } satisfies NativeStackNavigationOptions;
 
