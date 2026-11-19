@@ -38,7 +38,8 @@ export function ConsentView({
   const insets = useSafeAreaInsets();
   const margin = useScreenMargin();
   // At accessibility sizes the answers scroll with the text instead of
-  // pinning to the bottom, where they would cover most of it.
+  // pinning to the bottom, where they would cover most of it, and the text
+  // uses the full width instead of the 680-pt column.
   const inline = useStackedRows();
   const { data: session } = useSession();
   const [shareName, setShareName] = useState(app.shareName);
@@ -74,7 +75,7 @@ export function ConsentView({
       </Stack.Toolbar>
       {/* The scroll view stays first in the chain, so the glass header finds it. */}
       <View collapsable={false} style={styles.screen}>
-        <List reading>
+        <List reading={!inline}>
           <View
             accessibilityLabel={spoken(`Sign In to ${app.name}?`, host)}
             accessibilityRole="header"

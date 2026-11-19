@@ -31,7 +31,14 @@ import {
   isNetworkError,
   LoadingState,
 } from "../../../../src/ui/empty-state";
-import { ActionRow, Cell, LabeledRow, List, Section } from "../../../../src/ui/list";
+import {
+  ActionRow,
+  Cell,
+  LabeledRow,
+  List,
+  Section,
+  useStackedRows,
+} from "../../../../src/ui/list";
 import { Text } from "../../../../src/ui/text";
 import { metrics, space } from "../../../../src/ui/tokens";
 
@@ -53,6 +60,9 @@ export default function NotificationDetailScreen() {
   // A touch-and-hold preview also prefetches this screen as a hidden,
   // unfocused route; only the screen people actually opened marks read.
   const focused = useIsFocused();
+  // At accessibility sizes the 680-pt column leaves about 30 characters a
+  // line on iPad, so the text uses the full width (as the Inbox does).
+  const wide = useStackedRows();
   const params = useLocalSearchParams<{ id: string }>();
   const compositeId = typeof params.id === "string" ? params.id : "";
 
@@ -184,7 +194,7 @@ export default function NotificationDetailScreen() {
           </Stack.Toolbar.Button>
         </Stack.Toolbar>
       )}
-      <List reading>
+      <List reading={!wide}>
         {notification ? (
           <NotificationContent notification={notification} />
         ) : loading ? (
