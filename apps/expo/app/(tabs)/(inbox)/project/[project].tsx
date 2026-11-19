@@ -28,7 +28,12 @@ import {
   isNetworkError,
   LoadingState,
 } from "../../../../src/ui/empty-state";
-import { PlainSeparator, useHorizontalSafeArea, useScreenMargin } from "../../../../src/ui/list";
+import {
+  FilterLine,
+  PlainSeparator,
+  useHorizontalSafeArea,
+  useScreenMargin,
+} from "../../../../src/ui/list";
 import { colors, space } from "../../../../src/ui/tokens";
 
 const PAGE_SIZE = 30;
@@ -283,6 +288,11 @@ export default function ProjectScreen() {
       </Stack.Toolbar>
       <FlatList
         ItemSeparatorComponent={Separator}
+        ListHeaderComponent={
+          unreadOnly ? (
+            <FilterLine label="Unread" margin={margin} onShowAll={() => setUnreadOnly(false)} />
+          ) : null
+        }
         ListEmptyComponent={
           loading ? (
             <LoadingState />

@@ -31,7 +31,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLayout } from "../lib/layout";
 import { spoken } from "./a11y";
-import { Text } from "./text";
+import { Button } from "./button";
+import { Text, useFontScale } from "./text";
 import { type ColorName, colors, metrics, palette, radius, space } from "./tokens";
 
 /**
@@ -76,6 +77,16 @@ export function useTextMeasure(): ViewStyle | null {
   const { regular } = useLayout();
   const stacked = useStackedRows();
   return regular && !stacked ? styles.measure : null;
+}
+
+/**
+ * A row's leading SF Symbol and its column (V-22): 20 pt at the default text
+ * size, growing with Dynamic Type like the system's own list symbols, up to
+ * twice that at accessibility sizes, in a column that keeps 8 pt around it.
+ */
+export function useRowSymbol(): { size: number; column: number } {
+  const size = Math.round(20 * Math.min(useFontScale(), 2));
+  return { size, column: Math.max(metrics.rowSymbolColumn, size + 8) };
 }
 
 /** True from xxxLarge up, for layouts that check whether their text still fits. */
@@ -410,7 +421,8 @@ export function Row({
 }: RowProps) {
   const stacked = useStackedRows();
   const measure = useTextMeasure();
-  const leadWidth = leading ? (leadingWidth ?? metrics.rowSymbolColumn) : metrics.rowSymbolColumn;
+  const symbolSize = useRowSymbol();
+  const leadWidth = leading ? (leadingWidth ?? metrics.rowSymbolColumn) : symbolSize.column;
   const hasLeading = Boolean(symbol || leading);
   const navigates = Boolean(chevron || props.onPress);
   return (
@@ -428,7 +440,7 @@ export function Row({
           {leading ?? (
             <SymbolView
               name={symbol as SFSymbol}
-              size={20}
+              size={symbolSize.size}
               tintColor={colors[symbolColor ?? (navigates ? "accent" : "secondaryLabel")]}
             />
           )}
@@ -461,6 +473,38 @@ export function Row({
       {trailing}
       {chevron ? <Chevron /> : null}
     </Cell>
+  );
+}
+
+export interface FilterLineProps {
+  /** What the list shows ("Unread", "Responses"). */
+  label: string;
+  onShowAll: () => void;
+  /** The plain list's screen margin, so the line starts with the rows. */
+  margin: number;
+}
+
+/**
+ * The first line of a filtered plain list (I-11): "Filtered by: Unread" and
+ * Show All. With the filled filter symbol in the bar, this is how Mail shows
+ * a filter; it sits at the top of the list, where the rows change, because a
+ * tab stack has no bottom toolbar (3.12 rule 8). Render it as the list's
+ * `ListHeaderComponent` only while a filter is on.
+ */
+export function FilterLine({ label, onShowAll, margin }: FilterLineProps) {
+  const measure = useTextMeasure();
+  return (
+    <View style={[styles.filterLine, { paddingHorizontal: margin }]}>
+      <Text color="secondaryLabel" style={[styles.copy, measure]} variant="footnote">
+        {`Filtered by: ${label}`}
+      </Text>
+      <Button
+        accessibilityHint="Turns the filter off"
+        onPress={onShowAll}
+        title="Show All"
+        variant="plain"
+      />
+    </View>
   );
 }
 
@@ -567,6 +611,7 @@ export function ActionRow({
   ...props
 }: ActionRowProps) {
   const tint: ColorName = destructive ? "danger" : "accent";
+  const symbolSize = useRowSymbol();
   return (
     <Cell
       accessibilityLabel={accessibilityLabel ?? title}
@@ -574,15 +619,14 @@ export function ActionRow({
       accessible
       disabled={disabled}
       separatorInset={
-        metrics.rowPaddingHorizontal +
-        (symbol ? metrics.rowSymbolColumn + metrics.rowAccessoryGap : 0)
+        metrics.rowPaddingHorizontal + (symbol ? symbolSize.column + metrics.rowAccessoryGap : 0)
       }
       style={disabled ? styles.disabled : null}
       {...props}
     >
       {symbol ? (
-        <View style={[styles.leading, { width: metrics.rowSymbolColumn }]}>
-          <SymbolView name={symbol} size={20} tintColor={colors[tint]} />
+        <View style={[styles.leading, { width: symbolSize.column }]}>
+          <SymbolView name={symbol} size={symbolSize.size} tintColor={colors[tint]} />
         </View>
       ) : null}
       <Text color={tint} style={styles.copy} variant="body">
@@ -698,6 +742,12 @@ const styles = StyleSheet.create({
   },
   disabled: {
     opacity: 0.4,
+  },
+  filterLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.xs,
+    minHeight: metrics.hitTarget,
   },
   switch: {
     alignSelf: "center",

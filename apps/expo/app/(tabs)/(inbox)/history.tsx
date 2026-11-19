@@ -9,7 +9,12 @@ import { previewActivity } from "../../../src/lib/inbox-preview";
 import { createRefreshSequence } from "../../../src/lib/inbox-refresh";
 import { Button } from "../../../src/ui/button";
 import { EmptyState, ErrorState, isNetworkError, LoadingState } from "../../../src/ui/empty-state";
-import { PlainSeparator, useHorizontalSafeArea, useScreenMargin } from "../../../src/ui/list";
+import {
+  FilterLine,
+  PlainSeparator,
+  useHorizontalSafeArea,
+  useScreenMargin,
+} from "../../../src/ui/list";
 import { Text } from "../../../src/ui/text";
 import { colors, metrics, space } from "../../../src/ui/tokens";
 
@@ -167,6 +172,15 @@ export default function HistoryScreen() {
       </Stack.Toolbar>
       <FlatList
         ItemSeparatorComponent={Separator}
+        ListHeaderComponent={
+          filter === "all" ? null : (
+            <FilterLine
+              label={current?.label ?? ""}
+              margin={margin}
+              onShowAll={() => choose("all")}
+            />
+          )
+        }
         ListEmptyComponent={
           status === "loading" ? (
             <LoadingState />
