@@ -121,6 +121,18 @@ export async function queueInteractionResponse(
 }
 
 /**
+ * Takes a response out of the queue (its first attempt arrived late, so
+ * the retry isn't needed). The queue's stored shape is unchanged.
+ */
+export async function dropQueuedResponse(interactionId: string): Promise<void> {
+  await withQueueLock(async () => {
+    const queue = await readQueue();
+    const rest = queue.filter((item) => item.interactionId !== interactionId);
+    if (rest.length !== queue.length) await writeQueue(rest);
+  });
+}
+
+/**
  * In memory only: the queue's verdict on each response it finishes, the
  * server took it (`delivered`) or refused it for good (400/404/409), so the
  * Inbox can show what happened to an answer it queued.

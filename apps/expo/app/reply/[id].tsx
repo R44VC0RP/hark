@@ -20,6 +20,7 @@ import { projectNameFor } from "../../src/components/inbox/format";
 import { api } from "../../src/lib/api";
 import { alertFailure, haptic } from "../../src/lib/haptics";
 import {
+  answerFailure,
   type CachedInteraction,
   cachedInteraction,
   markInteractionHandled,
@@ -238,10 +239,14 @@ export default function ReplySheet() {
       // (checked in the simulator). The Inbox row shows "Replied" in place,
       // or, with no connection, that it will be sent once there is one (the
       // reply waits in the retry queue, so the draft isn't needed).
-      if (sent === "queued") {
+      if (sent === "offline" || sent === "slow") {
         haptic.warning();
-        markInteractionQueued(interaction, "reply");
-        AccessibilityInfo.announceForAccessibility("Reply will send when you’re back online");
+        markInteractionQueued(interaction, "reply", sent);
+        AccessibilityInfo.announceForAccessibility(
+          sent === "offline"
+            ? "Reply will send when you’re back online"
+            : "Reply will send when the connection responds",
+        );
       } else {
         haptic.success();
         markInteractionHandled(interaction, "reply");
@@ -249,7 +254,7 @@ export default function ReplySheet() {
       leaving.current = true;
       router.back();
     } catch (error) {
-      alertFailure("Couldn’t Send Reply", error);
+      alertFailure("Couldn’t Send Reply", answerFailure(error));
       busy.current = false;
       setSending(false);
     }

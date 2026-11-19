@@ -1,8 +1,14 @@
 import type { InboxInteractionDto } from "@hark/contracts";
 import * as SecureStore from "expo-secure-store";
 import { useSyncExternalStore } from "react";
+import { ANSWER_LABELS } from "../components/inbox/format";
 import { ApiError, api } from "./api";
-import { DEVICE_ID_KEY, onQueuedResponseDone, queueInteractionResponse } from "./interactions";
+import {
+  DEVICE_ID_KEY,
+  dropQueuedResponse,
+  onQueuedResponseDone,
+  queueInteractionResponse,
+} from "./interactions";
 
 /**
  * Hands a request from the Inbox to the Reply sheet (DESIGN.md 5.5) and
@@ -21,6 +27,12 @@ export interface CachedInteraction {
 export type RequestAnswer = "approve" | "deny" | "yes" | "no" | "reply";
 
 /**
+ * Why an answer waits in the retry queue: no response at all (no
+ * connection), or none within `ANSWER_WAIT_MS` (a connection that hangs).
+ */
+export type QueueReason = "offline" | "slow";
+
+/**
  * Why a request the Inbox shows stopped waiting: answered here, answered
  * here without a connection (the answer waits in the retry queue), answered
  * on another device (with History's word for the answer, "Approved", when
@@ -29,7 +41,7 @@ export type RequestAnswer = "approve" | "deny" | "yes" | "no" | "reply";
  */
 export type RequestOutcome =
   | { kind: "answered"; answer: RequestAnswer }
-  | { kind: "queued"; answer: RequestAnswer }
+  | { kind: "queued"; answer: RequestAnswer; reason: QueueReason }
   | { kind: "answeredElsewhere"; result: string }
   | { kind: "expired" }
   | { kind: "withdrawn" }
@@ -95,11 +107,15 @@ export function markInteractionHandled(
 export function markInteractionQueued(
   interaction: InboxInteractionDto,
   answer: RequestAnswer,
+  reason: QueueReason,
 ): void {
   const { id } = interaction;
   if (handled.has(id)) return;
   handled = new Set([...handled, id]);
-  settled = new Map([...settled, [id, { interaction, outcome: { kind: "queued", answer } }]]);
+  settled = new Map([
+    ...settled,
+    [id, { interaction, outcome: { kind: "queued", answer, reason } }],
+  ]);
   queuedAnswers.set(id, { interaction, answer });
   interactions.delete(id);
   drafts.delete(id);
@@ -118,7 +134,10 @@ function resettle(request: SettledRequest): void {
  * changed), the answer didn't count and its buttons come back; else the row
  * says how it closed (answered on another device, expired, withdrawn).
  */
-async function settleRefused(interaction: InboxInteractionDto): Promise<void> {
+async function settleRefused(
+  interaction: InboxInteractionDto,
+  mayHaveArrived: RequestAnswer | null,
+): Promise<void> {
   const open = await api.listPendingInteractions().then(
     (result) => result.interactions,
     () => null,
@@ -130,7 +149,37 @@ async function settleRefused(interaction: InboxInteractionDto): Promise<void> {
     return;
   }
   const [closed] = await outcomesOf([interaction], Date.now());
-  if (closed) resettle(closed);
+  if (!closed) return;
+  // The first attempt timed out but may have reached the server after all
+  // (and the queue's retry was then refused as already answered): a
+  // request that closed with exactly that answer got this answer.
+  const ours =
+    mayHaveArrived &&
+    closed.outcome.kind === "answeredElsewhere" &&
+    closed.outcome.result === ANSWER_LABELS[mayHaveArrived];
+  resettle(ours ? { interaction, outcome: { kind: "answered", answer: mayHaveArrived } } : closed);
+}
+
+/**
+ * Answers whose first attempt got no response within `ANSWER_WAIT_MS`: the
+ * request is still out and may yet arrive; resolves true if it did.
+ */
+const lateAttempts = new Map<string, Promise<boolean>>();
+
+/** How long a refused retry waits for a late first attempt to finish. */
+const LATE_ATTEMPT_WAIT_MS = 30_000;
+
+/** A late first attempt arrived: the answer counted, so the queued retry isn't needed. */
+function lateAttemptArrived(id: string): void {
+  lateAttempts.delete(id);
+  const queued = queuedAnswers.get(id);
+  if (!queued) return;
+  queuedAnswers.delete(id);
+  void dropQueuedResponse(id);
+  resettle({
+    interaction: queued.interaction,
+    outcome: { kind: "answered", answer: queued.answer },
+  });
 }
 
 onQueuedResponseDone((id, delivered) => {
@@ -138,13 +187,31 @@ onQueuedResponseDone((id, delivered) => {
   if (!queued) return;
   queuedAnswers.delete(id);
   if (delivered) {
+    lateAttempts.delete(id);
     resettle({
       interaction: queued.interaction,
       outcome: { kind: "answered", answer: queued.answer },
     });
-  } else {
-    void settleRefused(queued.interaction);
+    return;
   }
+  // Refused (already answered, withdrawn, expired, changed). If the first
+  // attempt is still out, it may be the answer the server already has.
+  const late = lateAttempts.get(id);
+  lateAttempts.delete(id);
+  const arrived = late
+    ? Promise.race([
+        late,
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), LATE_ATTEMPT_WAIT_MS)),
+      ])
+    : Promise.resolve(false);
+  void arrived.then((yes) =>
+    yes
+      ? resettle({
+          interaction: queued.interaction,
+          outcome: { kind: "answered", answer: queued.answer },
+        })
+      : settleRefused(queued.interaction, late ? queued.answer : null),
+  );
 });
 
 /**
@@ -167,8 +234,12 @@ export function settleRequests(requests: readonly SettledRequest[]): void {
  * the Inbox is out of sight, or after a pull to refresh.
  */
 export function clearSettledRequests(): void {
-  if (settled.size === 0) return;
-  settled = new Map();
+  // An answer still waiting in the retry queue stays, so the person can
+  // see it hasn't been sent yet; it settles once the queue sends it or the
+  // server refuses it, and goes with the next tidy after that.
+  const waiting = new Map([...settled].filter(([, request]) => request.outcome.kind === "queued"));
+  if (waiting.size === settled.size) return;
+  settled = waiting;
   notify();
 }
 
@@ -206,45 +277,85 @@ export async function outcomesOf(
 }
 
 /**
+ * How long an answer given in the app waits for the server before it goes
+ * to the retry queue. The API answers in milliseconds and a slow but
+ * working mobile link in a second or two; a connection that accepts the
+ * request and never answers (common on a bad network) otherwise kept the
+ * row on "Sending…" for over 86 s (R4). 10 s is several times a slow link's
+ * worst case and still short enough that nobody keeps waiting on a spinner.
+ */
+export const ANSWER_WAIT_MS = 10_000;
+
+/**
  * Sends an answer given in the app (the Inbox's buttons, the Reply sheet)
  * straight to the server first: the person is looking at the request and
  * should learn at once whether the answer counted (R3-02). Resolves "sent";
  * "taken" when the server says the request already closed (answered on
- * another device, withdrawn, expired: ask `outcomesOf` which); "queued"
- * when no response came back at all (no connection, timed out): the answer
- * goes to the retry queue that notification actions use and is sent when
- * the connection is back, as before the redesign. Any other server
- * response throws.
+ * another device, withdrawn, expired: ask `outcomesOf` which); "offline"
+ * when no response came back at all (no connection) and "slow" when none
+ * came within `ANSWER_WAIT_MS`: either way the answer goes to the retry
+ * queue that notification actions use and is sent when the connection
+ * works, as before the redesign. A slow first attempt may still arrive; it
+ * can't count twice, because the server takes one answer per request and
+ * refuses the other with a conflict, and the row ends up showing whichever
+ * answer the server kept (`lateAttempts`, `onQueuedResponseDone`). Any
+ * other server response throws.
  */
 export async function sendAnswer(
   interaction: InboxInteractionDto,
   answer: { action: Exclude<RequestAnswer, "reply"> } | { action: "reply"; response: string },
-): Promise<"sent" | "taken" | "queued"> {
+): Promise<"sent" | "taken" | QueueReason> {
   const deviceId = await SecureStore.getItemAsync(DEVICE_ID_KEY);
   if (!deviceId) throw new Error("This device isn’t registered with Hark.");
+  const input = { ...answer, actionDigest: interaction.actionDigest };
+  const attempt = api.respondToInteraction(interaction.id, { ...input, deviceId });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const wait = new Promise<"slow">((resolve) => {
+    timer = setTimeout(() => resolve("slow"), ANSWER_WAIT_MS);
+  });
   try {
-    await api.respondToInteraction(interaction.id, {
-      ...answer,
-      actionDigest: interaction.actionDigest,
-      deviceId,
-    });
-    return "sent";
+    const first = await Promise.race([attempt.then(() => "sent" as const), wait]);
+    if (first === "sent") return "sent";
+    lateAttempts.set(
+      interaction.id,
+      attempt.then(
+        () => true,
+        () => false,
+      ),
+    );
+    attempt.then(
+      () => lateAttemptArrived(interaction.id),
+      () => {},
+    );
+    await queueInteractionResponse(interaction.id, input);
+    return "slow";
   } catch (error) {
     // No HTTP response (an ApiError always has one): keep the answer.
     if (!(error instanceof ApiError)) {
-      await queueInteractionResponse(interaction.id, {
-        ...answer,
-        actionDigest: interaction.actionDigest,
-      });
-      return "queued";
+      await queueInteractionResponse(interaction.id, input);
+      return "offline";
     }
     // 409 "already terminal" (the other 409 is a changed request, an error).
-    const taken =
-      error instanceof ApiError &&
-      (error.status === 404 || (error.status === 409 && /terminal/i.test(error.message)));
+    const taken = error.status === 404 || (error.status === 409 && /terminal/i.test(error.message));
     if (taken) return "taken";
     throw error;
+  } finally {
+    clearTimeout(timer);
   }
+}
+
+/**
+ * Why an answer wasn't sent, in words for an alert: a request that changed
+ * since it appeared (a conflict that isn't "already answered") gets a plain
+ * sentence instead of the server's "Interaction action digest mismatch".
+ */
+export function answerFailure(error: unknown): unknown {
+  if (error instanceof ApiError && error.status === 409) {
+    return new Error(
+      "The request changed after it appeared, so your answer wasn’t sent. Check the new version and answer again.",
+    );
+  }
+  return error;
 }
 
 /** An unsent reply, kept per request so closing the sheet never loses it. */

@@ -47,7 +47,10 @@ export function outcomeLine(outcome: RequestOutcome): {
         text: ANSWER_LABELS[outcome.answer],
         symbol: "clock.arrow.circlepath",
         done: false,
-        note: "Will send when you’re back online",
+        note:
+          outcome.reason === "offline"
+            ? "Will send when you’re back online"
+            : "Will send when the connection responds",
       };
     case "answeredElsewhere":
       return answer(outcome.result, "Answered on another device");

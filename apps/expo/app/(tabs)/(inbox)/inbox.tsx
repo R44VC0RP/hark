@@ -27,6 +27,7 @@ import { publishInboxCounts } from "../../../src/lib/app-directory";
 import { useSession } from "../../../src/lib/auth";
 import { alertFailure, haptic } from "../../../src/lib/haptics";
 import {
+  answerFailure,
   clearSettledRequests,
   currentHandledIds,
   currentSettledRequests,
@@ -117,7 +118,9 @@ export default function InboxScreen() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loadFailure, setLoadFailure] = useState<LoadFailure | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [sendingId, setSendingId] = useState<string | null>(null);
+  // The requests whose answer is on its way: only their own buttons wait,
+  // every other request stays answerable (R4: one hung answer disabled all).
+  const [sendingIds, setSendingIds] = useState<ReadonlySet<string>>(() => new Set());
   const [now, setNow] = useState(() => Date.now());
   const handled = useHandledInteractionIds();
   const settled = useSettledRequests();
@@ -156,7 +159,7 @@ export default function InboxScreen() {
     setOrder(null);
   }, []);
   const summaryJson = useRef("");
-  const sending = useRef<string | null>(null);
+  const sending = useRef(new Set<string>());
   // Older/self-hosted servers without /api/inbox keep the legacy layout.
   const projectInboxSupported = useRef(true);
   // Orders overlapping refreshes (timer, focus, push, pull to refresh) so a
@@ -381,9 +384,9 @@ export default function InboxScreen() {
 
   const respond = useCallback(
     async (item: InboxInteractionDto, action: RequestAction) => {
-      if (sending.current || arrivedJustNow(item.id)) return;
-      sending.current = item.id;
-      setSendingId(item.id);
+      if (sending.current.has(item.id) || arrivedJustNow(item.id)) return;
+      sending.current.add(item.id);
+      setSendingIds(new Set(sending.current));
       try {
         const sent = simulatorPreview ? "sent" : await sendAnswer(item, { action });
         if (sent === "sent") {
@@ -392,14 +395,15 @@ export default function InboxScreen() {
           // buttons were, so nothing moves under the finger that tapped.
           markInteractionHandled(item, action);
           AccessibilityInfo.announceForAccessibility(ANSWER_LABELS[action]);
-        } else if (sent === "queued") {
-          // No response at all (no connection, timed out): the answer waits
-          // in the retry queue and goes out when the connection is back; the
-          // row says so, then shows what really happened.
+        } else if (sent === "offline" || sent === "slow") {
+          // No response (no connection) or none in time (a hung
+          // connection): the answer waits in the retry queue and goes out
+          // when the connection works; the row says so, then shows what
+          // really happened.
           haptic.warning();
-          markInteractionQueued(item, action);
+          markInteractionQueued(item, action, sent);
           AccessibilityInfo.announceForAccessibility(
-            `${ANSWER_LABELS[action]}, will send when you’re back online`,
+            `${ANSWER_LABELS[action]}, ${sent === "offline" ? "will send when you’re back online" : "will send when the connection responds"}`,
           );
         } else {
           // Already closed on the server (a stale tap after an answer on
@@ -421,11 +425,13 @@ export default function InboxScreen() {
         }
         void refresh().catch(() => {});
       } catch (error) {
-        // Not sent: the buttons come back (nothing settled) and it says so.
-        alertFailure("Couldn’t Send Response", error);
+        // Not sent: the buttons come back (nothing settled) and it says so;
+        // a request that changed shows its new version.
+        alertFailure("Couldn’t Send Response", answerFailure(error));
+        void refresh().catch(() => {});
       } finally {
-        sending.current = null;
-        setSendingId(null);
+        sending.current.delete(item.id);
+        setSendingIds(new Set(sending.current));
       }
     },
     [arrivedJustNow, refresh],
@@ -490,7 +496,7 @@ export default function InboxScreen() {
               <Section detail={needsYouDetail} prominent title="Needs You">
                 {requests.map(({ item, outcome }) => (
                   <RequestRow
-                    busy={sendingId !== null}
+                    busy={sendingIds.has(item.id)}
                     item={item}
                     key={item.id}
                     now={now}
@@ -498,7 +504,7 @@ export default function InboxScreen() {
                     onRespond={respond}
                     onReply={reply}
                     projectName={projectNameFor(item, projects)}
-                    sending={sendingId === item.id}
+                    sending={sendingIds.has(item.id)}
                   />
                 ))}
               </Section>
