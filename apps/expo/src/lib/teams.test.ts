@@ -1,16 +1,15 @@
 import type { AppDto, OncallPageDto } from "@hark/contracts";
 import { describe, expect, it } from "vitest";
 import { ApiError } from "./api-error";
+import { formatUpcoming } from "./dates";
 import {
   currentShift,
   escalationLabel,
   escalationPolicySummary,
-  formatHandoff,
   groupAppsByTeam,
   isSeatLimitError,
   isUnsupportedRoute,
   joinCodeFromUrl,
-  onCallSummary,
   pagePushData,
   pagesNeedingResponse,
   pagesNeedYouLabel,
@@ -85,16 +84,18 @@ describe("on-call formatting", () => {
   const now = new Date(2026, 9, 8, 13, 0).getTime();
 
   it("formats handoffs relative to today", () => {
-    expect(formatHandoff(new Date(2026, 9, 8, 17, 30).toISOString(), now, "en-US")).toBe("5:30 PM");
-    expect(formatHandoff(new Date(2026, 9, 12, 9, 0).toISOString(), now, "en-US")).toBe(
-      "Mon 9:00 AM",
+    expect(formatUpcoming(new Date(2026, 9, 8, 17, 30).toISOString(), now, "en-US")).toBe(
+      "5:30 PM",
     );
-    expect(formatHandoff(new Date(2026, 9, 20, 9, 0).toISOString(), now, "en-US")).toBe(
-      "Oct 20, 9:00 AM",
+    expect(formatUpcoming(new Date(2026, 9, 12, 9, 0).toISOString(), now, "en-US")).toBe(
+      "Mon at 9:00 AM",
+    );
+    expect(formatUpcoming(new Date(2026, 9, 20, 9, 0).toISOString(), now, "en-US")).toBe(
+      "Oct 20 at 9:00 AM",
     );
   });
 
-  it("finds the current shift and summarizes it", () => {
+  it("finds the current shift", () => {
     const person = { userId: "u", name: "Ryan", image: null };
     const shifts = [
       {
@@ -115,7 +116,6 @@ describe("on-call formatting", () => {
     const shift = currentShift(shifts, now);
     expect(shift?.groupName).toBe("Platform");
     if (!shift) throw new Error("expected a shift");
-    expect(onCallSummary(shift, now, "en-US")).toBe("On call for Platform until Mon 9:00 AM");
     expect(currentShift(shifts, new Date(2026, 9, 14).getTime())).toBeNull();
   });
 

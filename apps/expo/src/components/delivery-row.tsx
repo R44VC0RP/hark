@@ -1,6 +1,7 @@
 import type { EventDto } from "@hark/contracts";
 import { memo, useState } from "react";
 import { StyleSheet, View } from "react-native";
+import { formatListDate } from "../lib/dates";
 import { spoken } from "../ui/a11y";
 import { SourceAvatar } from "../ui/avatar";
 import { Cell, useStackedRows } from "../ui/list";
@@ -8,7 +9,6 @@ import { animateListChange } from "../ui/motion";
 import { StatusDot } from "../ui/status-dot";
 import { Text } from "../ui/text";
 import { type ColorName, colors, metrics, space } from "../ui/tokens";
-import { formatActivityTime } from "./inbox/format";
 
 export const DELIVERY_AVATAR = 32;
 const DOT = 9;
@@ -56,7 +56,7 @@ export const DeliveryRow = memo(function DeliveryRow({
   const stacked = useStackedRows();
   const expandable = event.body.length > 0;
   const status = deliveryStatus(event);
-  const time = formatActivityTime(event.createdAt);
+  const time = formatListDate(event.createdAt);
   const lines = expanded || stacked ? undefined : 1;
   const timeText = (
     <Text color="tertiaryLabel" tabular variant="footnote">

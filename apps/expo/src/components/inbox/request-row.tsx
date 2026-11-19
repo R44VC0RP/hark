@@ -2,6 +2,7 @@ import type { InboxInteractionDto } from "@hark/contracts";
 import { SymbolView } from "expo-symbols";
 import { memo } from "react";
 import { type AccessibilityActionEvent, StyleSheet, View } from "react-native";
+import { formatAgo, formatTimeLeft, spokenTime } from "../../lib/dates";
 import type { RequestAnswer } from "../../lib/inbox-cache";
 import { useLayout } from "../../lib/layout";
 import { spoken } from "../../ui/a11y";
@@ -10,13 +11,7 @@ import { Button } from "../../ui/button";
 import { Cell, useStackedRows } from "../../ui/list";
 import { Text, useFontScale } from "../../ui/text";
 import { colors, metrics, space } from "../../ui/tokens";
-import {
-  ANSWER_LABELS,
-  isRefusal,
-  relativeTime,
-  timeRemaining,
-  timeRemainingSpoken,
-} from "./format";
+import { ANSWER_LABELS, isRefusal } from "./format";
 
 export type RequestAction = Exclude<RequestAnswer, "reply">;
 
@@ -76,7 +71,7 @@ export const RequestRow = memo(function RequestRow({
     item.title,
     item.prompt,
     source,
-    result ?? timeRemainingSpoken(item.expiresAt, now),
+    result ?? spokenTime(formatTimeLeft(item.expiresAt, now)),
   );
   const actions = answer
     ? undefined
@@ -88,7 +83,7 @@ export const RequestRow = memo(function RequestRow({
       : [{ name: "reply", label: "Reply" }];
   const time = (
     <Text color="tertiaryLabel" tabular variant="footnote">
-      {relativeTime(item.createdAt, now)}
+      {formatAgo(item.createdAt, now)}
     </Text>
   );
   const inactive = busy || answer !== null;
@@ -135,7 +130,7 @@ export const RequestRow = memo(function RequestRow({
       <View style={styles.meta}>
         <SymbolView name="clock" size={Math.round(12 * scale)} tintColor={colors.tertiaryLabel} />
         <Text color="tertiaryLabel" tabular variant="footnote">
-          {timeRemaining(item.expiresAt, now)}
+          {formatTimeLeft(item.expiresAt, now)}
         </Text>
       </View>
     </View>

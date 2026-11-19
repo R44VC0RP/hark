@@ -1,7 +1,8 @@
 import type { CriticalAlertState } from "@hark/contracts";
 import { StyleSheet, View } from "react-native";
 import type { OncallMeDto } from "../../lib/api";
-import { currentShift, formatHandoff } from "../../lib/teams";
+import { formatUpcoming } from "../../lib/dates";
+import { currentShift } from "../../lib/teams";
 import { spoken } from "../../ui/a11y";
 import { Cell, Chevron } from "../../ui/list";
 import { Text } from "../../ui/text";
@@ -16,7 +17,7 @@ export interface OncallStatus {
   title: string;
   /** Short facts of the shift ("Platform primary", "Northwind Platform"), one line. */
   facts: string[];
-  /** The rest as its own line ("Until Sat 6:00 PM", "No shifts scheduled for you."). */
+  /** The rest as its own line ("Until Sat at 6:00 PM", "No shifts scheduled for you."). */
   detail: string;
 }
 
@@ -32,7 +33,7 @@ export function oncallStatus(me: OncallMeDto | null | undefined, now: number): O
       onCall: true,
       title: "You're On Call",
       facts: [shift.groupName, shift.teamName],
-      detail: `Until ${formatHandoff(shift.endsAt, now)}`,
+      detail: `Until ${formatUpcoming(shift.endsAt, now)}`,
     };
   }
   const next = shifts
@@ -43,7 +44,7 @@ export function oncallStatus(me: OncallMeDto | null | undefined, now: number): O
     title: "You're Not On Call",
     facts: [],
     detail: next
-      ? `Next: ${next.groupName}, ${formatHandoff(next.startsAt, now)}`
+      ? `Next: ${next.groupName}, ${formatUpcoming(next.startsAt, now)}`
       : "No shifts scheduled for you.",
   };
 }

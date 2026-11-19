@@ -2,13 +2,13 @@ import type { InboxProjectSummaryDto } from "@hark/contracts";
 import { Link } from "expo-router";
 import { memo } from "react";
 import { StyleSheet, View } from "react-native";
+import { formatListDate } from "../../lib/dates";
 import { useLayout } from "../../lib/layout";
 import { spoken } from "../../ui/a11y";
 import { Thumbnail } from "../../ui/avatar";
 import { Cell, useStackedRows } from "../../ui/list";
 import { Text } from "../../ui/text";
 import { colors, metrics, radius, space } from "../../ui/tokens";
-import { relativeTime } from "./format";
 
 const THUMB = 40;
 const BADGE = 20;
@@ -61,7 +61,7 @@ export const ProjectRow = memo(function ProjectRow({
         <View style={[styles.trailing, wide && styles.trailingWide]}>
           {item.latestAt ? (
             <Text color="tertiaryLabel" tabular variant="footnote">
-              {relativeTime(item.latestAt, now)}
+              {formatListDate(item.latestAt, now)}
             </Text>
           ) : null}
           {unread ? (

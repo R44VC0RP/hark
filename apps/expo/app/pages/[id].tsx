@@ -10,6 +10,7 @@ import { PageStatusPill } from "../../src/components/teams/page-status";
 import { ApiError, api } from "../../src/lib/api";
 import { publishDirectory, refreshDirectory, useDirectory } from "../../src/lib/app-directory";
 import { useSession } from "../../src/lib/auth";
+import { formatAgo, formatDateTime, spokenTime } from "../../src/lib/dates";
 import { haptic } from "../../src/lib/haptics";
 import { openTopLevelDestination } from "../../src/lib/inbox-body";
 import { previewPages, previewViewer } from "../../src/lib/inbox-preview";
@@ -18,10 +19,8 @@ import { leaveSheetThenPush } from "../../src/lib/navigation";
 import { dismissNotificationsForPage } from "../../src/lib/notification-withdrawals";
 import {
   escalationLabel,
-  formatHandoff,
   onPageClaimed,
   pageStatusLabel,
-  timeAgo,
   timelineLabel,
 } from "../../src/lib/teams";
 import { spoken } from "../../src/ui/a11y";
@@ -72,15 +71,6 @@ function errorText(cause: unknown): string {
 function failed(title: string, cause: unknown): void {
   haptic.error();
   Alert.alert(title, errorText(cause));
-}
-
-function dateTime(value: string): string {
-  return new Date(value).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
 }
 
 const TIMELINE_DOT: Record<OncallPageEventDto["kind"], ColorName> = {
@@ -368,7 +358,7 @@ export default function PageSheet() {
                 accessibilityLabel={spoken(
                   pageStatusLabel(page),
                   page.groupName,
-                  timeAgo(page.createdAt, now),
+                  spokenTime(formatAgo(page.createdAt, now)),
                 )}
                 accessible
                 style={[styles.statusLine, stacked && styles.statusLineStacked]}
@@ -376,7 +366,7 @@ export default function PageSheet() {
                 <PageStatusPill status={page.status} />
                 {/* The group is the sheet's title, so the line only adds the age. */}
                 <Text color="secondaryLabel" style={styles.flex} tabular variant="subheadline">
-                  {timeAgo(page.createdAt, now)}
+                  {formatAgo(page.createdAt, now)}
                 </Text>
               </View>
               <Text accessibilityRole="header" selectable variant="title2">
@@ -392,7 +382,7 @@ export default function PageSheet() {
             {resolved ? (
               <Section>
                 <Row
-                  subtitle={page.resolvedAt ? dateTime(page.resolvedAt) : undefined}
+                  subtitle={page.resolvedAt ? formatDateTime(page.resolvedAt, now) : undefined}
                   symbol="checkmark.circle.fill"
                   symbolColor="accent"
                   title={escalationLabel(page, now)}
@@ -430,7 +420,7 @@ export default function PageSheet() {
                 <LabeledRow label="Urgency" value="Low · one alert, no escalation" />
               ) : null}
               <LabeledRow label="From" selectable value={page.source} />
-              <LabeledRow label="Raised" value={dateTime(page.createdAt)} />
+              <LabeledRow label="Raised" value={formatDateTime(page.createdAt, now)} />
               {page.repeatCount > 0 ? (
                 <LabeledRow label="Repeats" value={`Fired ${page.repeatCount + 1} times`} />
               ) : null}
@@ -565,12 +555,12 @@ export default function PageSheet() {
 /** One line of the page's history: who was paged, claimed or resolved it, and when. */
 function TimelineRow({ event, now }: { event: OncallPageEventDto; now: number }) {
   // On compact widths the time goes under the label: once it carries a date
-  // ("Nov 17, 10:32 PM") a trailing time squeezed the label into two lines.
+  // ("Nov 17 at 10:32 PM") a trailing time squeezed the label into two lines.
   const accessibilitySize = useStackedRows();
   const { regular } = useLayout();
   const stacked = accessibilitySize || !regular;
   const label = timelineLabel(event);
-  const time = formatHandoff(event.at, now);
+  const time = formatDateTime(event.at, now);
   return (
     <Cell
       accessibilityLabel={spoken(label, time)}

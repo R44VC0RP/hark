@@ -14,6 +14,7 @@ import { AppIcon } from "../../../../src/components/app-icon";
 import { api, classifyNotificationDetailFailure } from "../../../../src/lib/api";
 import { changeUnreadCount } from "../../../../src/lib/app-directory";
 import { useSession } from "../../../../src/lib/auth";
+import { formatDateTime } from "../../../../src/lib/dates";
 import { haptic } from "../../../../src/lib/haptics";
 import {
   linkDestinationLabel,
@@ -235,7 +236,7 @@ export default function NotificationDetailScreen() {
 
 function NotificationContent({ notification }: { notification: InboxNotificationDetailDto }) {
   const { app, url } = notification;
-  const received = formatHeaderTime(notification.createdAt);
+  const received = formatDateTime(notification.createdAt);
   // "Fieldnotes Shop · Fieldnotes Shop" says nothing twice (same rule as the Inbox).
   const projectName =
     notification.projectName &&
@@ -310,7 +311,7 @@ function NotificationContent({ notification }: { notification: InboxNotification
       ) : null}
 
       <Section title="Details">
-        <LabeledRow label="Received" selectable value={formatFullTime(notification.createdAt)} />
+        <LabeledRow label="Received" selectable value={received} />
         {notification.status ? (
           <LabeledRow label="Delivery" value={statusLabel(notification.status)} />
         ) : null}
@@ -393,29 +394,6 @@ function statusLabel(status: string): string {
     default:
       return status;
   }
-}
-
-/** "Today at 9:41 PM", "Yesterday at 8:02 AM", "Nov 12 at 3:15 PM". */
-function formatHeaderTime(value: string): string {
-  const date = new Date(value);
-  const time = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(today.getDate() - 1);
-  if (date.toDateString() === today.toDateString()) return `Today at ${time}`;
-  if (date.toDateString() === yesterday.toDateString()) return `Yesterday at ${time}`;
-  const sameYear = date.getFullYear() === today.getFullYear();
-  const day = date.toLocaleDateString([], {
-    month: "short",
-    day: "numeric",
-    ...(sameYear ? {} : { year: "numeric" }),
-  });
-  return `${day} at ${time}`;
-}
-
-/** "Nov 18, 2026 at 9:41 PM". */
-function formatFullTime(value: string): string {
-  return new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 }
 
 const styles = StyleSheet.create({

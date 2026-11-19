@@ -2,16 +2,13 @@ import type { TeamInviteDto } from "@hark/contracts";
 import { SymbolView } from "expo-symbols";
 import { memo } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
+import { formatUpcoming } from "../../lib/dates";
 import { roleLabel } from "../../lib/teams";
 import { spoken } from "../../ui/a11y";
 import { Cell, useStackedRows } from "../../ui/list";
 import { Text } from "../../ui/text";
 import { colors, metrics, space } from "../../ui/tokens";
 import { FactLine } from "./fact-line";
-
-function expiryLabel(value: string): string {
-  return new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
 
 /**
  * A pending invite (DESIGN.md 5.13): who it is for, its role and who sent it
@@ -29,7 +26,7 @@ export const InviteRow = memo(function InviteRow({
   const stacked = useStackedRows();
   const title = invite.email ?? "Invite Link";
   const facts = [roleLabel(invite.role), `from ${invite.invitedBy}`];
-  const expires = `Expires ${expiryLabel(invite.expiresAt)}`;
+  const expires = `Expires ${formatUpcoming(invite.expiresAt)}`;
   return (
     <Cell
       minHeight={metrics.rowMinHeightSubtitle}

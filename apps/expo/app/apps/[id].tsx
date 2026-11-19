@@ -8,6 +8,7 @@ import { useActionSheet } from "../../src/components/apps/action-sheet";
 import { ApiError, api } from "../../src/lib/api";
 import { refreshDirectory, useDirectory } from "../../src/lib/app-directory";
 import { useSession } from "../../src/lib/auth";
+import { formatDateTime } from "../../src/lib/dates";
 import { haptic } from "../../src/lib/haptics";
 import { previewApps, previewViewer } from "../../src/lib/inbox-preview";
 import { leaveSheetThenPush } from "../../src/lib/navigation";
@@ -30,20 +31,6 @@ function hostOf(origin: string): string {
   } catch {
     return origin;
   }
-}
-
-function formatDate(value: string | null): string {
-  if (!value) return "Never";
-  const date = new Date(value);
-  const minutes = Math.round((Date.now() - date.getTime()) / 60_000);
-  if (minutes < 1) return "Just now";
-  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
-  return date.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
 }
 
 function failureMessage(cause: unknown): string {
@@ -331,8 +318,11 @@ export default function AppInfoSheet() {
                 <LabeledRow label="Via" value={app.createdBy} />
               ) : null}
               {app.projectName ? <LabeledRow label="Project" value={app.projectName} /> : null}
-              <LabeledRow label="Added" value={formatDate(app.createdAt)} />
-              <LabeledRow label="Last Opened" value={formatDate(app.lastOpenedAt)} />
+              <LabeledRow label="Added" value={formatDateTime(app.createdAt)} />
+              <LabeledRow
+                label="Last Opened"
+                value={app.lastOpenedAt ? formatDateTime(app.lastOpenedAt) : "Never"}
+              />
               <LabeledRow
                 label="Sign-In"
                 value={consented ? "Signed in with Hark" : "Asks before signing in"}

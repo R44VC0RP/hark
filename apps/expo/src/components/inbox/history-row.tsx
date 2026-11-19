@@ -3,6 +3,7 @@ import { useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { memo, useState } from "react";
 import { StyleSheet, View } from "react-native";
+import { formatListDate } from "../../lib/dates";
 import { useLayout } from "../../lib/layout";
 import { spoken } from "../../ui/a11y";
 import { SourceAvatar } from "../../ui/avatar";
@@ -10,7 +11,7 @@ import { Cell, Chevron, useStackedRows } from "../../ui/list";
 import { animateListChange } from "../../ui/motion";
 import { Text, useFontScale } from "../../ui/text";
 import { colors, metrics, space } from "../../ui/tokens";
-import { activityKindLabel, formatActivityTime, isRefusal } from "./format";
+import { activityKindLabel, isRefusal } from "./format";
 
 export const HISTORY_AVATAR = 30;
 
@@ -38,7 +39,7 @@ export const HistoryRow = memo(function HistoryRow({
   // A notification's ID is the detail screen's ("event:…", "notification:…").
   const opens = item.kind === "notification";
   const expandable = !opens && Boolean(item.detail);
-  const meta = `${item.sourceName} · ${activityKindLabel(item.kind)} · ${formatActivityTime(item.createdAt)}`;
+  const meta = `${item.sourceName} · ${activityKindLabel(item.kind)} · ${formatListDate(item.createdAt)}`;
   // Denied and No are answers, not successes: grey, with a cross.
   const refusal = item.result ? isRefusal(item.result) : false;
   const result = item.result ? (

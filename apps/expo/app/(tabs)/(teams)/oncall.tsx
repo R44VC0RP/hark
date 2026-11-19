@@ -21,6 +21,7 @@ import { api, type OncallMeDto } from "../../../src/lib/api";
 import { refreshDirectory, useDirectory } from "../../../src/lib/app-directory";
 import { useSession } from "../../../src/lib/auth";
 import { criticalAlertsEnabled, reportCriticalAlertState } from "../../../src/lib/critical-alerts";
+import { formatHandoffClock, formatUpcoming } from "../../../src/lib/dates";
 import { haptic } from "../../../src/lib/haptics";
 import {
   previewOncallGroups,
@@ -29,12 +30,7 @@ import {
   previewTeams,
   previewViewer,
 } from "../../../src/lib/inbox-preview";
-import {
-  escalationPolicySummary,
-  formatHandoff,
-  isUnsupportedRoute,
-  onPageClaimed,
-} from "../../../src/lib/teams";
+import { escalationPolicySummary, isUnsupportedRoute, onPageClaimed } from "../../../src/lib/teams";
 import { spoken } from "../../../src/ui/a11y";
 import { Avatar } from "../../../src/ui/avatar";
 import { EmptyState, ErrorState, isNetworkError, LoadingState } from "../../../src/ui/empty-state";
@@ -357,7 +353,7 @@ export default function OncallScreen() {
                   {upcoming.map((item) => (
                     <Row
                       key={`${item.groupId}-${item.startsAt}`}
-                      subtitle={`${item.teamName}\n${formatHandoff(item.startsAt, now)} – ${formatHandoff(item.endsAt, now)}`}
+                      subtitle={`${item.teamName}\n${formatUpcoming(item.startsAt, now)} – ${formatUpcoming(item.endsAt, now)}`}
                       title={item.groupName}
                     />
                   ))}
@@ -387,7 +383,9 @@ function RotationRow({
   viewerId: string | undefined;
 }) {
   const stacked = useStackedRows();
-  const schedule = `${group.rotation.period === "weekly" ? "Weekly" : "Daily"} · ${group.rotation.handoffAt}`;
+  // The handoff on this device's clock, like the shifts under it (V-07).
+  const handoff = formatHandoffClock(group.rotation.handoffAt, group.rotation.timezone, now);
+  const schedule = `${group.rotation.period === "weekly" ? "Weekly" : "Daily"} · ${handoff}`;
   // "On call → 5 min → Everyone in the group · repeats 1× · then everyone in
   // the team": the chain on one line, what follows it as a sentence on the
   // next, so no "·" ends a wrapped line (V-06). An arrow keeps to the step
@@ -428,11 +426,11 @@ function RotationRow({
         const you = item.person.userId === viewerId;
         const name = `${you ? "You" : item.person.name}${item.override ? " (cover)" : ""}`;
         const when = live
-          ? `Now – ${formatHandoff(item.endsAt, now)}`
-          : formatHandoff(item.startsAt, now);
+          ? `Now – ${formatUpcoming(item.endsAt, now)}`
+          : formatUpcoming(item.startsAt, now);
         return (
           <View
-            accessibilityLabel={`${live ? "Now" : formatHandoff(item.startsAt, now)}: ${you ? "you" : item.person.name}${item.override ? ", covering" : ""}`}
+            accessibilityLabel={`${when}: ${you ? "you" : item.person.name}${item.override ? ", covering" : ""}`}
             accessible
             key={`${item.startsAt}-${item.person.userId}`}
             style={[styles.shift, stacked && styles.stacked]}

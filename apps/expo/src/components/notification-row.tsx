@@ -1,12 +1,12 @@
 import type { InboxNotificationSummaryDto } from "@hark/contracts";
 import { memo, useMemo } from "react";
 import { StyleSheet, View } from "react-native";
+import { formatListDate } from "../lib/dates";
 import { spoken } from "../ui/a11y";
 import { Cell, useStackedRows } from "../ui/list";
 import { MenuLink, type MenuLinkAction } from "../ui/menu-link";
 import { Text } from "../ui/text";
 import { colors, space } from "../ui/tokens";
-import { formatActivityTime } from "./inbox/format";
 
 /** The leading column that holds the unread dot (DESIGN.md 5.6). */
 export const NOTIFICATION_DOT_COLUMN = 16;
@@ -39,7 +39,7 @@ export const NotificationRow = memo(function NotificationRow({
 }: NotificationRowProps) {
   const stacked = useStackedRows();
   const unread = item.readAt === null;
-  const time = formatActivityTime(item.createdAt);
+  const time = formatListDate(item.createdAt);
   const titleVariant = unread ? "headline" : "body";
   const toggleLabel = unread ? "Mark as Read" : "Mark as Unread";
   const linkOnly = Boolean(item.url && !item.app);

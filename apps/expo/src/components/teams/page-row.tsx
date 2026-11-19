@@ -2,7 +2,8 @@ import type { OncallPageDto } from "@hark/contracts";
 import { Link } from "expo-router";
 import { memo } from "react";
 import { StyleSheet, View } from "react-native";
-import { pageStatusLabel, timeAgo } from "../../lib/teams";
+import { formatAgo, spokenTime } from "../../lib/dates";
+import { pageStatusLabel } from "../../lib/teams";
 import { spoken } from "../../ui/a11y";
 import { Cell, Chevron, useStackedRows } from "../../ui/list";
 import { StatusDot } from "../../ui/status-dot";
@@ -73,13 +74,19 @@ export function sortPages(pages: OncallPageDto[]): OncallPageDto[] {
 export const PageRow = memo(function PageRow({ page, now }: { page: OncallPageDto; now: number }) {
   const stacked = useStackedRows();
   const open = page.status === "triggered";
-  const ago = timeAgo(page.createdAt, now);
+  const ago = formatAgo(page.createdAt, now);
   const state = pageStateText(page);
   return (
     <Link asChild href={{ pathname: "/pages/[id]", params: { id: page.id } }}>
       <Cell
         accessibilityHint="Opens the page"
-        accessibilityLabel={spoken(page.title, pageStatusLabel(page), page.groupName, ago, state)}
+        accessibilityLabel={spoken(
+          page.title,
+          pageStatusLabel(page),
+          page.groupName,
+          spokenTime(ago),
+          state,
+        )}
         accessibilityRole="button"
         accessible
         minHeight={metrics.rowMinHeightSubtitle}

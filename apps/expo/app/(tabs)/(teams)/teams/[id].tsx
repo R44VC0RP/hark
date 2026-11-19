@@ -20,6 +20,7 @@ import { SeatLimitNotice } from "../../../../src/components/teams/seat-limit-not
 import { ApiError, api } from "../../../../src/lib/api";
 import { refreshDirectory } from "../../../../src/lib/app-directory";
 import { useSession } from "../../../../src/lib/auth";
+import { formatUpcoming } from "../../../../src/lib/dates";
 import { haptic } from "../../../../src/lib/haptics";
 import {
   previewOncallGroups,
@@ -31,7 +32,6 @@ import {
 } from "../../../../src/lib/inbox-preview";
 import {
   canManageTeam,
-  formatHandoff,
   isSeatLimitError,
   roleLabel,
   seatsFull,
@@ -66,7 +66,7 @@ function failed(title: string, cause: unknown): void {
 }
 
 /**
- * "Alex Kim until Thu 5:00 AM" or "Nobody on call". At accessibility sizes
+ * "Alex Kim until Thu at 5:00 AM" or "Nobody on call". At accessibility sizes
  * the open-page count goes on its own line instead of squeezing the name
  * beside a capsule, and the handoff may wrap.
  */
@@ -74,7 +74,7 @@ function groupSubtitle(group: OncallGroupDto, viewerId: string | undefined, stac
   const open = stacked && group.openPageCount > 0 ? `\n${group.openPageCount} open` : "";
   if (!group.current) return `Nobody on call${open}`;
   const who = group.current.person.userId === viewerId ? "You" : group.current.person.name;
-  const until = `until ${formatHandoff(group.current.endsAt)}`;
+  const until = `until ${formatUpcoming(group.current.endsAt)}`;
   return `${who} ${stacked ? until : unbroken(until)}${open}`;
 }
 
