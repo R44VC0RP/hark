@@ -63,8 +63,8 @@ const stripColors = new Map<string, string>();
  * The first opens teach the gesture with a Liquid Glass hint.
  *
  * iPad regular windows get the native navigation bar in the page's colour
- * with glass items: Close, Back, Forward, Reload; Open in Safari, App Info
- * and More (Switch App, Stop Signing In).
+ * with glass items: Close, Back, Forward, Reload; Open in Safari, App Info,
+ * Switch App and More (Stop Signing In).
  */
 export default function WebAppScreen() {
   const params = useLocalSearchParams<{ id: string; url?: string }>();
