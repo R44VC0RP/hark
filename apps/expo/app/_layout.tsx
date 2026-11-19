@@ -25,6 +25,7 @@ import {
   handleNotificationResponse,
   registerInteractionCategories,
 } from "../src/lib/interactions";
+import { isPad } from "../src/lib/layout";
 import { startLiveActivityTokenSync } from "../src/lib/live-activities";
 import { setCurrentPath, useNavigationForLinks } from "../src/lib/navigation";
 import { PENDING_JOIN_CODE_KEY } from "../src/lib/teams";
@@ -149,7 +150,15 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" options={{ gestureEnabled: false }} />
         <Stack.Screen name="web/[id]" />
         <Stack.Screen name="apps/[id]" options={sheetOptions} />
-        <Stack.Screen name="pages/[id]" options={sheetOptions} />
+        {/*
+          On iPad a form sheet is about 570 × 650 pt, which put the toolbar
+          over the details and the timeline below the fold; a page sheet
+          shows status, details, timeline and actions together.
+        */}
+        <Stack.Screen
+          name="pages/[id]"
+          options={isPad ? { ...sheetOptions, presentation: "pageSheet" } : sheetOptions}
+        />
         <Stack.Screen name="join/[code]" options={sheetOptions} />
         <Stack.Screen name="critical-alerts" options={sheetOptions} />
         <Stack.Screen
