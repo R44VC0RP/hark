@@ -6,7 +6,6 @@ import {
 } from "@expo-google-fonts/inter-tight";
 import * as Notifications from "expo-notifications";
 import {
-  router,
   Stack,
   ThemeProvider,
   usePathname,
@@ -29,8 +28,7 @@ import {
 } from "../src/lib/interactions";
 import { startLiveActivityTokenSync } from "../src/lib/live-activities";
 import {
-  afterSheets,
-  openWebApp,
+  goTo,
   rootTransitionEnded,
   setCurrentPath,
   useNavigationForLinks,
@@ -50,9 +48,10 @@ setHourCycle(
       ? "h12"
       : undefined,
 );
-// Notification taps open screens by the same rule as links: never inside
-// or under a sheet (src/lib/navigation.ts).
-setNotificationNavigation({ afterSheets, openWebApp });
+// Notification taps open screens the one way everything outside the
+// current screen does (src/lib/navigation.ts `goTo`): never inside or
+// under a sheet, and tab routes in their tab with Back (R4-01).
+setNotificationNavigation({ open: goTo });
 void registerInteractionCategories().catch((error) => {
   console.warn("Could not register notification actions", error);
 });
@@ -139,7 +138,7 @@ export default function RootLayout() {
       await SecureStore.deleteItemAsync(PENDING_JOIN_CODE_KEY);
       setTimeout(() => {
         try {
-          router.push({ pathname: "/join/[code]", params: { code } });
+          goTo({ pathname: "/join/[code]", params: { code } });
         } catch {
           // The invite link can be opened again.
         }

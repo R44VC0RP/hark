@@ -337,30 +337,30 @@ export async function registerInteractionCategories(): Promise<void> {
   ]);
 }
 
+/** Where a notification tap goes: a route in the router's object form. */
+export interface NotificationDestination {
+  pathname: "/pages/[id]" | "/join/[code]" | "/notification/[id]" | "/web/[id]";
+  params: Record<string, string>;
+}
+
 /**
- * How a notification tap navigates. The root layout installs
- * `src/lib/navigation.ts`'s `afterSheets` and `openWebApp`, so a tap
- * never opens a screen inside or under an open sheet, and a web app opens
- * like everywhere else (replacing the open one inside a web app). Until
- * then (and in tests) it navigates at once.
+ * How a notification tap navigates: every destination (page, invite,
+ * notification detail, web app) goes through `open`. The root layout
+ * installs `src/lib/navigation.ts`'s `goTo`, the one way into the app from
+ * outside the current screen, so a tap never opens inside or under a sheet
+ * and never pushes a second copy of the tabs over a web app (R4-01). Until
+ * then (and in tests) it pushes the route.
  */
 export interface NotificationNavigation {
-  afterSheets(open: () => void): void;
-  openWebApp(id: string, url?: string): void;
+  open(destination: NotificationDestination): void;
 }
 
 let notificationNavigation: NotificationNavigation = {
-  afterSheets: (open) => open(),
-  openWebApp: (id, url) =>
-    router.push({ pathname: "/web/[id]", params: { id, ...(url ? { url } : {}) } }),
+  open: (destination) => router.push(destination),
 };
 
 export function setNotificationNavigation(navigation: NotificationNavigation): void {
   notificationNavigation = navigation;
-}
-
-function beforeNavigate(open: () => void): void {
-  notificationNavigation.afterSheets(open);
 }
 
 /** Best-effort push navigation that tolerates a not-yet-mounted router on cold start. */
@@ -380,19 +380,15 @@ function navigateSoon(navigate: () => void): void {
 
 function openPage(pageId: string, intent?: "escalate"): void {
   navigateSoon(() =>
-    beforeNavigate(() =>
-      router.push({
-        pathname: "/pages/[id]",
-        params: { id: pageId, ...(intent ? { intent } : {}) },
-      }),
-    ),
+    notificationNavigation.open({
+      pathname: "/pages/[id]",
+      params: { id: pageId, ...(intent ? { intent } : {}) },
+    }),
   );
 }
 
 function openJoin(code: string): void {
-  navigateSoon(() =>
-    beforeNavigate(() => router.push({ pathname: "/join/[code]", params: { code } })),
-  );
+  navigateSoon(() => notificationNavigation.open({ pathname: "/join/[code]", params: { code } }));
 }
 
 /** Handles taps and actions on on-call pages; returns false for other pushes. */
@@ -420,42 +416,19 @@ async function handlePageResponse(response: Notifications.NotificationResponse):
   return true;
 }
 
-/** Best-effort navigation that tolerates a not-yet-mounted router on cold start. */
 function openNotificationDetail(compositeId: string): void {
-  const navigate = () => {
-    beforeNavigate(() =>
-      router.push({ pathname: "/notification/[id]", params: { id: compositeId } }),
-    );
-  };
-  try {
-    navigate();
-  } catch {
-    setTimeout(() => {
-      try {
-        navigate();
-      } catch {
-        // The inbox remains one tap away; navigation is best effort.
-      }
-    }, 500);
-  }
+  navigateSoon(() =>
+    notificationNavigation.open({ pathname: "/notification/[id]", params: { id: compositeId } }),
+  );
 }
 
-/** Opens a Hark web app, retrying once if the router is not mounted yet. */
 function openWebApp(appId: string, url: string | undefined): void {
-  const navigate = () => {
-    notificationNavigation.openWebApp(appId, url);
-  };
-  try {
-    navigate();
-  } catch {
-    setTimeout(() => {
-      try {
-        navigate();
-      } catch {
-        // The app stays one tap away on the home screen.
-      }
-    }, 500);
-  }
+  navigateSoon(() =>
+    notificationNavigation.open({
+      pathname: "/web/[id]",
+      params: { id: appId, ...(url ? { url } : {}) },
+    }),
+  );
 }
 
 export async function handleNotificationResponse(

@@ -1,6 +1,8 @@
 import { type Href, router, useNavigationContainerRef } from "expo-router";
 import { CommonActions, StackActions } from "expo-router/react-navigation";
 import { useEffect } from "react";
+import { Dimensions } from "react-native";
+import { isPad } from "./layout";
 
 /**
  * Navigation helpers shared by every screen (DESIGN.md 5.0). The root layout
@@ -24,15 +26,7 @@ export function setCurrentPath(path: string): void {
  * prompt when there is one) and opens once the sheet is gone.
  */
 export function openWebApp(id: string, url?: string): void {
-  const href = { pathname: "/web/[id]", params: { id, ...(url ? { url } : {}) } } as const;
-  const stack = rootStack();
-  const sheet = topSheet();
-  const below = stack?.routes[(stack.index ?? stack.routes.length - 1) - (sheet ? 1 : 0)];
-  const inWebApp = stack ? below?.name === "web/[id]" : currentPath.startsWith("/web/");
-  // Once the sheet is gone, like a link (`afterSheets`): opened in the same
-  // tick as the sheet's close, a screen can be laid out inside the leaving
-  // sheet (R3-03). Without a sheet this opens at once.
-  afterSheets(() => (inWebApp ? router.replace(href) : router.push(href)));
+  goTo({ pathname: "/web/[id]", params: { id, url } });
 }
 
 /**
@@ -46,12 +40,12 @@ export function backOr(fallback: Href): void {
 }
 
 /**
- * Closes the sheet this is called from, then opens `href` from the screen
- * underneath (a sheet that opens a web app or another route).
+ * Closes the sheet this is called from, then opens `destination` from the
+ * screen underneath (a sheet that opens a web app or another route), by
+ * the same rule as everything else (`goTo`): once the sheet is gone.
  */
-export function leaveSheetThenPush(href: Href): void {
-  router.back();
-  router.push(href);
+export function leaveSheetThenPush(destination: Destination): void {
+  goTo(destination);
 }
 
 /**
@@ -235,10 +229,27 @@ function openTabLink(path: string): boolean {
   const stack = tabs?.routes.find((route) => route.name === link.tab)?.state as
     | NavigatorState
     | undefined;
-  const home = stack?.routes[0];
-  if (!tabs || !stack || !home) return false;
+  if (!tabs) return false;
   const above = root.routes.length - 1 - tabsIndex;
   if (above > 0) navigationRef.dispatch({ ...StackActions.pop(above), target: root.key });
+  const home = stack?.routes[0];
+  if (!stack || !home) {
+    // The tab was never shown, so its stack doesn't exist yet: it is
+    // created with its root under the target (`initial: false`).
+    const target = link.screen;
+    navigationRef.dispatch({
+      ...CommonActions.navigate(
+        target
+          ? {
+              name: link.tab,
+              params: { screen: target.name, params: target.params, initial: false },
+            }
+          : { name: link.tab },
+      ),
+      target: tabs.key,
+    });
+    return true;
+  }
   navigationRef.dispatch({ ...CommonActions.navigate({ name: link.tab }), target: tabs.key });
   const top = stack.routes[stack.routes.length - 1];
   const target = link.screen;
@@ -276,10 +287,9 @@ function openTabLink(path: string): boolean {
  * to Expo Router.
  */
 export function followLink(path: string): string | null | Promise<string | null> {
-  const open = () => (openTabLink(path) ? null : path);
-  const sheet = topSheet();
-  if (!sheet) return open();
-  return closeSheet(sheet).then((closed) => (closed ? open() : null));
+  const open = () => (outsideApp() && tabLinkOf(path) ? null : openTabLink(path) ? null : path);
+  const ready = whenSheetsGone();
+  return ready === true ? open() : ready.then((go) => (go ? open() : null));
 }
 
 /**
@@ -294,7 +304,14 @@ export function followLink(path: string): string | null | Promise<string | null>
 function closeSheet(sheet: { key: string }): Promise<boolean> {
   const guard = guardOfTopSheet();
   const closing = guard ? guard.ask() : Promise.resolve(closeTopSheet());
-  return closing.then((closed) => (closed ? sheetGone(sheet.key).then(() => true) : false));
+  return closing.then((closed) => {
+    if (!closed) return false;
+    const gone: Promise<void> = sheetGone(sheet.key).then(() => {
+      if (sheetLeaving === gone) sheetLeaving = null;
+    });
+    sheetLeaving = gone;
+    return gone.then(() => true);
+  });
 }
 
 /**
@@ -305,25 +322,97 @@ function closeSheet(sheet: { key: string }): Promise<boolean> {
  * keeps editing a Reply draft.
  */
 export function afterSheets(open: () => void): void {
+  const ready = whenSheetsGone();
+  if (ready === true) open();
+  else
+    void ready.then((go) => {
+      if (go) open();
+    });
+}
+
+/** Each navigation request; only the latest may open once sheets are gone. */
+let latestRequest = 0;
+/** The sheet still leaving after a request closed it, until it is gone. */
+let sheetLeaving: Promise<void> | null = null;
+
+/**
+ * `true` when nothing is in the way, so the caller opens now. Otherwise the
+ * sheet on top closes (Reply with a draft asks first), or the one already
+ * leaving finishes, and the promise says whether this request may still
+ * open: false when the person keeps editing, and false for every request
+ * but the latest, so several entries made while a prompt or a sheet was in
+ * the way open one screen, the last one asked for (R4: all of them used to
+ * open, stacking web apps).
+ */
+function whenSheetsGone(): true | Promise<boolean> {
+  const request = ++latestRequest;
   const sheet = topSheet();
-  if (!sheet) {
-    open();
-    return;
-  }
-  void closeSheet(sheet).then((closed) => {
-    if (closed) open();
+  const waiting = sheet ? closeSheet(sheet) : sheetLeaving?.then(() => true);
+  if (!waiting) return true;
+  return waiting.then((go) => go && request === latestRequest);
+}
+
+/** A route as a path or in the router's object form (`/pages/[id]` + params). */
+export type Destination =
+  | string
+  | { pathname: string; params?: Record<string, string | undefined> };
+
+/** The path of a destination: `[param]` segments filled in, the rest as a query. */
+export function destinationPath(destination: Destination): string {
+  if (typeof destination === "string") return destination;
+  const params: Record<string, string | undefined> = { ...destination.params };
+  const path = destination.pathname.replace(/\[([^\]]+)\]/g, (_, name: string) => {
+    const value = params[name] ?? "";
+    delete params[name];
+    return encodeURIComponent(value);
+  });
+  const query = Object.entries(params)
+    .filter((entry): entry is [string, string] => entry[1] !== undefined)
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+    .join("&");
+  return query ? `${path}?${query}` : path;
+}
+
+/**
+ * THE way into the app from outside the current screen: notification taps
+ * (detail, page, join, web app), keyboard shortcuts, the pages accessory,
+ * a sheet's button that opens something else, and an invite resumed after
+ * sign-in. Links use the same steps through `followLink`. The sheet on top
+ * closes first and the destination opens once it is gone; a tab route opens
+ * in its tab as [root, target], popping whatever is above the tabs (a web
+ * app), so there is never a second tab navigator and Back always reaches
+ * the tab's root (R4-01: a notification pushed from a web app mounted a
+ * second copy of the tabs with no Back); a web app replaces the open one
+ * when it opens from inside a web app (⌘1–9, Switch App) and is pushed
+ * otherwise; anything else (a sheet, Link Not Found, signed out) is pushed.
+ */
+export function goTo(destination: Destination): void {
+  const path = destinationPath(destination);
+  afterSheets(() => {
+    if (outsideApp() && tabLinkOf(path)) return;
+    if (openTabLink(path)) return;
+    const href = path as Href;
+    if (path.startsWith("/web/") && topRouteName() === "web/[id]") router.replace(href);
+    else router.push(href);
   });
 }
 
 /**
- * Opens an app path the way a link would (`followLink`): the sheet on top
- * closes first; tab routes open as [root, target] in their tab; anything
- * else is pushed.
+ * On Sign In and Set Up there is no signed-in app, so no tabs to open a
+ * tab route in: pushing one mounted a tab navigator for a signed-out person
+ * that redirected straight back to Sign In, and stayed mounted (R4). Such a
+ * destination is dropped there, as it in effect was before; an invite still
+ * opens its screen, which keeps it until sign-in.
  */
-export function goTo(path: string): void {
-  afterSheets(() => {
-    if (!openTabLink(path)) router.push(path as Href);
-  });
+function outsideApp(): boolean {
+  return currentPath === "/" || currentPath === "/home";
+}
+
+/** The root stack's top route (a web app, a sheet, the tabs). */
+function topRouteName(): string | undefined {
+  const stack = rootStack();
+  if (!stack) return currentPath.startsWith("/web/") ? "web/[id]" : undefined;
+  return stack.routes[stack.index ?? stack.routes.length - 1]?.name;
 }
 
 /** Links waiting for a sheet to finish leaving, by the sheet's route key. */
@@ -371,6 +460,31 @@ interface NavigationRef {
 
 let navigationRef: NavigationRef | null = null;
 
+/**
+ * How many tab navigators (`(tabs)` routes, at any depth) the navigation
+ * state holds. Signed in there must be exactly one: a second one is a whole
+ * copy of the app (its own Inbox stack and keyboard shortcuts) mounted above
+ * the first, which a push of a tab route from outside the tabs created (R4-01).
+ */
+export function tabNavigatorCount(state: unknown): number {
+  return tabNavigatorPaths(state).length;
+}
+
+/** Where each tab navigator sits, as route names from the root ("__root > (tabs)"). */
+function tabNavigatorPaths(state: unknown): string[] {
+  const paths: string[] = [];
+  const walk = (node: unknown, path: string[]) => {
+    const routes = (node as { routes?: { name?: string; state?: unknown }[] } | undefined)?.routes;
+    for (const route of routes ?? []) {
+      const here = [...path, route.name ?? "?"];
+      if (route.name === "(tabs)") paths.push(here.join(" > "));
+      if (route.state) walk(route.state, here);
+    }
+  };
+  walk(state, []);
+  return paths;
+}
+
 /** Root layout only: lets `dropLeftoverPreviews` reach the navigation state. */
 export function useNavigationForLinks(): void {
   const navigation = useNavigationContainerRef();
@@ -379,6 +493,29 @@ export function useNavigationForLinks(): void {
     return () => {
       navigationRef = null;
     };
+  }, [navigation]);
+  // Development check (R4-01): says so whenever the number of mounted tab
+  // navigators changes, and warns when there is more than one.
+  useEffect(() => {
+    if (!__DEV__) return;
+    let last = -1;
+    return navigation.addListener("state", () => {
+      const paths = tabNavigatorPaths(navigation.getRootState());
+      const count = paths.length;
+      if (count === last) return;
+      last = count;
+      // Which device: a lane's simulators share one Metro log.
+      const device = `${isPad ? "iPad" : "iPhone"} ${Math.round(Dimensions.get("window").width)} pt`;
+      if (count > 1) {
+        const root = rootStack()
+          ?.routes.map((route) => route.name)
+          .join(", ");
+        console.warn(
+          `[nav-invariant] ${device}: ${count} tab navigators mounted: ${paths.join(" | ")} (root stack: ${root})`,
+        );
+      } else
+        console.log(`[nav-invariant] ${device}: ${count} tab navigator${count === 1 ? "" : "s"}`);
+    });
   }, [navigation]);
 }
 
