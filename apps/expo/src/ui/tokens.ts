@@ -192,14 +192,33 @@ export const navigationTheme: Theme = {
  * back button, ink bar items. Never add `headerStyle.backgroundColor`,
  * `headerBlurEffect` or `headerShadowVisible`.
  */
+/**
+ * Navigation titles in UIKit's own title fonts, which follow Dynamic Type
+ * like Settings' and Mail's. expo-router always sends a title colour and a
+ * weight (the theme's), and react-native-screens then sets a fixed 17- and
+ * 34-pt font, so titles stayed the same size at AX5. No colour or family
+ * and an empty weight reach native as nil and leave the bar's default fonts
+ * in place (same size and weight at the default text size; the system's
+ * label colour instead of our near-black ink).
+ */
+const systemTitleStyle: { color?: ColorValue; fontFamily?: string; fontWeight?: "normal" } = {
+  color: undefined,
+  fontFamily: undefined,
+  // Typed as a weight; native reads "" as no weight at all.
+  fontWeight: "" as unknown as "normal",
+};
+
 export const stackScreenOptions = {
   headerTransparent: true,
   headerBackButtonDisplayMode: "minimal",
   headerTintColor: palette.label,
-  // The soft edge is explicit: "automatic" draws nothing under the iPad top
-  // tab bar, so scrolled rows ran crisp under the status bar there (checked
-  // in the simulator). iPhone's automatic style was already soft.
-  scrollEdgeEffects: { top: "soft", bottom: "automatic", left: "automatic", right: "automatic" },
+  headerTitleStyle: systemTitleStyle,
+  headerLargeTitleStyle: systemTitleStyle,
+  // The soft edges are explicit: "automatic" drew nothing under the iPad top
+  // tab bar (rows ran crisp under the status bar) or above the floating tab
+  // bar and pages accessory (rows ran crisp behind them and green buttons
+  // tinted the tab bar). Both checked in the simulator.
+  scrollEdgeEffects: { top: "soft", bottom: "soft", left: "automatic", right: "automatic" },
   contentStyle: { backgroundColor: palette.background },
 } satisfies NativeStackNavigationOptions;
 
@@ -216,10 +235,12 @@ export const sheetOptions = {
   headerTransparent: true,
   headerBackButtonDisplayMode: "minimal",
   headerTintColor: palette.label,
-  // Same soft edge as stacks. With "automatic" the Reply sheet drew the hard
+  headerTitleStyle: systemTitleStyle,
+  // Same soft edges as stacks. With "automatic" the Reply sheet drew the hard
   // style (opaque band and divider) under its header even at rest, because
-  // its list starts under the header (checked in the simulator).
-  scrollEdgeEffects: { top: "soft", bottom: "automatic", left: "automatic", right: "automatic" },
+  // its list starts under the header, and content ran crisp under bottom
+  // toolbars (checked in the simulator).
+  scrollEdgeEffects: { top: "soft", bottom: "soft", left: "automatic", right: "automatic" },
   sheetAllowedDetents: [1],
   contentStyle: { backgroundColor: palette.groupedBackground },
 } satisfies NativeStackNavigationOptions;
