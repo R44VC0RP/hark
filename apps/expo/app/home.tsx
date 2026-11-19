@@ -221,6 +221,8 @@ export default function SetUpScreen() {
 
   return (
     <>
+      {/* A root screen: nothing to go back to, even when something opened it with a push. */}
+      <Stack.Screen options={{ headerBackVisible: false, gestureEnabled: false }} />
       <Stack.Toolbar placement="right">
         <Stack.Toolbar.Menu accessibilityLabel="More" icon="ellipsis">
           <Stack.Toolbar.MenuAction
