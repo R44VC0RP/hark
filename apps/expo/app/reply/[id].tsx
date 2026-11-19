@@ -7,19 +7,25 @@ import {
   useRoute,
 } from "expo-router/react-navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActionSheetIOS, findNodeHandle, StyleSheet, TextInput, View } from "react-native";
+import { ActionSheetIOS, Alert, findNodeHandle, StyleSheet, TextInput, View } from "react-native";
+import { projectNameFor } from "../../src/components/inbox/format";
+import { api } from "../../src/lib/api";
 import { alertFailure, haptic } from "../../src/lib/haptics";
 import {
+  type CachedInteraction,
   cachedInteraction,
   markInteractionHandled,
+  outcomesOf,
+  rememberInteraction,
   replyDraft,
   saveReplyDraft,
+  sendAnswer,
+  settleRequests,
 } from "../../src/lib/inbox-cache";
-import { submitInteractionResponse } from "../../src/lib/interactions";
 import { useLayout } from "../../src/lib/layout";
 import { setLeaveGuard } from "../../src/lib/navigation";
 import { SourceAvatar } from "../../src/ui/avatar";
-import { EmptyState } from "../../src/ui/empty-state";
+import { EmptyState, ErrorState, isNetworkError, LoadingState } from "../../src/ui/empty-state";
 import { List, useStackedRows } from "../../src/ui/list";
 import { Text } from "../../src/ui/text";
 import { colors, palette, space, typography } from "../../src/ui/tokens";
@@ -43,11 +49,23 @@ const CANCEL_FRAME = { left: 16, top: 12, width: 44, height: 44 } as const;
 
 type DraftChoice = "delete" | "save" | "keep";
 
+/** The request: from the Inbox's cache, else loaded here (a reply link). */
+type Loaded = CachedInteraction | "loading" | "missing" | "network" | "failed";
+
+/** Why a reply wasn't sent when the request had already closed. */
+const CLOSED_MESSAGES = {
+  answeredElsewhere: "It was already answered on another device.",
+  expired: "It expired before your reply arrived.",
+  withdrawn: "It was withdrawn before your reply arrived.",
+  gone: "It’s no longer waiting for an answer.",
+} as const;
+
 /**
  * Reply to a request (DESIGN.md 5.5): a form sheet at half height that the
  * Inbox opens. Cancel leads, Send Reply is the prominent trailing item. The
- * request comes from the Inbox's cache, so a relaunch shows "Request
- * Unavailable" instead of guessing.
+ * request comes from the Inbox's cache; a reply link to a request the Inbox
+ * hasn't loaded fetches it, and only a request that is no longer open shows
+ * "Request Unavailable".
  */
 export default function ReplySheet() {
   const router = useRouter();
@@ -59,7 +77,30 @@ export default function ReplySheet() {
   const stacked = useStackedRows();
   const navigation = useNavigation();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const cached = cachedInteraction(String(id));
+  const [loaded, setLoaded] = useState<Loaded>(() => cachedInteraction(String(id)) ?? "loading");
+  const cached = typeof loaded === "string" ? null : loaded;
+  useEffect(() => {
+    if (loaded !== "loading") return;
+    let current = true;
+    void Promise.all([
+      api.listPendingInteractions(),
+      api.listInboxProjects().catch(() => null),
+    ]).then(
+      ([{ interactions }, projects]) => {
+        if (!current) return;
+        const interaction = interactions.find((item) => item.id === String(id));
+        if (!interaction) return setLoaded("missing");
+        rememberInteraction(interaction, projectNameFor(interaction, projects?.projects ?? []));
+        setLoaded(cachedInteraction(String(id)) ?? "missing");
+      },
+      (error: unknown) => {
+        if (current) setLoaded(isNetworkError(error) ? "network" : "failed");
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [id, loaded]);
   // The draft outlives the sheet (per request, like Messages): closing it
   // and opening the same request again brings the text back.
   const [text, setText] = useState(() => replyDraft(String(id)));
@@ -161,12 +202,25 @@ export default function ReplySheet() {
     setSending(true);
     try {
       const { interaction } = cached;
-      if (!simulatorPreview) {
-        await submitInteractionResponse(interaction.id, {
-          action: "reply",
-          response,
-          actionDigest: interaction.actionDigest,
-        });
+      const sent = simulatorPreview
+        ? "sent"
+        : await sendAnswer(interaction, { action: "reply", response });
+      if (sent === "taken") {
+        // Closed on the server before the reply arrived: the Inbox row
+        // settles with what really happened, and this says it wasn't sent.
+        const [closed] = await outcomesOf([interaction], Date.now());
+        if (closed) settleRequests([closed]);
+        haptic.warning();
+        saveReplyDraft(String(id), "");
+        leaving.current = true;
+        Alert.alert(
+          "Reply Not Sent",
+          CLOSED_MESSAGES[
+            closed?.outcome.kind === "answered" ? "gone" : (closed?.outcome.kind ?? "gone")
+          ],
+          [{ text: "OK", onPress: () => router.back() }],
+        );
+        return;
       }
       haptic.success();
       // No list animation here: this sheet is closing, and Fabric's
@@ -229,7 +283,15 @@ export default function ReplySheet() {
         contentInsetAdjustmentBehavior="never"
         scrollIndicatorInsets={{ top: headerHeight }}
       >
-        {cached ? (
+        {loaded === "loading" ? (
+          <LoadingState />
+        ) : loaded === "network" || loaded === "failed" ? (
+          <ErrorState
+            network={loaded === "network"}
+            onRetry={() => setLoaded("loading")}
+            title="Couldn’t Load Request"
+          />
+        ) : cached ? (
           <>
             <View accessible style={styles.context}>
               <View style={styles.source}>
@@ -276,9 +338,14 @@ export default function ReplySheet() {
             title="Request Unavailable"
           />
         )}
+        {/*
+          Where the draft prompt points on iPad: the Cancel button's frame.
+          Inside the scroll view: a third view beside it broke the form
+          sheet's expectations ("FormSheet with ScrollView expects at most 2
+          subviews", R3-P2-3).
+        */}
+        <View collapsable={false} pointerEvents="none" ref={anchor} style={styles.cancelAnchor} />
       </List>
-      {/* Where the draft prompt points on iPad: the Cancel button's frame. */}
-      <View collapsable={false} pointerEvents="none" ref={anchor} style={styles.cancelAnchor} />
     </>
   );
 }
