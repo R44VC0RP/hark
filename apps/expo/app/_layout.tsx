@@ -16,9 +16,10 @@ import {
 import * as SecureStore from "expo-secure-store";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect, useRef } from "react";
-import { AppState } from "react-native";
+import { AppState, Settings } from "react-native";
 import { trackAppEvent } from "../src/lib/analytics";
 import { useSession } from "../src/lib/auth";
+import { setHourCycle } from "../src/lib/dates";
 import {
   flushInteractionResponses,
   flushPageAcknowledgements,
@@ -32,6 +33,16 @@ import { useLargeText } from "../src/ui/list";
 import { navigationTheme, palette, sheetOptions, stackScreenOptions } from "../src/ui/tokens";
 
 void SplashScreen.preventAutoHideAsync();
+
+// iOS keeps the 24-Hour Time switch outside the locale Hermes formats with
+// ("3:29 AM" stayed with it on), so times read it from the global defaults.
+setHourCycle(
+  Settings.get("AppleICUForce24HourTime")
+    ? "h23"
+    : Settings.get("AppleICUForce12HourTime")
+      ? "h12"
+      : undefined,
+);
 void registerInteractionCategories().catch((error) => {
   console.warn("Could not register notification actions", error);
 });
