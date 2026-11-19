@@ -48,29 +48,40 @@ const APP_ICON = 40;
  * The bottom toolbar's text items as UIKit draws them (iOS 27.2): 17-pt
  * medium in the body text style, growing with the text size until about
  * xxLarge, a little bolder with Bold Text. The invisible copies that measure
- * them are a step heavier (semibold, bold with Bold Text) and stop growing a
- * bit later, so they never come out narrower than the real labels (checked
- * from Large to AX5, with and without Bold Text).
+ * them stop growing a bit later and, with Bold Text, are a step heavier, so
+ * they never come out narrower than the real labels (checked from Large to
+ * AX5, with and without Bold Text). On iPhone they are medium like the bar:
+ * a semibold copy came out 12 pt wider than the three labels UIKit fits on a
+ * 402-pt iPhone (R3V-01; their frames there are exactly medium label + 22 pt
+ * padding). iPad keeps the heavier copy its 375-pt windows were checked with.
  */
-const BAR_LABEL = { fontSize: 17, fontWeight: "600" } as const;
+const BAR_LABEL = { fontSize: 17, fontWeight: isPad ? "600" : "500" } as const;
 const BAR_LABEL_BOLD = { fontSize: 17, fontWeight: "700" } as const;
 const BAR_LABEL_MAX_SCALE = 1.25;
 /**
  * What a toolbar needs besides its labels, in points: both margins, each
  * item's padding, the prominent item's extra padding and the gap between
- * items, as UIKit lays them out when there is room (iOS 27.2). When the
- * items don't fit, UIKit first squeezes the margins (33 to 29 pt on a
- * 402-pt iPhone, where the three labels only just fit at the default text
- * size) and then moves the trailing item, the prominent one, into an
- * unlabelled "⋯" (V2-01). The sheet folds its secondary actions before the
- * bar would need squeezing, so a slightly narrower phone, larger or bolder
- * text, or another iOS release can't push the primary action out.
+ * items (iOS 27.2). When the items don't fit, UIKit first squeezes the
+ * margins, from 33 pt each on iPhone, and only then moves the trailing
+ * item, the prominent one, into an unlabelled "⋯" (V2-01). The check
+ * allows the squeeze to 29 pt that UIKit makes on a 402-pt iPhone at the
+ * default size (measured frames: 29 · Resolve 83 · 22 · Escalate 88 · 22 ·
+ * Acknowledge 129 · 29), where folding hid Resolve and Escalate although all
+ * three fit (R3V-01). Its limit is lower (somewhere between 16 and 29 pt:
+ * a 375-pt iPhone overflowed), so allowing 29 still folds before UIKit
+ * would hide the primary action.
  */
 const BAR_METRICS = isPad
   ? { margins: 28, padding: 24, prominent: 2, gap: 20 }
-  : { margins: 66, padding: 22, prominent: 1.5, gap: 22 };
-type BarLabel = "Resolve" | "Escalate" | "Acknowledge" | "Acknowledged";
-const BAR_LABELS: readonly BarLabel[] = ["Resolve", "Escalate", "Acknowledge", "Acknowledged"];
+  : { margins: 58, padding: 22, prominent: 1.5, gap: 22 };
+type BarLabel = "Resolve" | "Escalate" | "Acknowledge" | "Acknowledged" | "More";
+const BAR_LABELS: readonly BarLabel[] = [
+  "Resolve",
+  "Escalate",
+  "Acknowledge",
+  "Acknowledged",
+  "More",
+];
 const OPEN_TOOLBAR = [
   { label: "Resolve" },
   { label: "Escalate" },
@@ -80,6 +91,7 @@ const ACKNOWLEDGED_TOOLBAR = [
   { label: "Resolve", prominent: true },
   { label: "Acknowledged" },
 ] as const;
+const FOLDED_TOOLBAR = [{ label: "More" }, { label: "Acknowledge", prominent: true }] as const;
 /**
  * The list ends where the bottom toolbar starts (V2-03); should content
  * still reach the bar (before the sheet knows its height), the hard edge
@@ -455,6 +467,9 @@ export default function PageSheet() {
   // don't fit, Resolve and Escalate fold into More Actions; once
   // acknowledged, the dimmed "Acknowledged" gives way before Resolve would.
   const foldToolbar = triggered && !toolbar.fits(OPEN_TOOLBAR);
+  // Folded, the menu says what it is ("More") whenever that fits beside
+  // Acknowledge; a bare "⋯" read as decoration (R3V-01).
+  const labelFold = foldToolbar && toolbar.fits(FOLDED_TOOLBAR);
   const showAcknowledged = triggered || toolbar.fits(ACKNOWLEDGED_TOOLBAR);
   const ringing = page?.ringing ?? [];
   const timeline = page?.timeline ?? [];
@@ -521,6 +536,64 @@ export default function PageSheet() {
               ) : null}
             </View>
 
+            {/*
+              The page's link comes right after what happened: it is the next
+              step after acknowledging, and below Timeline and Details it was
+              off the first screen on iPhone and iPad landscape (R3V-02).
+            */}
+            {page.app ? (
+              <Section>
+                <Cell
+                  minHeight={APP_ICON + 2 * space.s}
+                  separatorInset={metrics.rowPaddingHorizontal + APP_ICON + metrics.rowAccessoryGap}
+                  style={stacked ? styles.appRowStacked : null}
+                >
+                  <View
+                    accessibilityLabel={spoken(page.app.name, hostOf(page.url ?? page.app.origin))}
+                    accessible
+                    style={styles.appIdentity}
+                  >
+                    <AppIcon iconUrl={page.app.iconUrl} name={page.app.name} size={APP_ICON} />
+                    <View style={styles.flex}>
+                      <Text variant="body" weight="600">
+                        {page.app.name}
+                      </Text>
+                      <Text
+                        color="secondaryLabel"
+                        numberOfLines={stacked ? undefined : 1}
+                        variant="footnote"
+                      >
+                        {hostOf(page.url ?? page.app.origin)}
+                      </Text>
+                    </View>
+                  </View>
+                  <Button
+                    accessibilityHint={`Opens ${page.app.name} signed in with Hark`}
+                    onPress={() => {
+                      if (!page.app) return;
+                      leaveSheetThenPush({
+                        pathname: "/web/[id]",
+                        params: { id: page.app.id, ...(page.url ? { url: page.url } : {}) },
+                      });
+                    }}
+                    title="Open"
+                    variant="bordered"
+                  />
+                </Cell>
+              </Section>
+            ) : page.url ? (
+              <Section>
+                <ActionRow
+                  accessibilityHint="Opens the link from this page"
+                  onPress={() => {
+                    if (page.url) void openTopLevelDestination(page.url);
+                  }}
+                  symbol="arrow.up.right.square"
+                  title="Open Link"
+                />
+              </Section>
+            ) : null}
+
             {resolved ? (
               <Section>
                 <Row
@@ -577,59 +650,6 @@ export default function PageSheet() {
               />
               <LabeledRow label="Status" value={escalationLabel(page, now)} />
             </Section>
-
-            {page.app ? (
-              <Section>
-                <Cell
-                  minHeight={APP_ICON + 2 * space.s}
-                  separatorInset={metrics.rowPaddingHorizontal + APP_ICON + metrics.rowAccessoryGap}
-                  style={stacked ? styles.appRowStacked : null}
-                >
-                  <View
-                    accessibilityLabel={spoken(page.app.name, hostOf(page.url ?? page.app.origin))}
-                    accessible
-                    style={styles.appIdentity}
-                  >
-                    <AppIcon iconUrl={page.app.iconUrl} name={page.app.name} size={APP_ICON} />
-                    <View style={styles.flex}>
-                      <Text variant="body" weight="600">
-                        {page.app.name}
-                      </Text>
-                      <Text
-                        color="secondaryLabel"
-                        numberOfLines={stacked ? undefined : 1}
-                        variant="footnote"
-                      >
-                        {hostOf(page.url ?? page.app.origin)}
-                      </Text>
-                    </View>
-                  </View>
-                  <Button
-                    accessibilityHint={`Opens ${page.app.name} signed in with Hark`}
-                    onPress={() => {
-                      if (!page.app) return;
-                      leaveSheetThenPush({
-                        pathname: "/web/[id]",
-                        params: { id: page.app.id, ...(page.url ? { url: page.url } : {}) },
-                      });
-                    }}
-                    title="Open"
-                    variant="bordered"
-                  />
-                </Cell>
-              </Section>
-            ) : page.url ? (
-              <Section>
-                <ActionRow
-                  accessibilityHint="Opens the link from this page"
-                  onPress={() => {
-                    if (page.url) void openTopLevelDestination(page.url);
-                  }}
-                  symbol="arrow.up.right.square"
-                  title="Open Link"
-                />
-              </Section>
-            ) : null}
           </>
         )}
       </List>
@@ -654,7 +674,11 @@ export default function PageSheet() {
             same leading place, so the trailing item stays visible.
           */}
           {triggered && foldToolbar ? (
-            <Stack.Toolbar.Menu accessibilityLabel="More Actions" icon="ellipsis">
+            <Stack.Toolbar.Menu
+              accessibilityLabel="More Actions"
+              icon={labelFold ? undefined : "ellipsis"}
+            >
+              {labelFold ? <Stack.Toolbar.Label>More</Stack.Toolbar.Label> : null}
               <Stack.Toolbar.MenuAction disabled={busy !== null} onPress={resolve}>
                 Resolve…
               </Stack.Toolbar.MenuAction>
