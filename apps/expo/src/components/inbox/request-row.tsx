@@ -61,6 +61,11 @@ export const RequestRow = memo(function RequestRow({
         { name: answers.secondary.action, label: answers.secondary.label },
       ]
     : [{ name: "reply", label: "Reply" }];
+  const time = (
+    <Text color="tertiaryLabel" tabular variant="footnote">
+      {relativeTime(item.createdAt, now)}
+    </Text>
+  );
   const onAccessibilityAction = (event: AccessibilityActionEvent) => {
     const name = event.nativeEvent.actionName;
     if (busy) return;
@@ -77,20 +82,25 @@ export const RequestRow = memo(function RequestRow({
         accessibilityLabel={label}
         accessible
         onAccessibilityAction={onAccessibilityAction}
-        style={[styles.column, styles.copy]}
+        style={[stacked ? styles.full : styles.column, styles.copy]}
       >
         <View style={styles.sourceLine}>
           <SourceAvatar name={item.sourceName} size={24} url={item.sourceImageUrl} />
-          <Text color="secondaryLabel" numberOfLines={1} style={styles.source} variant="footnote">
+          <Text
+            color="secondaryLabel"
+            numberOfLines={stacked ? undefined : 1}
+            style={styles.source}
+            variant="footnote"
+          >
             <Text color="secondaryLabel" variant="footnote" weight="600">
               {item.sourceName}
             </Text>
             {projectName ? ` · ${projectName}` : ""}
           </Text>
-          <Text color="tertiaryLabel" tabular variant="footnote">
-            {relativeTime(item.createdAt, now)}
-          </Text>
+          {stacked ? null : time}
         </View>
+        {/* At accessibility sizes the time stacks under the source (3.6). */}
+        {stacked ? time : null}
         <Text numberOfLines={stacked ? undefined : 2} variant="headline">
           {item.title}
         </Text>
@@ -104,7 +114,13 @@ export const RequestRow = memo(function RequestRow({
           </Text>
         </View>
       </View>
-      <View style={[styles.column, styles.actions, stacked && styles.actionsStacked]}>
+      <View
+        style={[
+          stacked ? styles.full : styles.column,
+          styles.actions,
+          stacked && styles.actionsStacked,
+        ]}
+      >
         {answers ? (
           <>
             <Button
@@ -150,11 +166,16 @@ const styles = StyleSheet.create({
   /**
    * On wide windows the whole request is one column (about 88 characters of
    * prompt per line) and the answers fill the same width, so text, time and
-   * buttons share one right edge. A no-op on iPhone widths.
+   * buttons share one right edge. A no-op on iPhone widths. At accessibility
+   * text sizes the cap would leave about 25 characters per line, so the
+   * request uses the full width instead.
    */
   column: {
     width: "100%",
     maxWidth: metrics.measureWidth,
+  },
+  full: {
+    width: "100%",
   },
   copy: {
     gap: 2,

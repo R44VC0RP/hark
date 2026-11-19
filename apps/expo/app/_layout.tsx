@@ -28,6 +28,7 @@ import {
 import { startLiveActivityTokenSync } from "../src/lib/live-activities";
 import { setCurrentPath } from "../src/lib/navigation";
 import { PENDING_JOIN_CODE_KEY } from "../src/lib/teams";
+import { useStackedRows } from "../src/ui/list";
 import { navigationTheme, palette, sheetOptions, stackScreenOptions } from "../src/ui/tokens";
 
 void SplashScreen.preventAutoHideAsync();
@@ -61,6 +62,7 @@ export default function RootLayout() {
   });
 
   const navigatorReady = fontsLoaded || Boolean(fontError);
+  const largeText = useStackedRows();
   useEffect(() => {
     if (navigatorReady) void SplashScreen.hideAsync();
   }, [navigatorReady]);
@@ -150,6 +152,10 @@ export default function RootLayout() {
           options={{
             ...sheetOptions,
             sheetAllowedDetents: [0.5, 1],
+            // At accessibility text sizes the request and the focused field
+            // don't fit at half height: iOS scrolls the caret into view and
+            // the title ends up under the header (checked in the simulator).
+            sheetInitialDetentIndex: largeText ? 1 : 0,
             sheetGrabberVisible: true,
             contentStyle: { backgroundColor: "transparent" },
           }}

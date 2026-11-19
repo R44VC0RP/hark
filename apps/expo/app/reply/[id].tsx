@@ -8,7 +8,7 @@ import { cachedInteraction, markInteractionHandled } from "../../src/lib/inbox-c
 import { submitInteractionResponse } from "../../src/lib/interactions";
 import { SourceAvatar } from "../../src/ui/avatar";
 import { EmptyState } from "../../src/ui/empty-state";
-import { List } from "../../src/ui/list";
+import { List, useStackedRows } from "../../src/ui/list";
 import { Text } from "../../src/ui/text";
 import { colors, palette, space, typography } from "../../src/ui/tokens";
 
@@ -23,6 +23,7 @@ const simulatorPreview = __DEV__ && !Device.isDevice;
 export default function ReplySheet() {
   const router = useRouter();
   const headerHeight = useHeaderHeight();
+  const stacked = useStackedRows();
   const { id } = useLocalSearchParams<{ id: string }>();
   const cached = cachedInteraction(String(id));
   const [text, setText] = useState("");
@@ -103,7 +104,7 @@ export default function ReplySheet() {
                 />
                 <Text
                   color="secondaryLabel"
-                  numberOfLines={1}
+                  numberOfLines={stacked ? undefined : 1}
                   style={styles.flex}
                   variant="footnote"
                 >
