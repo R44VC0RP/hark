@@ -34,7 +34,15 @@ import { escalationPolicySummary, isUnsupportedRoute, onPageClaimed } from "../.
 import { spoken } from "../../../src/ui/a11y";
 import { Avatar } from "../../../src/ui/avatar";
 import { EmptyState, ErrorState, isNetworkError, LoadingState } from "../../../src/ui/empty-state";
-import { Cell, List, Row, Section, SwitchRow, useStackedRows } from "../../../src/ui/list";
+import {
+  Cell,
+  List,
+  Row,
+  Section,
+  SwitchRow,
+  useStackedRows,
+  useTextMeasure,
+} from "../../../src/ui/list";
 import { Text } from "../../../src/ui/text";
 import { colors, space } from "../../../src/ui/tokens";
 
@@ -383,6 +391,9 @@ function RotationRow({
   viewerId: string | undefined;
 }) {
   const stacked = useStackedRows();
+  // The policy is text: it keeps the measure; the schedule and shift times
+  // stay on the trailing edge (3.6).
+  const measure = useTextMeasure();
   // The handoff on this device's clock, like the shifts under it (V-07).
   const handoff = formatHandoffClock(group.rotation.handoffAt, group.rotation.timezone, now);
   const schedule = `${group.rotation.period === "weekly" ? "Weekly" : "Daily"} · ${handoff}`;
@@ -412,11 +423,11 @@ function RotationRow({
             {schedule}
           </Text>
         </View>
-        <Text color="secondaryLabel" variant="subheadline">
+        <Text color="secondaryLabel" style={measure} variant="subheadline">
           {flow}
         </Text>
         {then ? (
-          <Text color="secondaryLabel" variant="subheadline">
+          <Text color="secondaryLabel" style={measure} variant="subheadline">
             {then}
           </Text>
         ) : null}

@@ -5,7 +5,7 @@ import { Pressable, StyleSheet, View } from "react-native";
 import { formatUpcoming } from "../../lib/dates";
 import { roleLabel } from "../../lib/teams";
 import { spoken } from "../../ui/a11y";
-import { Cell, useStackedRows } from "../../ui/list";
+import { Cell, useStackedRows, useTextMeasure } from "../../ui/list";
 import { Text } from "../../ui/text";
 import { colors, metrics, space } from "../../ui/tokens";
 import { FactLine } from "./fact-line";
@@ -24,6 +24,7 @@ export const InviteRow = memo(function InviteRow({
   onRevoke: (invite: TeamInviteDto) => void;
 }) {
   const stacked = useStackedRows();
+  const measure = useTextMeasure();
   const title = invite.email ?? "Invite Link";
   const facts = [roleLabel(invite.role), `from ${invite.invitedBy}`];
   const expires = `Expires ${formatUpcoming(invite.expiresAt)}`;
@@ -43,7 +44,7 @@ export const InviteRow = memo(function InviteRow({
         <View style={styles.leading}>
           <SymbolView name="link" size={20} tintColor={colors.secondaryLabel} />
         </View>
-        <View style={styles.copy}>
+        <View style={[styles.copy, measure]}>
           <Text numberOfLines={stacked ? undefined : 1} variant="body">
             {title}
           </Text>

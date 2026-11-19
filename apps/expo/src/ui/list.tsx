@@ -62,6 +62,22 @@ export function useStackedRows(): boolean {
   return useWindowDimensions().fontScale >= metrics.accessibilityFontScale;
 }
 
+/**
+ * The wide-row rule (DESIGN.md 3.6, V-24). On regular widths sections and
+ * rows still stretch to the window, but a row's text stops at the 600-pt
+ * measure; everything trailing (time, value, count, badge, result, answers,
+ * switch, chevron) stays on the row's trailing edge, as in Settings and
+ * Mail. Put the returned style on a row's text column (the view with
+ * `flex: 1`): it caps the column and its auto margin takes the rest of the
+ * row, so the trailing items keep their place. `null` on compact widths and
+ * at accessibility sizes, where text uses the whole row.
+ */
+export function useTextMeasure(): ViewStyle | null {
+  const { regular } = useLayout();
+  const stacked = useStackedRows();
+  return regular && !stacked ? styles.measure : null;
+}
+
 /** True from xxxLarge up, for layouts that check whether their text still fits. */
 export function useLargeText(): boolean {
   return useWindowDimensions().fontScale >= metrics.largeFontScale;
@@ -178,6 +194,11 @@ export function Section({ title, detail, prominent, footer, children, bare, styl
   // At accessibility sizes the detail goes under the title instead of
   // squeezing it into several lines (3.6).
   const stacked = useStackedRows();
+  const measure = useTextMeasure();
+  // A header's detail sits on its rows' trailing edge, over their values.
+  // Content without rows (the Apps grid) has no such edge: on wide windows
+  // the detail follows the title instead of floating far from it (V-24).
+  const detailFollows = bare && measure !== null;
   return (
     <View style={[styles.section, style]}>
       {title ? (
@@ -185,7 +206,7 @@ export function Section({ title, detail, prominent, footer, children, bare, styl
           <Text
             accessibilityRole="header"
             color={prominent ? "label" : "secondaryLabel"}
-            style={stacked && detail ? null : styles.headerTitle}
+            style={(stacked && detail) || detailFollows ? null : styles.headerTitle}
             variant={prominent ? "headline" : "subheadline"}
             weight={prominent ? undefined : "500"}
           >
@@ -209,11 +230,11 @@ export function Section({ title, detail, prominent, footer, children, bare, styl
       ) : null}
       {footer ? (
         typeof footer === "string" ? (
-          <Text color="secondaryLabel" style={styles.footer} variant="footnote">
+          <Text color="secondaryLabel" style={[styles.footer, measure]} variant="footnote">
             {footer}
           </Text>
         ) : (
-          <View style={styles.footer}>{footer}</View>
+          <View style={[styles.footer, measure]}>{footer}</View>
         )
       ) : null}
     </View>
@@ -388,6 +409,7 @@ export function Row({
   ...props
 }: RowProps) {
   const stacked = useStackedRows();
+  const measure = useTextMeasure();
   const leadWidth = leading ? (leadingWidth ?? metrics.rowSymbolColumn) : metrics.rowSymbolColumn;
   const hasLeading = Boolean(symbol || leading);
   const navigates = Boolean(chevron || props.onPress);
@@ -412,7 +434,7 @@ export function Row({
           )}
         </View>
       ) : null}
-      <View style={styles.copy}>
+      <View style={[styles.copy, measure]}>
         <Text color={titleColor} variant={titleVariant}>
           {title}
         </Text>
@@ -494,9 +516,14 @@ export interface SwitchRowProps {
 
 /** A native `UISwitch` row; the switch is the accessible element. */
 export function SwitchRow({ title, subtitle, value, onValueChange, disabled }: SwitchRowProps) {
+  const measure = useTextMeasure();
   return (
     <Cell minHeight={subtitle ? metrics.rowMinHeightSubtitle : metrics.rowMinHeight}>
-      <View accessibilityElementsHidden importantForAccessibility="no" style={styles.copy}>
+      <View
+        accessibilityElementsHidden
+        importantForAccessibility="no"
+        style={[styles.copy, measure]}
+      >
         <Text variant="body">{title}</Text>
         {subtitle ? (
           <Text color="secondaryLabel" variant="subheadline">
@@ -642,6 +669,10 @@ const styles = StyleSheet.create({
     minWidth: 0,
     flex: 1,
     gap: 2,
+  },
+  measure: {
+    maxWidth: metrics.measureWidth,
+    marginRight: "auto",
   },
   value: {
     flexShrink: 1,

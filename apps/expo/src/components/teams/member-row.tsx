@@ -6,7 +6,7 @@ import { StyleSheet, View } from "react-native";
 import { roleLabel } from "../../lib/teams";
 import { spoken } from "../../ui/a11y";
 import { Avatar } from "../../ui/avatar";
-import { Cell, useStackedRows } from "../../ui/list";
+import { Cell, useStackedRows, useTextMeasure } from "../../ui/list";
 import { Text } from "../../ui/text";
 import { colors, metrics, radius, space } from "../../ui/tokens";
 import { RowMenu } from "./row-menu";
@@ -82,6 +82,7 @@ export const MemberRow = memo(function MemberRow({
   reserveAction: boolean;
 }) {
   const stacked = useStackedRows();
+  const measure = useTextMeasure();
   const role = roleLabel(member.role);
   const pill = <RolePill label={role} />;
   const manageable = actions.length > 0;
@@ -97,7 +98,7 @@ export const MemberRow = memo(function MemberRow({
         style={styles.identity}
       >
         <Avatar image={member.image} name={member.name} size={AVATAR} />
-        <View style={styles.copy}>
+        <View style={[styles.copy, measure]}>
           <Text numberOfLines={stacked ? undefined : 1} variant="body">
             {member.name}
             {self ? (

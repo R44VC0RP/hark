@@ -3,7 +3,7 @@ import { memo, useMemo } from "react";
 import { StyleSheet, View } from "react-native";
 import { formatListDate } from "../lib/dates";
 import { spoken } from "../ui/a11y";
-import { Cell, useStackedRows } from "../ui/list";
+import { Cell, useStackedRows, useTextMeasure } from "../ui/list";
 import { MenuLink, type MenuLinkAction } from "../ui/menu-link";
 import { Text } from "../ui/text";
 import { colors, space } from "../ui/tokens";
@@ -38,6 +38,10 @@ export const NotificationRow = memo(function NotificationRow({
   onOpenApp,
 }: NotificationRowProps) {
   const stacked = useStackedRows();
+  // Wide windows: the text keeps the measure and the time moves to the
+  // row's trailing edge, like every list's trailing details (3.6).
+  const measure = useTextMeasure();
+  const wide = measure !== null;
   const unread = item.readAt === null;
   const time = formatListDate(item.createdAt);
   const titleVariant = unread ? "headline" : "body";
@@ -108,7 +112,7 @@ export const NotificationRow = memo(function NotificationRow({
             <View style={[styles.dot, unread ? null : styles.dotHidden]} />
           </View>
         </View>
-        <View style={styles.copy}>
+        <View style={[styles.copy, measure]}>
           <View style={styles.titleLine}>
             <Text
               numberOfLines={stacked ? undefined : 1}
@@ -117,7 +121,7 @@ export const NotificationRow = memo(function NotificationRow({
             >
               {item.title}
             </Text>
-            {stacked ? null : timeText}
+            {stacked || wide ? null : timeText}
           </View>
           {item.preview ? (
             <Text color="secondaryLabel" numberOfLines={stacked ? 4 : 2} variant="subheadline">
@@ -130,6 +134,7 @@ export const NotificationRow = memo(function NotificationRow({
           {/* At accessibility sizes the time stacks under the text (3.6). */}
           {stacked ? timeText : null}
         </View>
+        {wide ? <View style={styles.trailingTime}>{timeText}</View> : null}
       </Cell>
     </MenuLink>
   );
@@ -176,5 +181,9 @@ const styles = StyleSheet.create({
   title: {
     minWidth: 0,
     flex: 1,
+  },
+  /** Lines up with the title's first line, like the Inbox's project rows. */
+  trailingTime: {
+    paddingTop: 2,
   },
 });

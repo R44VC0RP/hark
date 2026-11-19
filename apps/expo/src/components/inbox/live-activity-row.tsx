@@ -1,10 +1,9 @@
 import type { InboxLiveActivityDto } from "@hark/contracts";
 import { memo } from "react";
 import { StyleSheet, View } from "react-native";
-import { useLayout } from "../../lib/layout";
 import { spoken } from "../../ui/a11y";
 import { SourceAvatar } from "../../ui/avatar";
-import { Cell, useStackedRows } from "../../ui/list";
+import { Cell, useStackedRows, useTextMeasure } from "../../ui/list";
 import { ProgressBar } from "../../ui/progress-bar";
 import { Text } from "../../ui/text";
 import { metrics, space } from "../../ui/tokens";
@@ -18,9 +17,10 @@ export const LiveActivityRow = memo(function LiveActivityRow({
   item: InboxLiveActivityDto;
 }) {
   const stacked = useStackedRows();
-  // iPad: text and bar keep the Inbox's reading measure and the percent
-  // moves to the row's trailing edge, where requests and projects keep theirs.
-  const wide = useLayout().regular && !stacked;
+  // Wide windows: text and bar keep the measure and the percent moves to the
+  // row's trailing edge, where requests and projects keep theirs (3.6).
+  const measure = useTextMeasure();
+  const wide = measure !== null;
   const progress = item.props.progress;
   const percent = progress !== undefined ? Math.round(progress * 100) : null;
   const detail = `${item.sourceName} · ${item.props.detail ?? item.props.status}`;
@@ -41,7 +41,7 @@ export const LiveActivityRow = memo(function LiveActivityRow({
       separatorInset={metrics.rowPaddingHorizontal + AVATAR + metrics.rowAccessoryGap}
     >
       <SourceAvatar name={item.sourceName} size={AVATAR} url={item.sourceImageUrl} />
-      <View style={[styles.copy, wide && styles.copyWide]}>
+      <View style={[styles.copy, measure]}>
         <View style={styles.titleLine}>
           <Text
             numberOfLines={stacked ? undefined : 2}
@@ -73,13 +73,8 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 2,
   },
-  copyWide: {
-    flexGrow: 0,
-    flexBasis: metrics.measureWidth,
-  },
   trailingWide: {
     alignSelf: "flex-start",
-    marginLeft: "auto",
     paddingTop: 2,
   },
   titleLine: {

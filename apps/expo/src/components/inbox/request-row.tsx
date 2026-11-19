@@ -4,11 +4,10 @@ import { memo } from "react";
 import { type AccessibilityActionEvent, StyleSheet, View } from "react-native";
 import { formatAgo, formatTimeLeft, spokenTime } from "../../lib/dates";
 import type { RequestAnswer } from "../../lib/inbox-cache";
-import { useLayout } from "../../lib/layout";
 import { spoken } from "../../ui/a11y";
 import { SourceAvatar } from "../../ui/avatar";
 import { Button } from "../../ui/button";
-import { Cell, useStackedRows } from "../../ui/list";
+import { Cell, useStackedRows, useTextMeasure } from "../../ui/list";
 import { Text, useFontScale } from "../../ui/text";
 import { colors, metrics, space } from "../../ui/tokens";
 import { ANSWER_LABELS, isRefusal } from "./format";
@@ -50,7 +49,8 @@ export const RequestRow = memo(function RequestRow({
   onReply,
 }: RequestRowProps) {
   const stacked = useStackedRows();
-  const wide = useLayout().regular && !stacked;
+  const measure = useTextMeasure();
+  const wide = measure !== null;
   const scale = useFontScale();
   const answers =
     item.kind === "approval"
@@ -102,7 +102,7 @@ export const RequestRow = memo(function RequestRow({
       accessibilityLabel={label}
       accessible
       onAccessibilityAction={onAccessibilityAction}
-      style={[wide ? styles.copyWide : styles.full, styles.copy]}
+      style={[wide ? [styles.copyWide, measure] : styles.full, styles.copy]}
     >
       <View style={styles.sourceLine}>
         <SourceAvatar name={item.sourceName} size={24} url={item.sourceImageUrl} />
@@ -233,9 +233,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.cell,
   },
   /**
-   * Wide windows: text on the leading side at the reading measure (about 88
-   * characters of prompt per line), time and answers in a fixed trailing
-   * column on the row's trailing edge. At accessibility text sizes the
+   * Wide windows: text on the leading side at the measure (about 88
+   * characters of prompt per line, `useTextMeasure`), time and answers in a
+   * fixed column on the row's trailing edge. At accessibility text sizes the
    * request stacks at full width instead, like on iPhone.
    */
   rowWide: {
@@ -244,13 +244,11 @@ const styles = StyleSheet.create({
     gap: space.xl,
   },
   copyWide: {
-    flexGrow: 0,
-    flexShrink: 1,
-    flexBasis: metrics.measureWidth,
+    minWidth: 0,
+    flex: 1,
   },
   trailing: {
     width: metrics.trailingColumnWidth,
-    marginLeft: "auto",
     justifyContent: "space-between",
     alignItems: "flex-end",
   },

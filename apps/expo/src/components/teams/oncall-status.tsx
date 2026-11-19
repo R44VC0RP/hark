@@ -4,7 +4,7 @@ import type { OncallMeDto } from "../../lib/api";
 import { formatUpcoming } from "../../lib/dates";
 import { currentShift } from "../../lib/teams";
 import { spoken } from "../../ui/a11y";
-import { Cell, Chevron } from "../../ui/list";
+import { Cell, Chevron, useTextMeasure } from "../../ui/list";
 import { Text } from "../../ui/text";
 import { colors, metrics } from "../../ui/tokens";
 import { FactLine } from "./fact-line";
@@ -65,6 +65,7 @@ export function OncallStatusRow({
   /** Fill the row with `accentSoft` while on call (On Call's status section). */
   tinted?: boolean;
 }) {
+  const measure = useTextMeasure();
   return (
     <Cell
       accessibilityHint={onPress ? "Shows your shifts, pages and paging settings" : undefined}
@@ -77,7 +78,7 @@ export function OncallStatusRow({
       style={[styles.row, tinted && status.onCall ? styles.tinted : null]}
     >
       <LeadingDot color={status.onCall ? "accent" : "placeholder"} variant="headline" />
-      <View style={styles.copy}>
+      <View style={[styles.copy, measure]}>
         <Text variant="headline">{status.title}</Text>
         {status.facts.length > 0 ? (
           // The team gives way before the group you're on call for.

@@ -4,13 +4,12 @@ import { SymbolView } from "expo-symbols";
 import { memo, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { formatListDate } from "../../lib/dates";
-import { useLayout } from "../../lib/layout";
 import { spoken } from "../../ui/a11y";
 import { SourceAvatar } from "../../ui/avatar";
-import { Cell, Chevron, useStackedRows } from "../../ui/list";
+import { Cell, Chevron, useStackedRows, useTextMeasure } from "../../ui/list";
 import { animateListChange } from "../../ui/motion";
 import { Text, useFontScale } from "../../ui/text";
-import { colors, metrics, space } from "../../ui/tokens";
+import { colors, space } from "../../ui/tokens";
 import { activityKindLabel, isRefusal } from "./format";
 
 export const HISTORY_AVATAR = 30;
@@ -20,8 +19,8 @@ export const HISTORY_AVATAR = 30;
  * Notifications open their detail screen (chevron); Live Activities and
  * responses with a detail expand and collapse on tap; the others are not
  * pressable. At accessibility text sizes titles and meta wrap and the result
- * stacks under the text (3.6, 3.10). On iPad the text keeps the Inbox's
- * reading measure and the result stays on the trailing edge.
+ * stacks under the text (3.6, 3.10). On wide windows the text keeps the
+ * measure and the result stays on the trailing edge (3.6).
  */
 export const HistoryRow = memo(function HistoryRow({
   item,
@@ -34,7 +33,7 @@ export const HistoryRow = memo(function HistoryRow({
   const router = useRouter();
   const [expanded, setExpanded] = useState(false);
   const stacked = useStackedRows();
-  const wide = useLayout().regular && !stacked;
+  const measure = useTextMeasure();
   const scale = useFontScale();
   // A notification's ID is the detail screen's ("event:…", "notification:…").
   const opens = item.kind === "notification";
@@ -43,7 +42,7 @@ export const HistoryRow = memo(function HistoryRow({
   // Denied and No are answers, not successes: grey, with a cross.
   const refusal = item.result ? isRefusal(item.result) : false;
   const result = item.result ? (
-    <View style={[styles.result, wide && styles.trailingWide]}>
+    <View style={styles.result}>
       <SymbolView
         name={refusal ? "xmark" : "checkmark"}
         size={Math.round(12 * scale)}
@@ -86,7 +85,7 @@ export const HistoryRow = memo(function HistoryRow({
       style={[styles.row, { paddingHorizontal: margin }]}
     >
       <SourceAvatar name={item.sourceName} size={HISTORY_AVATAR} url={item.sourceImageUrl} />
-      <View style={[styles.copy, wide && styles.copyWide]}>
+      <View style={[styles.copy, measure]}>
         <Text
           numberOfLines={expanded || stacked ? undefined : 1}
           variant="subheadline"
@@ -110,7 +109,7 @@ export const HistoryRow = memo(function HistoryRow({
       </View>
       {stacked ? null : result}
       {opens ? (
-        <View style={[styles.chevron, wide && !result && styles.trailingWide]}>
+        <View style={styles.chevron}>
           <Chevron />
         </View>
       ) : null}
@@ -127,18 +126,11 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 2,
   },
-  copyWide: {
-    flexGrow: 0,
-    flexBasis: metrics.measureWidth,
-  },
   result: {
     flexDirection: "row",
     alignItems: "center",
     gap: space.xxs,
     paddingTop: 2,
-  },
-  trailingWide: {
-    marginLeft: "auto",
   },
   chevron: {
     alignSelf: "center",

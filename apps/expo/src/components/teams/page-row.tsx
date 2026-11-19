@@ -5,7 +5,7 @@ import { StyleSheet, View } from "react-native";
 import { formatAgo, spokenTime } from "../../lib/dates";
 import { pageStatusLabel } from "../../lib/teams";
 import { spoken } from "../../ui/a11y";
-import { Cell, Chevron, useStackedRows } from "../../ui/list";
+import { Cell, Chevron, useStackedRows, useTextMeasure } from "../../ui/list";
 import { StatusDot } from "../../ui/status-dot";
 import { Text } from "../../ui/text";
 import { type ColorName, metrics, type TextVariant } from "../../ui/tokens";
@@ -73,6 +73,7 @@ export function sortPages(pages: OncallPageDto[]): OncallPageDto[] {
  */
 export const PageRow = memo(function PageRow({ page, now }: { page: OncallPageDto; now: number }) {
   const stacked = useStackedRows();
+  const measure = useTextMeasure();
   const open = page.status === "triggered";
   const ago = formatAgo(page.createdAt, now);
   const state = pageStateText(page);
@@ -94,7 +95,7 @@ export const PageRow = memo(function PageRow({ page, now }: { page: OncallPageDt
         style={styles.row}
       >
         <LeadingDot color={open ? "danger" : "accent"} variant={open ? "headline" : "body"} />
-        <View style={styles.copy}>
+        <View style={[styles.copy, measure]}>
           <Text numberOfLines={stacked ? undefined : 1} variant={open ? "headline" : "body"}>
             {page.title}
           </Text>
