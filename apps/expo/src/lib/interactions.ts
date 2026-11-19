@@ -302,14 +302,29 @@ export async function registerInteractionCategories(): Promise<void> {
 }
 
 /**
- * Runs a notification tap's navigation. The root layout installs
- * `afterSheets` (`src/lib/navigation.ts`) so a tap never pushes inside or
- * under an open sheet; until then (and in tests) it navigates at once.
+ * How a notification tap navigates. The root layout installs
+ * `src/lib/navigation.ts`'s `afterSheets` and `openWebApp`, so a tap
+ * never opens a screen inside or under an open sheet, and a web app opens
+ * like everywhere else (replacing the open one inside a web app). Until
+ * then (and in tests) it navigates at once.
  */
-let beforeNavigate: (open: () => void) => void = (open) => open();
+export interface NotificationNavigation {
+  afterSheets(open: () => void): void;
+  openWebApp(id: string, url?: string): void;
+}
 
-export function setNotificationNavigationGate(gate: (open: () => void) => void): void {
-  beforeNavigate = gate;
+let notificationNavigation: NotificationNavigation = {
+  afterSheets: (open) => open(),
+  openWebApp: (id, url) =>
+    router.push({ pathname: "/web/[id]", params: { id, ...(url ? { url } : {}) } }),
+};
+
+export function setNotificationNavigation(navigation: NotificationNavigation): void {
+  notificationNavigation = navigation;
+}
+
+function beforeNavigate(open: () => void): void {
+  notificationNavigation.afterSheets(open);
 }
 
 /** Best-effort push navigation that tolerates a not-yet-mounted router on cold start. */
@@ -392,9 +407,7 @@ function openNotificationDetail(compositeId: string): void {
 /** Opens a Hark web app, retrying once if the router is not mounted yet. */
 function openWebApp(appId: string, url: string | undefined): void {
   const navigate = () => {
-    beforeNavigate(() =>
-      router.push({ pathname: "/web/[id]", params: { id: appId, ...(url ? { url } : {}) } }),
-    );
+    notificationNavigation.openWebApp(appId, url);
   };
   try {
     navigate();

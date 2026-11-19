@@ -25,11 +25,12 @@ import {
   flushPageAcknowledgements,
   handleNotificationResponse,
   registerInteractionCategories,
-  setNotificationNavigationGate,
+  setNotificationNavigation,
 } from "../src/lib/interactions";
 import { startLiveActivityTokenSync } from "../src/lib/live-activities";
 import {
   afterSheets,
+  openWebApp,
   rootTransitionEnded,
   setCurrentPath,
   useNavigationForLinks,
@@ -51,7 +52,7 @@ setHourCycle(
 );
 // Notification taps open screens by the same rule as links: never inside
 // or under a sheet (src/lib/navigation.ts).
-setNotificationNavigationGate(afterSheets);
+setNotificationNavigation({ afterSheets, openWebApp });
 void registerInteractionCategories().catch((error) => {
   console.warn("Could not register notification actions", error);
 });

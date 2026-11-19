@@ -20,8 +20,8 @@ export function setCurrentPath(path: string): void {
  * Never inside a sheet: pushed over one (⌘1 with Settings up) it opened in
  * the sheet, where each change of its header remounted it, in a loop for an
  * app that asks before signing in ("Maximum update depth exceeded", then a
- * blank app). Like a link, it closes the sheet first, after Reply's draft
- * prompt when there is one.
+ * blank app). Like a link, it closes the sheet first (after Reply's draft
+ * prompt when there is one) and opens once the sheet is gone.
  */
 export function openWebApp(id: string, url?: string): void {
   const href = { pathname: "/web/[id]", params: { id, ...(url ? { url } : {}) } } as const;
@@ -29,16 +29,10 @@ export function openWebApp(id: string, url?: string): void {
   const sheet = topSheet();
   const below = stack?.routes[(stack.index ?? stack.routes.length - 1) - (sheet ? 1 : 0)];
   const inWebApp = stack ? below?.name === "web/[id]" : currentPath.startsWith("/web/");
-  const open = () => (inWebApp ? router.replace(href) : router.push(href));
-  const guard = guardOfTopSheet();
-  if (guard) {
-    void guard.ask().then((closed) => {
-      if (closed) open();
-    });
-    return;
-  }
-  closeTopSheet();
-  open();
+  // Once the sheet is gone, like a link (`afterSheets`): opened in the same
+  // tick as the sheet's close, a screen can be laid out inside the leaving
+  // sheet (R3-03). Without a sheet this opens at once.
+  afterSheets(() => (inWebApp ? router.replace(href) : router.push(href)));
 }
 
 /**
@@ -337,16 +331,15 @@ const leaving = new Map<string, () => void>();
 
 /**
  * How long a sheet takes to be gone, in ms, for the sheets that never say
- * so: of the sheets, only Reply's closing `transitionEnd` reaches the root
- * stack when JavaScript closes it; Settings, App Info, Page, Join and
- * Critical Alerts send nothing. The navigation state is already right;
- * this only waits for UIKit and react-native-screens to finish with the
- * sheet. Measured on iPad (Settings form sheet): the slide-out ends about
- * 370 ms after it starts, but opening a screen 500 ms after the close
- * still landed a layout pass on the dismissed sheet (red box
- * "sheetPresentationController is null when attempting to set allowed
- * detents", 4 of 4 links and notification taps); at 1000 ms and later,
- * 0 of 4.
+ * so. A timer because there is no event to wait for: only Reply's closing
+ * `transitionEnd` reaches the root stack when JavaScript closes it;
+ * Settings, App Info, Page, Join and Critical Alerts send nothing. A native
+ * "dismissal finished" event for JS-initiated dismissals would replace it.
+ * The navigation state is already right; this only waits for UIKit and
+ * react-native-screens to finish with the sheet. Measured on iPad: opening
+ * 500 ms after closing Settings still landed a layout pass on the
+ * dismissed sheet (red box "sheetPresentationController is null when
+ * attempting to set allowed detents", 4 of 4); at 1000 ms, 0 of 4.
  */
 const SHEET_DISMISS_MS = 1000;
 
