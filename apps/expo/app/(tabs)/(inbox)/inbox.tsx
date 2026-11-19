@@ -31,6 +31,7 @@ import {
   currentHandledIds,
   currentSettledRequests,
   markInteractionHandled,
+  markInteractionQueued,
   outcomesOf,
   type RequestAnswer,
   type RequestOutcome,
@@ -391,6 +392,15 @@ export default function InboxScreen() {
           // buttons were, so nothing moves under the finger that tapped.
           markInteractionHandled(item, action);
           AccessibilityInfo.announceForAccessibility(ANSWER_LABELS[action]);
+        } else if (sent === "queued") {
+          // No response at all (no connection, timed out): the answer waits
+          // in the retry queue and goes out when the connection is back; the
+          // row says so, then shows what really happened.
+          haptic.warning();
+          markInteractionQueued(item, action);
+          AccessibilityInfo.announceForAccessibility(
+            `${ANSWER_LABELS[action]}, will send when you’re back online`,
+          );
         } else {
           // Already closed on the server (a stale tap after an answer on
           // another device): the row settles with what really happened,

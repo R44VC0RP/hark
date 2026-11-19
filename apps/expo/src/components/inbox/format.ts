@@ -42,6 +42,13 @@ export function outcomeLine(outcome: RequestOutcome): {
         ANSWER_LABELS[outcome.answer],
         outcome.answer === "reply" ? "Reply sent" : "Answer sent",
       );
+    case "queued":
+      return {
+        text: ANSWER_LABELS[outcome.answer],
+        symbol: "clock.arrow.circlepath",
+        done: false,
+        note: "Will send when you’re back online",
+      };
     case "answeredElsewhere":
       return answer(outcome.result, "Answered on another device");
     case "expired":

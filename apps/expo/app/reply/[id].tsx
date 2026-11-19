@@ -7,7 +7,15 @@ import {
   useRoute,
 } from "expo-router/react-navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActionSheetIOS, Alert, findNodeHandle, StyleSheet, TextInput, View } from "react-native";
+import {
+  AccessibilityInfo,
+  ActionSheetIOS,
+  Alert,
+  findNodeHandle,
+  StyleSheet,
+  TextInput,
+  View,
+} from "react-native";
 import { projectNameFor } from "../../src/components/inbox/format";
 import { api } from "../../src/lib/api";
 import { alertFailure, haptic } from "../../src/lib/haptics";
@@ -15,6 +23,7 @@ import {
   type CachedInteraction,
   cachedInteraction,
   markInteractionHandled,
+  markInteractionQueued,
   outcomesOf,
   rememberInteraction,
   replyDraft,
@@ -216,17 +225,27 @@ export default function ReplySheet() {
         Alert.alert(
           "Reply Not Sent",
           CLOSED_MESSAGES[
-            closed?.outcome.kind === "answered" ? "gone" : (closed?.outcome.kind ?? "gone")
+            closed?.outcome.kind === "answered" || closed?.outcome.kind === "queued"
+              ? "gone"
+              : (closed?.outcome.kind ?? "gone")
           ],
           [{ text: "OK", onPress: () => router.back() }],
         );
         return;
       }
-      haptic.success();
       // No list animation here: this sheet is closing, and Fabric's
       // LayoutAnimation aborts the app when the same commit removes the sheet
-      // (checked in the simulator). The Inbox row shows "Replied" in place.
-      markInteractionHandled(interaction, "reply");
+      // (checked in the simulator). The Inbox row shows "Replied" in place,
+      // or, with no connection, that it will be sent once there is one (the
+      // reply waits in the retry queue, so the draft isn't needed).
+      if (sent === "queued") {
+        haptic.warning();
+        markInteractionQueued(interaction, "reply");
+        AccessibilityInfo.announceForAccessibility("Reply will send when you’re back online");
+      } else {
+        haptic.success();
+        markInteractionHandled(interaction, "reply");
+      }
       leaving.current = true;
       router.back();
     } catch (error) {

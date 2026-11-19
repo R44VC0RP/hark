@@ -2,7 +2,7 @@ import type { InboxInteractionDto } from "@hark/contracts";
 import * as SecureStore from "expo-secure-store";
 import { useSyncExternalStore } from "react";
 import { ApiError, api } from "./api";
-import { DEVICE_ID_KEY } from "./interactions";
+import { DEVICE_ID_KEY, onQueuedResponseDone, queueInteractionResponse } from "./interactions";
 
 /**
  * Hands a request from the Inbox to the Reply sheet (DESIGN.md 5.5) and
@@ -21,13 +21,15 @@ export interface CachedInteraction {
 export type RequestAnswer = "approve" | "deny" | "yes" | "no" | "reply";
 
 /**
- * Why a request the Inbox shows stopped waiting: answered here, answered on
- * another device (with History's word for the answer, "Approved", when the
- * server gave it), past its expiry, withdrawn by whoever asked, or gone for
- * a reason the app could not learn.
+ * Why a request the Inbox shows stopped waiting: answered here, answered
+ * here without a connection (the answer waits in the retry queue), answered
+ * on another device (with History's word for the answer, "Approved", when
+ * the server gave it), past its expiry, withdrawn by whoever asked, or gone
+ * for a reason the app could not learn.
  */
 export type RequestOutcome =
   | { kind: "answered"; answer: RequestAnswer }
+  | { kind: "queued"; answer: RequestAnswer }
   | { kind: "answeredElsewhere"; result: string }
   | { kind: "expired" }
   | { kind: "withdrawn" }
@@ -40,6 +42,11 @@ export interface SettledRequest {
 }
 
 const interactions = new Map<string, CachedInteraction>();
+/** Answers given here that wait in the retry queue, until it sends or drops them. */
+const queuedAnswers = new Map<
+  string,
+  { interaction: InboxInteractionDto; answer: RequestAnswer }
+>();
 const drafts = new Map<string, string>();
 let handled: ReadonlySet<string> = new Set();
 let settled: ReadonlyMap<string, SettledRequest> = new Map();
@@ -78,6 +85,67 @@ export function markInteractionHandled(
   drafts.delete(id);
   notify();
 }
+
+/**
+ * Called when an answer given here got no response from the server and
+ * waits in the retry queue: the row keeps its place and says it will be
+ * sent; once the queue sends it (or the server refuses it) the row shows
+ * what really happened (`onQueuedResponseDone` below).
+ */
+export function markInteractionQueued(
+  interaction: InboxInteractionDto,
+  answer: RequestAnswer,
+): void {
+  const { id } = interaction;
+  if (handled.has(id)) return;
+  handled = new Set([...handled, id]);
+  settled = new Map([...settled, [id, { interaction, outcome: { kind: "queued", answer } }]]);
+  queuedAnswers.set(id, { interaction, answer });
+  interactions.delete(id);
+  drafts.delete(id);
+  notify();
+}
+
+/** A row still on screen takes its real outcome (a queued answer resolved). */
+function resettle(request: SettledRequest): void {
+  if (!settled.has(request.interaction.id)) return;
+  settled = new Map([...settled, [request.interaction.id, request]]);
+  notify();
+}
+
+/**
+ * The server refused a queued answer: if the request still waits (it
+ * changed), the answer didn't count and its buttons come back; else the row
+ * says how it closed (answered on another device, expired, withdrawn).
+ */
+async function settleRefused(interaction: InboxInteractionDto): Promise<void> {
+  const open = await api.listPendingInteractions().then(
+    (result) => result.interactions,
+    () => null,
+  );
+  if (open?.some((item) => item.id === interaction.id)) {
+    handled = new Set([...handled].filter((id) => id !== interaction.id));
+    settled = new Map([...settled].filter(([id]) => id !== interaction.id));
+    notify();
+    return;
+  }
+  const [closed] = await outcomesOf([interaction], Date.now());
+  if (closed) resettle(closed);
+}
+
+onQueuedResponseDone((id, delivered) => {
+  const queued = queuedAnswers.get(id);
+  if (!queued) return;
+  queuedAnswers.delete(id);
+  if (delivered) {
+    resettle({
+      interaction: queued.interaction,
+      outcome: { kind: "answered", answer: queued.answer },
+    });
+  } else {
+    void settleRefused(queued.interaction);
+  }
+});
 
 /**
  * Requests that left the server's open list while the Inbox showed them
@@ -139,17 +207,19 @@ export async function outcomesOf(
 
 /**
  * Sends an answer given in the app (the Inbox's buttons, the Reply sheet)
- * straight to the server, not through the background queue that
- * notification actions use: the person is looking at the request and must
- * learn at once whether the answer counted (R3-02). Resolves "sent", or
+ * straight to the server first: the person is looking at the request and
+ * should learn at once whether the answer counted (R3-02). Resolves "sent";
  * "taken" when the server says the request already closed (answered on
- * another device, withdrawn, expired: ask `outcomesOf` which); any other
- * failure throws, and nothing is retried later.
+ * another device, withdrawn, expired: ask `outcomesOf` which); "queued"
+ * when no response came back at all (no connection, timed out): the answer
+ * goes to the retry queue that notification actions use and is sent when
+ * the connection is back, as before the redesign. Any other server
+ * response throws.
  */
 export async function sendAnswer(
   interaction: InboxInteractionDto,
   answer: { action: Exclude<RequestAnswer, "reply"> } | { action: "reply"; response: string },
-): Promise<"sent" | "taken"> {
+): Promise<"sent" | "taken" | "queued"> {
   const deviceId = await SecureStore.getItemAsync(DEVICE_ID_KEY);
   if (!deviceId) throw new Error("This device isn’t registered with Hark.");
   try {
@@ -160,6 +230,14 @@ export async function sendAnswer(
     });
     return "sent";
   } catch (error) {
+    // No HTTP response (an ApiError always has one): keep the answer.
+    if (!(error instanceof ApiError)) {
+      await queueInteractionResponse(interaction.id, {
+        ...answer,
+        actionDigest: interaction.actionDigest,
+      });
+      return "queued";
+    }
     // 409 "already terminal" (the other 409 is a changed request, an error).
     const taken =
       error instanceof ApiError &&

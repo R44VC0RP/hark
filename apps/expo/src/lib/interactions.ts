@@ -106,6 +106,35 @@ export async function submitInteractionResponse(
   await submitOrQueue({ interactionId, input });
 }
 
+/**
+ * An answer given in the app that got no response from the server (no
+ * connection, or it timed out): stored in the same queue, which sends it
+ * when the connection is back (on launch, on return to the app, every 30 s).
+ * Resolves once it is stored; the first retry runs in the background.
+ */
+export async function queueInteractionResponse(
+  interactionId: string,
+  input: InteractionActionInput,
+): Promise<void> {
+  await enqueue({ interactionId, input });
+  void flushInteractionResponses();
+}
+
+/**
+ * In memory only: the queue's verdict on each response it finishes, the
+ * server took it (`delivered`) or refused it for good (400/404/409), so the
+ * Inbox can show what happened to an answer it queued.
+ */
+type QueuedResponseListener = (interactionId: string, delivered: boolean) => void;
+const queuedResponseListeners = new Set<QueuedResponseListener>();
+
+export function onQueuedResponseDone(listener: QueuedResponseListener): () => void {
+  queuedResponseListeners.add(listener);
+  return () => {
+    queuedResponseListeners.delete(listener);
+  };
+}
+
 export async function flushInteractionResponses(): Promise<void> {
   if (flushing) {
     flushRequested = true;
@@ -122,6 +151,7 @@ export async function flushInteractionResponses(): Promise<void> {
         return;
       }
       const completed = new Set<string>();
+      const delivered = new Set<string>();
       for (const response of queue) {
         try {
           if (response.responseToken) {
@@ -136,6 +166,7 @@ export async function flushInteractionResponses(): Promise<void> {
             await api.respondToInteraction(response.interactionId, input);
           }
           completed.add(response.interactionId);
+          delivered.add(response.interactionId);
         } catch (error) {
           if (isTerminalApiError(error)) completed.add(response.interactionId);
         }
@@ -145,6 +176,11 @@ export async function flushInteractionResponses(): Promise<void> {
         const current = await readQueue();
         await writeQueue(current.filter((response) => !completed.has(response.interactionId)));
       });
+      for (const interactionId of completed) {
+        for (const listener of queuedResponseListeners) {
+          listener(interactionId, delivered.has(interactionId));
+        }
+      }
       // Continue immediately so work enqueued during this pass cannot be stranded.
     }
   })();
