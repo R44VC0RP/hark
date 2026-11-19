@@ -56,7 +56,15 @@ export const LiveActivityRow = memo(function LiveActivityRow({
             </Text>
             {percent !== null && !wide ? percentText : null}
           </View>
-          <Text color="secondaryLabel" numberOfLines={stacked ? 2 : 1} variant="subheadline">
+          {/*
+            Two lines on iPhone widths, where one cut the numbers off
+            ("212 of 340 tests passi…", SS-08); wide rows keep one.
+          */}
+          <Text
+            color="secondaryLabel"
+            numberOfLines={stacked ? undefined : wide ? 1 : 2}
+            variant="subheadline"
+          >
             {detail}
           </Text>
         </View>
