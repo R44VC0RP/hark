@@ -41,6 +41,8 @@ let currentJson = "";
 /** The last load failed; cleared by the next successful one. */
 let failed = false;
 let inflight: Promise<Directory> | null = null;
+/** The follow-up load requested while `inflight` runs. */
+let queued: Promise<Directory> | null = null;
 let lastRefreshAt = 0;
 const listeners = new Set<() => void>();
 
@@ -125,12 +127,28 @@ export async function loadDirectory(preview: boolean): Promise<Directory> {
 }
 
 /**
- * Loads and publishes a fresh snapshot. Calls made while one is loading share
- * it, so responses never arrive out of order. Rejects when the load fails
- * (pull to refresh shows that; background callers ignore it).
+ * Loads and publishes a fresh snapshot. A call made while one is loading gets
+ * one more load that starts after it, shared by every such call: the running
+ * load may have started before the caller's change (an app moved, a page
+ * acknowledged) and would publish what was true before it. Loads never
+ * overlap, so responses arrive in order. Rejects when the load fails (pull to
+ * refresh shows that; background callers ignore it).
  */
 export function refreshDirectory(): Promise<Directory> {
-  if (inflight) return inflight;
+  if (queued) return queued;
+  if (inflight) {
+    queued = inflight
+      .catch(() => undefined)
+      .then(() => {
+        queued = null;
+        return startLoad();
+      });
+    return queued;
+  }
+  return startLoad();
+}
+
+function startLoad(): Promise<Directory> {
   lastRefreshAt = Date.now();
   const task = loadDirectory(simulatorPreview)
     .then((directory) => {
