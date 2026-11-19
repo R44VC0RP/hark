@@ -29,6 +29,8 @@ const APPLE_INSET = 1;
  * matches it so the pair reads as one set.
  */
 const LABEL_SIZE = 19;
+/** How far the "Hark" wordmark grows with Dynamic Type next to its fixed dot. */
+const WORDMARK_MAX_SCALE = 1.4;
 /** The sign-in column on iPad and other wide windows. */
 const COLUMN_WIDTH = 480;
 
@@ -111,7 +113,10 @@ export default function SignInScreen() {
     >
       <View accessibilityLabel="Hark" accessibilityRole="header" accessible style={styles.wordmark}>
         <View style={styles.dot} />
-        <Text variant="brandMark">Hark</Text>
+        {/* The dot doesn't scale, so the wordmark grows only so far. */}
+        <Text maxFontSizeMultiplier={WORDMARK_MAX_SCALE} variant="brandMark">
+          Hark
+        </Text>
       </View>
 
       <View style={styles.hero}>

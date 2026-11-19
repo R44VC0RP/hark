@@ -37,6 +37,8 @@ type RegistrationState = "idle" | "working" | "registered" | "error";
 /** Recent Deliveries refresh while Set Up is open. */
 const EVENTS_POLL_MS = 10_000;
 const STEP_MIN_HEIGHT = 72;
+/** How far the "Hark" wordmark grows with Dynamic Type next to its fixed dot. */
+const WORDMARK_MAX_SCALE = 1.4;
 
 function permissionState(
   result: Notifications.NotificationPermissionsStatus,
@@ -235,7 +237,10 @@ export default function SetUpScreen() {
       <List onRefresh={() => void onRefresh()} reading refreshing={refreshing}>
         <View accessibilityLabel="Hark" accessible style={styles.wordmark}>
           <View style={styles.dot} />
-          <Text variant="brandMark">Hark</Text>
+          {/* The dot doesn't scale, so the wordmark grows only so far. */}
+          <Text maxFontSizeMultiplier={WORDMARK_MAX_SCALE} variant="brandMark">
+            Hark
+          </Text>
         </View>
         <Text
           accessibilityRole="header"
@@ -350,6 +355,13 @@ function StepRow({
   action: StepAction | null;
 }) {
   const stacked = useStackedRows();
+  const symbolView = (
+    <SymbolView
+      name={done ? "checkmark.circle.fill" : symbol}
+      size={22}
+      tintColor={blocked && !done ? colors.secondaryLabel : colors.accent}
+    />
+  );
   const button = action ? (
     <Button
       busy={action.busy}
@@ -367,14 +379,21 @@ function StepRow({
       separatorInset={
         metrics.rowPaddingHorizontal + metrics.rowSymbolColumn + metrics.rowAccessoryGap
       }
-      style={styles.step}
+      style={[styles.step, stacked && styles.stepStacked]}
     >
       <View style={styles.stepSymbol}>
-        <SymbolView
-          name={done ? "checkmark.circle.fill" : symbol}
-          size={22}
-          tintColor={blocked && !done ? colors.secondaryLabel : colors.accent}
-        />
+        {stacked ? (
+          // One line of the title's style, so the symbol sits on the title's
+          // first line at accessibility sizes.
+          <View style={styles.symbolLine}>
+            <Text accessibilityElementsHidden importantForAccessibility="no" variant="headline">
+              {"\u200B"}
+            </Text>
+            {symbolView}
+          </View>
+        ) : (
+          symbolView
+        )}
       </View>
       <View style={styles.stepCopy}>
         <View
@@ -412,6 +431,14 @@ const styles = StyleSheet.create({
   },
   step: {
     paddingVertical: space.s,
+  },
+  /** At accessibility sizes the symbol stays by the title instead of the middle. */
+  stepStacked: {
+    alignItems: "flex-start",
+  },
+  symbolLine: {
+    flexDirection: "row",
+    alignItems: "center",
   },
   stepSymbol: {
     width: metrics.rowSymbolColumn,
