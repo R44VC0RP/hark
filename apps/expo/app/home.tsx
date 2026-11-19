@@ -2,71 +2,84 @@ import type { EventDto } from "@hark/contracts";
 import Constants from "expo-constants";
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
-import { Redirect, Stack, useRouter } from "expo-router";
+import { Redirect, Stack } from "expo-router";
 import * as SecureStore from "expo-secure-store";
-import { StatusBar } from "expo-status-bar";
-import { SymbolView } from "expo-symbols";
+import { type SFSymbol, SymbolView } from "expo-symbols";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ActivityIndicator, AppState, Linking, Platform, StyleSheet, View } from "react-native";
+import { DeliveryRow } from "../src/components/delivery-row";
 import {
-  Alert,
-  Image,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+  APNS_TOKEN_KEY,
+  confirmDeleteAccount,
+  confirmSignOut,
+  EXPO_TOKEN_KEY,
+} from "../src/lib/account";
 import { trackAppEvent, trackOnboardingCompleted } from "../src/lib/analytics";
 import { api } from "../src/lib/api";
-import { authClient, useSession } from "../src/lib/auth";
+import { useSession } from "../src/lib/auth";
 import { readCriticalAlertState } from "../src/lib/critical-alerts";
 import {
-  clearInteractionResponses,
   DEVICE_ID_KEY,
   flushInteractionResponses,
   registerInteractionCategories,
 } from "../src/lib/interactions";
-import { deviceNoun, isPad, readableColumn } from "../src/lib/layout";
+import { deviceNoun, isPad } from "../src/lib/layout";
 import { refreshLiveActivityTokenSync } from "../src/lib/live-activities";
-import { colors, fonts, tightTracking } from "../src/lib/theme";
-import { clearAllWebsiteData } from "../src/lib/website-data";
+import { spoken } from "../src/ui/a11y";
+import { Button } from "../src/ui/button";
+import { Cell, List, Section, useStackedRows } from "../src/ui/list";
+import { Text } from "../src/ui/text";
+import { colors, metrics, space } from "../src/ui/tokens";
 
 type PermissionState = "unknown" | "undetermined" | "granted" | "denied";
 type RegistrationState = "idle" | "working" | "registered" | "error";
 
-const EXPO_TOKEN_KEY = "hark.device.expoPushToken";
-const APNS_TOKEN_KEY = "hark.device.apnsToken";
+/** Recent Deliveries refresh while Set Up is open. */
+const EVENTS_POLL_MS = 10_000;
+const STEP_MIN_HEIGHT = 72;
 
-export default function HomeScreen() {
+function permissionState(
+  result: Notifications.NotificationPermissionsStatus,
+): Exclude<PermissionState, "unknown"> {
+  return result.granted ? "granted" : result.canAskAgain ? "undetermined" : "denied";
+}
+
+/**
+ * Set Up This iPhone (DESIGN.md 5.2), what a new account sees after Sign In:
+ * allow notifications, register the device, then the Inbox. Recent
+ * Deliveries below show webhooks arriving while you set up. Sign out and
+ * delete account live in the More menu.
+ */
+export default function SetUpScreen() {
   const { data: session, isPending } = useSession();
-  const router = useRouter();
 
   const [permission, setPermission] = useState<PermissionState>("unknown");
   const [registration, setRegistration] = useState<RegistrationState>("idle");
-  const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
   const [events, setEvents] = useState<EventDto[] | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [storageHydrated, setStorageHydrated] = useState(false);
   const autoRegistrationAttempted = useRef(false);
+  const eventsJson = useRef("");
 
   const refreshPermission = useCallback(async () => {
-    const current = await Notifications.getPermissionsAsync();
-    setPermission(current.granted ? "granted" : current.canAskAgain ? "undetermined" : "denied");
+    setPermission(permissionState(await Notifications.getPermissionsAsync()));
   }, []);
 
   useEffect(() => {
     void refreshPermission();
+    // Back from the Settings app ("Open Settings"), where notifications may
+    // have been turned on.
+    const appState = AppState.addEventListener("change", (state) => {
+      if (state === "active") void refreshPermission();
+    });
+    return () => appState.remove();
   }, [refreshPermission]);
 
   useEffect(() => {
     void SecureStore.getItemAsync(EXPO_TOKEN_KEY)
       .then((storedExpoToken) => {
-        if (storedExpoToken) {
-          setExpoPushToken(storedExpoToken);
-          setRegistration("registered");
-        }
+        if (storedExpoToken) setRegistration("registered");
       })
       .finally(() => setStorageHydrated(true));
   }, []);
@@ -76,13 +89,12 @@ export default function HomeScreen() {
     const result = await Notifications.requestPermissionsAsync({
       ios: { allowAlert: true, allowBadge: true, allowSound: true },
     });
-    setPermission(result.granted ? "granted" : result.canAskAgain ? "undetermined" : "denied");
+    const state = permissionState(result);
+    setPermission(state);
     void trackAppEvent("notification_permission_resolved", {
       path: "/home",
-      outcome: result.granted ? "granted" : result.canAskAgain ? "undetermined" : "denied",
-      properties: {
-        permission: result.granted ? "granted" : result.canAskAgain ? "undetermined" : "denied",
-      },
+      outcome: state,
+      properties: { permission: state },
     });
   };
 
@@ -131,7 +143,6 @@ export default function HomeScreen() {
         await SecureStore.deleteItemAsync(APNS_TOKEN_KEY);
       }
 
-      setExpoPushToken(expoToken);
       setRegistration("registered");
       void trackAppEvent("device_registration_completed", {
         path: "/home",
@@ -144,7 +155,7 @@ export default function HomeScreen() {
       void trackAppEvent("device_registration_completed", { path: "/home", outcome: "failed" });
       if (!preserveReadyState) {
         setRegistration("error");
-        setLastError(err instanceof Error ? err.message : "Registration failed");
+        setLastError(err instanceof Error ? err.message : "Registration failed.");
       }
     }
   }, []);
@@ -165,603 +176,259 @@ export default function HomeScreen() {
   const refreshEvents = useCallback(async () => {
     try {
       const activity = await api.listEvents();
+      // Polling only re-renders when something changed.
+      const json = JSON.stringify(activity.events);
+      if (json === eventsJson.current) return;
+      eventsJson.current = json;
       setEvents(activity.events);
     } catch {
-      // Keep the last successful activity snapshot visible while offline.
+      // Keep the last successful snapshot visible while offline.
     }
   }, []);
 
   useEffect(() => {
     if (!session) return;
     void refreshEvents();
-    const interval = setInterval(() => void refreshEvents(), 10_000);
-    const notificationSubscription = Notifications.addNotificationReceivedListener(() => {
+    const interval = setInterval(() => void refreshEvents(), EVENTS_POLL_MS);
+    const received = Notifications.addNotificationReceivedListener(() => {
       void refreshEvents();
     });
     return () => {
       clearInterval(interval);
-      notificationSubscription.remove();
+      received.remove();
     };
   }, [session, refreshEvents]);
 
-  const signOut = () => {
-    Alert.alert("Sign out", "This device will stop receiving notifications.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Sign out",
-        style: "destructive",
-        onPress: () => {
-          void (async () => {
-            try {
-              if (expoPushToken) {
-                await api.unregisterDevice({ expoPushToken });
-              }
-            } catch {
-              // Best effort — the server also deactivates stale tokens.
-            }
-            await Promise.all([
-              SecureStore.deleteItemAsync(EXPO_TOKEN_KEY),
-              SecureStore.deleteItemAsync(APNS_TOKEN_KEY),
-              SecureStore.deleteItemAsync(DEVICE_ID_KEY),
-              clearInteractionResponses(),
-              clearAllWebsiteData(),
-            ]);
-            await authClient.signOut();
-            router.replace("/");
-          })();
-        },
-      },
-    ]);
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([refreshEvents(), refreshPermission()]);
+    } finally {
+      setRefreshing(false);
+    }
   };
 
-  const deleteAccount = () => {
-    Alert.alert(
-      "Delete account",
-      "This permanently deletes your services, webhook history, and registered devices. This cannot be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete account",
-          style: "destructive",
-          onPress: () => {
-            void (async () => {
-              try {
-                if (expoPushToken) await api.unregisterDevice({ expoPushToken });
-                const result = await authClient.deleteUser();
-                if (result.error) {
-                  throw new Error(result.error.message ?? "Account deletion was not completed");
-                }
-                await Promise.all([
-                  SecureStore.deleteItemAsync(EXPO_TOKEN_KEY),
-                  SecureStore.deleteItemAsync(APNS_TOKEN_KEY),
-                  SecureStore.deleteItemAsync(DEVICE_ID_KEY),
-                  clearInteractionResponses(),
-                  clearAllWebsiteData(),
-                ]);
-                router.replace("/");
-              } catch (error) {
-                Alert.alert(
-                  "Could not delete account",
-                  error instanceof Error ? error.message : "Please try again.",
-                );
-              }
-            })();
-          },
-        },
-      ],
-    );
-  };
-
-  if (!isPending && !session) {
-    return <Redirect href="/" />;
-  }
-
-  const ready = permission === "granted" && registration === "registered";
-
+  if (!isPending && !session) return <Redirect href="/" />;
   if (__DEV__ && !Device.isDevice) return <Redirect href="/inbox" />;
-  if (ready) return <Redirect href="/inbox" />;
+  if (permission === "granted" && registration === "registered") {
+    return <Redirect href="/inbox" />;
+  }
+
+  const allowed = permission === "granted";
+  const registered = registration === "registered";
 
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
-      <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar style="dark" />
-      <ScrollView contentContainerStyle={styles.scroll}>
-        <View style={styles.header}>
-          <View style={styles.brandGroup}>
-            <View style={styles.brandMark} />
-            <Text style={styles.brand}>Hark</Text>
-          </View>
-          <Pressable accessibilityRole="button" onPress={signOut} hitSlop={8}>
-            <Text style={styles.signOut}>Sign out</Text>
-          </Pressable>
+    <>
+      <Stack.Toolbar placement="right">
+        <Stack.Toolbar.Menu accessibilityLabel="More" icon="ellipsis">
+          <Stack.Toolbar.MenuAction
+            icon="rectangle.portrait.and.arrow.right"
+            onPress={confirmSignOut}
+          >
+            Sign Out
+          </Stack.Toolbar.MenuAction>
+          <Stack.Toolbar.MenuAction destructive icon="trash" onPress={confirmDeleteAccount}>
+            Delete Account…
+          </Stack.Toolbar.MenuAction>
+        </Stack.Toolbar.Menu>
+      </Stack.Toolbar>
+      <List onRefresh={() => void onRefresh()} reading refreshing={refreshing}>
+        <View accessibilityLabel="Hark" accessible style={styles.wordmark}>
+          <View style={styles.dot} />
+          <Text variant="brandMark">Hark</Text>
         </View>
-
-        <Text style={styles.greeting}>
-          {ready
-            ? `This ${deviceNoun} is ready to receive notifications.`
-            : `Two steps and this ${deviceNoun} starts receiving your webhooks.`}
-        </Text>
-
-        {ready ? (
-          <View style={styles.completedSteps}>
-            <CompactStep title="Notifications allowed" />
-            <CompactStep title="Device registered" />
-          </View>
-        ) : (
-          <>
-            <StepCard
-              index={1}
-              title="Allow notifications"
-              done={permission === "granted"}
-              body={
-                permission === "denied"
-                  ? "Notifications are turned off. Enable them for Hark in the iOS Settings app."
-                  : "Hark shows each webhook as a communication notification with your service's name and avatar."
-              }
-              actionLabel={permission === "granted" ? undefined : "Allow notifications"}
-              onAction={permission === "denied" ? undefined : requestPermission}
-            />
-
-            <StepCard
-              index={2}
-              title="Register this device"
-              done={registration === "registered"}
-              body={
-                registration === "registered"
-                  ? "This device is registered and ready when notifications are enabled."
-                  : `Links this ${deviceNoun} to your account so your services can reach it.`
-              }
-              actionLabel={
-                registration === "registered"
-                  ? undefined
-                  : registration === "working"
-                    ? "Registering…"
-                    : "Register device"
-              }
-              onAction={registration === "working" ? undefined : () => registerDevice(false)}
-              disabled={permission !== "granted"}
-            />
-          </>
-        )}
-
-        {lastError ? <Text style={styles.error}>{lastError}</Text> : null}
-        <ActivityLog events={events} onRefresh={refreshEvents} />
-        <Pressable accessibilityRole="button" onPress={deleteAccount} style={styles.deleteAccount}>
-          <Text style={styles.deleteAccountText}>Delete account</Text>
-        </Pressable>
-      </ScrollView>
-    </SafeAreaView>
-  );
-}
-
-function CompactStep({ title }: { title: string }) {
-  return (
-    <View style={styles.compactStep}>
-      <View style={styles.compactCheck}>
-        <Text style={styles.compactCheckText}>✓</Text>
-      </View>
-      <Text style={styles.compactStepText}>{title}</Text>
-    </View>
-  );
-}
-
-function StepCard({
-  index,
-  title,
-  body,
-  done,
-  actionLabel,
-  onAction,
-  disabled,
-}: {
-  index: number;
-  title: string;
-  body: string;
-  done: boolean;
-  actionLabel?: string;
-  onAction?: () => void | Promise<void>;
-  disabled?: boolean;
-}) {
-  return (
-    <View style={styles.card}>
-      <View style={styles.cardHeader}>
-        <View style={[styles.stepBadge, done && styles.stepBadgeDone]}>
-          <Text style={[styles.stepBadgeText, done && styles.stepBadgeTextDone]}>
-            {done ? "✓" : index}
-          </Text>
-        </View>
-        <Text style={styles.cardTitle}>{title}</Text>
-      </View>
-      <Text style={styles.cardBody}>{body}</Text>
-      {actionLabel && onAction ? (
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => void onAction()}
-          disabled={disabled}
-          style={({ pressed }) => [
-            styles.cardButton,
-            done && styles.cardButtonSecondary,
-            (pressed || disabled) && styles.pressed,
-          ]}
+        <Text
+          accessibilityRole="header"
+          lineBreakStrategyIOS="standard"
+          style={styles.headline}
+          variant="brandDisplay"
         >
-          <Text style={[styles.cardButtonText, done && styles.cardButtonTextSecondary]}>
-            {actionLabel}
-          </Text>
-        </Pressable>
-      ) : null}
-    </View>
-  );
-}
-
-function ActivityLog({
-  events,
-  onRefresh,
-}: {
-  events: EventDto[] | null;
-  onRefresh: () => Promise<void>;
-}) {
-  return (
-    <View style={styles.activitySection}>
-      <View style={styles.activityHeader}>
-        <Text style={styles.activityTitle}>Recent activity</Text>
-        <Pressable accessibilityRole="button" hitSlop={8} onPress={() => void onRefresh()}>
-          <Text style={styles.activityRefresh}>Refresh</Text>
-        </Pressable>
-      </View>
-      {events === null ? <Text style={styles.emptyActivity}>Loading…</Text> : null}
-      {events?.length === 0 ? (
-        <Text style={styles.emptyActivity}>No webhook activity yet.</Text>
-      ) : null}
-      {events?.map((activityEvent) => (
-        <ActivityLogRow activityEvent={activityEvent} key={activityEvent.id} />
-      ))}
-    </View>
-  );
-}
-
-function ActivityLogRow({ activityEvent }: { activityEvent: EventDto }) {
-  const [expanded, setExpanded] = useState(false);
-  const expandable = activityEvent.body.length > 0;
-  return (
-    <Pressable
-      accessibilityRole={expandable ? "button" : undefined}
-      disabled={!expandable}
-      onPress={() => setExpanded((current) => !current)}
-      style={styles.activityRow}
-    >
-      <View style={styles.activityAvatarWrap}>
-        {activityEvent.imageUrl ? (
-          <Image source={{ uri: activityEvent.imageUrl }} style={styles.activityAvatar} />
-        ) : (
-          <View style={styles.activityAvatarFallback}>
-            <Text style={styles.activityAvatarFallbackText}>
-              {activityEvent.serviceTitle.slice(0, 1).toUpperCase()}
-            </Text>
-          </View>
-        )}
-        <View style={styles.activityStatusBadge}>
-          <View style={[styles.activityDot, activityDotStyle(activityEvent.status)]} />
-        </View>
-      </View>
-      <View style={styles.activityCopy}>
-        <View style={styles.activityTopLine}>
-          <Text style={styles.activityName} numberOfLines={expanded ? undefined : 1}>
-            {activityEvent.serviceTitle} · {activityEvent.title}
-          </Text>
-          <Text style={styles.activityTime}>
-            {new Date(activityEvent.createdAt).toLocaleTimeString([], {
-              hour: "numeric",
-              minute: "2-digit",
-            })}
-          </Text>
-        </View>
-        <Text style={styles.activityBody} numberOfLines={expanded ? undefined : 1}>
-          {activityEvent.body}
+          Two steps and this {deviceNoun} starts receiving your webhooks.
         </Text>
-        <Text style={styles.activityStatus}>{activityStatus(activityEvent)}</Text>
-      </View>
-      {expandable ? (
-        <SymbolView
-          name={expanded ? "chevron.up" : "chevron.down"}
-          size={11}
-          style={styles.activityChevron}
-          tintColor={colors.soft}
-          weight="semibold"
-        />
-      ) : null}
-    </Pressable>
+
+        <Section
+          footer={
+            lastError ? (
+              <Text
+                accessibilityLiveRegion="polite"
+                color="danger"
+                lineBreakStrategyIOS="standard"
+                variant="footnote"
+              >
+                {lastError}
+              </Text>
+            ) : undefined
+          }
+        >
+          <StepRow
+            action={
+              allowed
+                ? null
+                : permission === "denied"
+                  ? { title: "Open Settings", onPress: () => void Linking.openSettings() }
+                  : { title: "Allow", onPress: () => void requestPermission() }
+            }
+            done={allowed}
+            subtitle={
+              permission === "denied"
+                ? "Notifications are off. Turn them on for Hark in Settings."
+                : "Hark shows each webhook as a communication notification with your service's name and avatar."
+            }
+            symbol="bell.badge"
+            title="Allow Notifications"
+          />
+          <StepRow
+            action={
+              registered
+                ? null
+                : {
+                    title: "Register",
+                    busyTitle: "Registering…",
+                    busy: registration === "working",
+                    disabled: !allowed,
+                    onPress: () => void registerDevice(false),
+                  }
+            }
+            blocked={!allowed}
+            done={registered}
+            subtitle={
+              registered
+                ? "Registered and ready."
+                : `Links this ${deviceNoun} to your account so your services can reach it.`
+            }
+            symbol={isPad ? "ipad" : "iphone"}
+            title={`Register This ${deviceNoun}`}
+          />
+        </Section>
+
+        <Section
+          footer={
+            events?.length === 0 ? "No webhooks yet. Send one and it shows up here." : undefined
+          }
+          title="Recent Deliveries"
+        >
+          {events === null ? (
+            <Cell minHeight={metrics.rowMinHeightSubtitle} style={styles.loadingCell}>
+              <ActivityIndicator accessibilityLabel="Loading deliveries" />
+            </Cell>
+          ) : (
+            events.map((event) => <DeliveryRow event={event} key={event.id} />)
+          )}
+        </Section>
+      </List>
+    </>
   );
 }
 
-function activityDotStyle(status: string) {
-  if (status === "accepted" || status === "delivered") return { backgroundColor: colors.accent };
-  if (status === "withdrawn") return { backgroundColor: colors.soft };
-  if (status === "failed") return { backgroundColor: colors.danger };
-  if (status === "partial" || status === "withdraw_partial") {
-    return { backgroundColor: "#D48A16" };
-  }
-  return { backgroundColor: colors.line };
+interface StepAction {
+  title: string;
+  onPress: () => void;
+  busy?: boolean;
+  busyTitle?: string;
+  disabled?: boolean;
 }
 
-function activityStatus(activityEvent: EventDto): string {
-  if (activityEvent.status === "accepted" || activityEvent.status === "delivered") {
-    return `Accepted for ${activityEvent.deliveredCount} ${activityEvent.deliveredCount === 1 ? "device" : "devices"}`;
-  }
-  if (activityEvent.status === "withdrawn") return "Withdrawal requested";
-  if (activityEvent.status === "withdraw_partial") return "Withdrawal partially accepted";
-  if (activityEvent.status === "partial") return "Partially accepted";
-  if (activityEvent.status === "no_devices") return "No active devices";
-  if (activityEvent.status === "processing") return "Processing";
-  return activityEvent.error ? `Failed · ${activityEvent.error}` : "Failed";
+/**
+ * One setup step: its symbol (a checkmark once done), what it does, and the
+ * button that does it. At accessibility text sizes the button moves under
+ * the text so nothing truncates.
+ */
+function StepRow({
+  title,
+  subtitle,
+  symbol,
+  done,
+  blocked,
+  action,
+}: {
+  title: string;
+  subtitle: string;
+  symbol: SFSymbol;
+  done: boolean;
+  /** Waiting on the step before it: its symbol is grey. */
+  blocked?: boolean;
+  action: StepAction | null;
+}) {
+  const stacked = useStackedRows();
+  const button = action ? (
+    <Button
+      busy={action.busy}
+      busyTitle={action.busyTitle}
+      disabled={action.disabled}
+      onPress={action.onPress}
+      style={stacked ? styles.stackedButton : null}
+      title={action.title}
+      variant="prominent"
+    />
+  ) : null;
+  return (
+    <Cell
+      minHeight={STEP_MIN_HEIGHT}
+      separatorInset={
+        metrics.rowPaddingHorizontal + metrics.rowSymbolColumn + metrics.rowAccessoryGap
+      }
+      style={styles.step}
+    >
+      <View style={styles.stepSymbol}>
+        <SymbolView
+          name={done ? "checkmark.circle.fill" : symbol}
+          size={22}
+          tintColor={blocked && !done ? colors.secondaryLabel : colors.accent}
+        />
+      </View>
+      <View style={styles.stepCopy}>
+        <View
+          accessibilityLabel={spoken(title, done ? "Done" : null, subtitle)}
+          accessible
+          style={styles.stepText}
+        >
+          <Text variant="headline">{title}</Text>
+          <Text color="secondaryLabel" variant="subheadline">
+            {subtitle}
+          </Text>
+        </View>
+        {stacked ? button : null}
+      </View>
+      {stacked ? null : button}
+    </Cell>
+  );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.paper },
-  scroll: { ...readableColumn, paddingHorizontal: 24, paddingBottom: 48, gap: 14 },
-  header: {
-    minHeight: 64,
+  wordmark: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    gap: space.xs,
+    marginTop: space.xs,
   },
-  brandGroup: { flexDirection: "row", alignItems: "center", gap: 9 },
-  brandMark: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.accent },
-  brand: {
-    color: colors.ink,
-    fontFamily: fonts.semibold,
-    fontSize: 18,
-    letterSpacing: tightTracking(18),
-  },
-  signOut: {
-    color: colors.muted,
-    fontFamily: fonts.medium,
-    fontSize: 14,
-    letterSpacing: tightTracking(14),
-  },
-  greeting: {
-    maxWidth: 340,
-    marginTop: 18,
-    marginBottom: 10,
-    color: colors.ink,
-    fontFamily: fonts.semibold,
-    fontSize: 26,
-    lineHeight: 31,
-    letterSpacing: tightTracking(26),
-  },
-  card: {
-    padding: 16,
-    gap: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.line,
-    borderRadius: 16,
-    backgroundColor: colors.surface,
-  },
-  cardHeader: { flexDirection: "row", alignItems: "center", gap: 10 },
-  stepBadge: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.accentSoft,
-  },
-  stepBadgeDone: { backgroundColor: colors.accent },
-  stepBadgeText: {
-    color: colors.accent,
-    fontFamily: fonts.semibold,
-    fontSize: 13,
-    letterSpacing: tightTracking(13),
-  },
-  stepBadgeTextDone: { color: "#FFFFFF" },
-  cardTitle: {
-    color: colors.ink,
-    fontFamily: fonts.semibold,
-    fontSize: 16,
-    letterSpacing: tightTracking(16),
-  },
-  cardBody: {
-    color: colors.muted,
-    fontFamily: fonts.regular,
-    fontSize: 14,
-    lineHeight: 20,
-    letterSpacing: tightTracking(14),
-  },
-  cardButton: {
-    minHeight: 44,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 2,
-    borderRadius: 22,
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
     backgroundColor: colors.accent,
   },
-  cardButtonSecondary: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.accent,
-    backgroundColor: colors.surface,
+  headline: {
+    marginTop: space.m,
   },
-  cardButtonText: {
-    color: "#FFFFFF",
-    fontFamily: fonts.medium,
-    fontSize: 15,
-    letterSpacing: tightTracking(15),
+  step: {
+    paddingVertical: space.s,
   },
-  cardButtonTextSecondary: { color: colors.accent },
-  pressed: { opacity: 0.8, transform: [{ scale: 0.98 }] },
-  error: {
-    paddingHorizontal: 4,
-    color: colors.danger,
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    letterSpacing: tightTracking(13),
-  },
-  completedSteps: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  compactStep: {
-    minHeight: 40,
-    flex: 1,
-    flexDirection: "row",
+  stepSymbol: {
+    width: metrics.rowSymbolColumn,
     alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 11,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.line,
-    borderRadius: 12,
-    backgroundColor: colors.surface,
   },
-  compactCheck: {
-    width: 18,
-    height: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 9,
-    backgroundColor: colors.accent,
-  },
-  compactCheckText: {
-    color: "#FFFFFF",
-    fontFamily: fonts.semibold,
-    fontSize: 10,
-  },
-  compactStepText: {
-    flex: 1,
-    color: colors.ink,
-    fontFamily: fonts.medium,
-    fontSize: 12,
-    letterSpacing: tightTracking(12),
-  },
-  activitySection: {
-    marginTop: 18,
-  },
-  activityHeader: {
-    minHeight: 40,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  activityTitle: {
-    color: colors.ink,
-    fontFamily: fonts.semibold,
-    fontSize: 18,
-    letterSpacing: tightTracking(18),
-  },
-  activityRefresh: {
-    color: colors.muted,
-    fontFamily: fonts.medium,
-    fontSize: 13,
-    letterSpacing: tightTracking(13),
-  },
-  emptyActivity: {
-    paddingVertical: 20,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.line,
-    color: colors.soft,
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    letterSpacing: tightTracking(13),
-  },
-  activityRow: {
-    flexDirection: "row",
-    gap: 9,
-    paddingVertical: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.line,
-  },
-  activityAvatarWrap: {
-    position: "relative",
-    width: 32,
-    height: 32,
-  },
-  activityAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.line,
-  },
-  activityAvatarFallback: {
-    width: 32,
-    height: 32,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 16,
-    backgroundColor: colors.accentSoft,
-  },
-  activityAvatarFallbackText: {
-    color: colors.accent,
-    fontFamily: fonts.medium,
-    fontSize: 12,
-    letterSpacing: tightTracking(12),
-  },
-  activityStatusBadge: {
-    position: "absolute",
-    right: -2,
-    bottom: -2,
-    width: 13,
-    height: 13,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 7,
-    backgroundColor: colors.paper,
-  },
-  activityDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-  },
-  activityCopy: {
+  stepCopy: {
     minWidth: 0,
     flex: 1,
+    gap: space.s,
   },
-  activityTopLine: {
-    flexDirection: "row",
-    alignItems: "baseline",
-    justifyContent: "space-between",
-    gap: 10,
+  stepText: {
+    gap: 2,
   },
-  activityName: {
-    minWidth: 0,
-    flex: 1,
-    color: colors.ink,
-    fontFamily: fonts.medium,
-    fontSize: 13,
-    lineHeight: 17,
-    letterSpacing: tightTracking(13),
-  },
-  activityTime: {
-    color: colors.soft,
-    fontFamily: fonts.regular,
-    fontSize: 11,
-    letterSpacing: tightTracking(11),
-  },
-  activityBody: {
-    marginTop: 2,
-    color: colors.muted,
-    fontFamily: fonts.regular,
-    fontSize: 12,
-    lineHeight: 16,
-    letterSpacing: tightTracking(12),
-  },
-  activityChevron: {
-    marginTop: 4,
-  },
-  activityStatus: {
-    marginTop: 1,
-    color: colors.soft,
-    fontFamily: fonts.regular,
-    fontSize: 10,
-    lineHeight: 14,
-    letterSpacing: tightTracking(10),
-  },
-  deleteAccount: {
+  stackedButton: {
     alignSelf: "flex-start",
-    marginTop: 18,
-    paddingVertical: 8,
   },
-  deleteAccountText: {
-    color: colors.danger,
-    fontFamily: fonts.medium,
-    fontSize: 13,
-    letterSpacing: tightTracking(13),
+  loadingCell: {
+    justifyContent: "center",
   },
 });
