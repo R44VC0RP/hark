@@ -40,7 +40,9 @@ export const HistoryRow = memo(function HistoryRow({
   // A notification's ID is the detail screen's ("event:…", "notification:…").
   const opens = item.kind === "notification";
   const expandable = !opens && Boolean(item.detail);
-  const meta = `${item.sourceName} · ${activityKindLabel(item.kind)} · ${formatListDate(item.createdAt)}`;
+  const source = `${item.sourceName} · ${activityKindLabel(item.kind)}`;
+  const time = formatListDate(item.createdAt);
+  const meta = `${source} · ${time}`;
   // Only answers wear a mark: ✓ in accent, or ✕ in grey for Denied and No.
   // A Live Activity's "Started" or "Updated" is plain grey text (V2-10).
   const answer = item.kind === "response";
@@ -108,13 +110,27 @@ export const HistoryRow = memo(function HistoryRow({
             {item.detail}
           </Text>
         ) : null}
-        <Text
-          color="tertiaryLabel"
-          numberOfLines={stacked || largeText ? undefined : 1}
-          variant="footnote"
-        >
-          {meta}
-        </Text>
+        {stacked || largeText ? (
+          <Text color="tertiaryLabel" variant="footnote">
+            {meta}
+          </Text>
+        ) : (
+          // One line: the source and kind give way, the time never does
+          // (on a 375-pt iPhone a trailing result cut it to "11:2…", V2-07).
+          <View style={styles.metaLine}>
+            <Text
+              color="tertiaryLabel"
+              numberOfLines={1}
+              style={styles.metaSource}
+              variant="footnote"
+            >
+              {source}
+            </Text>
+            <Text color="tertiaryLabel" numberOfLines={1} tabular variant="footnote">
+              {` · ${time}`}
+            </Text>
+          </View>
+        )}
         {stacked ? result : null}
       </View>
       {stacked ? null : result}
@@ -135,6 +151,14 @@ const styles = StyleSheet.create({
     minWidth: 0,
     flex: 1,
     gap: 2,
+  },
+  metaLine: {
+    flexDirection: "row",
+    minWidth: 0,
+  },
+  metaSource: {
+    minWidth: 0,
+    flexShrink: 1,
   },
   result: {
     flexDirection: "row",
