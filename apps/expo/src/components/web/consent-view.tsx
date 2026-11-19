@@ -70,7 +70,8 @@ export function ConsentView({
 
   return (
     <>
-      <Stack.Toolbar placement="left">
+      {/* Trailing, like every other close button in the app (3.12 rule 7). */}
+      <Stack.Toolbar placement="right">
         <Stack.Toolbar.Button accessibilityLabel="Close" icon="xmark" onPress={onCancel} />
       </Stack.Toolbar>
       {/* The scroll view stays first in the chain, so the glass header finds it. */}
