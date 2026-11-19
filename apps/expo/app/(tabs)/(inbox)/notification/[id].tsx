@@ -104,20 +104,33 @@ export default function NotificationDetailScreen() {
   // Mark read only after the full content loaded, and never while the screen
   // is a touch-and-hold preview or its prefetched copy (it may never be
   // opened). A preview that is tapped open becomes this same screen, focused,
-  // so this runs then.
+  // so this runs then. Optimistic, so the bar button and State row read
+  // "read" from the first frame instead of flipping a moment later.
   const unreadOnArrival = notification?.id === compositeId && notification.readAt === null;
   useEffect(() => {
     if (previewed || !focused || !unreadOnArrival || markedOnOpen.current === compositeId) return;
     if (simulatorPreview) return;
     markedOnOpen.current = compositeId;
+    const sameNotification = (current: InboxNotificationDetailDto | null) =>
+      current !== null && current.id === compositeId;
+    setNotification((current) =>
+      sameNotification(current) && current
+        ? { ...current, readAt: new Date().toISOString() }
+        : current,
+    );
     void api
       .markNotificationRead(compositeId)
       .then((marked) => {
-        setNotification((current) => (current ? { ...current, readAt: marked.readAt } : current));
+        setNotification((current) =>
+          sameNotification(current) && current ? { ...current, readAt: marked.readAt } : current,
+        );
       })
       .catch(() => {
-        // Unread state stays; the next open retries.
-        markedOnOpen.current = null;
+        // It stays unread; the next open retries (not this one, so a failing
+        // server is never asked in a loop).
+        setNotification((current) =>
+          sameNotification(current) && current ? { ...current, readAt: null } : current,
+        );
       });
   }, [compositeId, focused, previewed, unreadOnArrival]);
 
@@ -155,13 +168,22 @@ export default function NotificationDetailScreen() {
     <>
       {/* A preview has no header; its navigation object must not be touched. */}
       {previewed ? null : <Stack.Screen options={NO_TITLE} />}
-      {notification && !previewed ? (
+      {/*
+        Present from the first frame, so it slides in with the push instead of
+        popping in after it. While loading it reads "Mark as Unread": opening
+        a notification marks it read.
+      */}
+      {previewed ? null : (
         <Stack.Toolbar placement="right">
-          <Stack.Toolbar.Button disabled={togglingRead} onPress={() => void toggleRead()}>
-            {read ? "Mark as Unread" : "Mark as Read"}
+          <Stack.Toolbar.Button
+            disabled={!notification || togglingRead}
+            hidden={!notification && !loading}
+            onPress={() => void toggleRead()}
+          >
+            {notification && !read ? "Mark as Read" : "Mark as Unread"}
           </Stack.Toolbar.Button>
         </Stack.Toolbar>
-      ) : null}
+      )}
       <List reading>
         {notification ? (
           <NotificationContent notification={notification} />
