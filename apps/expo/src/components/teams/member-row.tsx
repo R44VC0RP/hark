@@ -1,13 +1,15 @@
+import { Button as MenuButton } from "@expo/ui/swift-ui";
 import type { TeamMemberDto } from "@hark/contracts";
-import { SymbolView } from "expo-symbols";
-import { memo, useRef } from "react";
-import { findNodeHandle, Pressable, StyleSheet, View } from "react-native";
+import { type SFSymbol, SymbolView } from "expo-symbols";
+import { memo } from "react";
+import { StyleSheet, View } from "react-native";
 import { roleLabel } from "../../lib/teams";
 import { spoken } from "../../ui/a11y";
 import { Avatar } from "../../ui/avatar";
 import { Cell, useStackedRows } from "../../ui/list";
 import { Text } from "../../ui/text";
 import { colors, metrics, radius, space } from "../../ui/tokens";
+import { RowMenu } from "./row-menu";
 
 const AVATAR = 36;
 const PILL = 22;
@@ -23,52 +25,66 @@ export function RolePill({ label }: { label: string }) {
   );
 }
 
+/** One item of a member's menu ("Make Admin", "Remove from Team…"). */
+export interface MemberAction {
+  label: string;
+  icon: SFSymbol;
+  destructive?: boolean;
+  run: () => void;
+}
+
 /**
- * A trailing `ellipsis` button (44 pt) that hands its own node to `onPress`,
- * so the action sheet it opens grows out of it (iOS 26; a popover on iPad).
+ * A trailing `ellipsis` button (44 pt) with the member's actions in a native
+ * menu that opens from it (I-07: not an action sheet, whose iPad popover let
+ * the dismissing tap through to the row under it).
  */
-export function MoreButton({
-  accessibilityLabel,
-  onPress,
-}: {
-  accessibilityLabel: string;
-  onPress: (anchor: number | undefined) => void;
-}) {
-  const ref = useRef<View>(null);
+function MoreMenu({ label, actions }: { label: string; actions: MemberAction[] }) {
   return (
-    <Pressable
-      accessibilityLabel={accessibilityLabel}
-      accessibilityRole="button"
-      onPress={() => onPress(findNodeHandle(ref.current) ?? undefined)}
-      ref={ref}
-      style={({ pressed }) => [styles.more, pressed && styles.pressed]}
+    <RowMenu
+      label={label}
+      menu={(done) =>
+        actions.map((action) => (
+          <MenuButton
+            key={action.label}
+            label={action.label}
+            onPress={() => {
+              done();
+              action.run();
+            }}
+            role={action.destructive ? "destructive" : "default"}
+            systemImage={action.icon}
+          />
+        ))
+      }
     >
-      <SymbolView name="ellipsis" size={17} tintColor={colors.secondaryLabel} weight="semibold" />
-    </Pressable>
+      <View style={styles.more}>
+        <SymbolView name="ellipsis" size={17} tintColor={colors.secondaryLabel} weight="semibold" />
+      </View>
+    </RowMenu>
   );
 }
 
 /**
  * A team member (DESIGN.md 5.13): avatar, name (" · You" for you), email and
- * role. Members you can manage get a trailing More button; rows that can't
+ * role. Members you can manage get a trailing More menu; rows that can't
  * keep its width (`reserveAction`) so the role pills line up.
  */
 export const MemberRow = memo(function MemberRow({
   member,
   self,
-  manageable,
+  actions,
   reserveAction,
-  onManage,
 }: {
   member: TeamMemberDto;
   self: boolean;
-  manageable: boolean;
+  /** What you can do to this member; none when you can't manage them. */
+  actions: MemberAction[];
   reserveAction: boolean;
-  onManage: (member: TeamMemberDto, anchor: number | undefined) => void;
 }) {
   const stacked = useStackedRows();
   const role = roleLabel(member.role);
   const pill = <RolePill label={role} />;
+  const manageable = actions.length > 0;
   return (
     <Cell
       minHeight={metrics.rowMinHeightSubtitle}
@@ -102,10 +118,7 @@ export const MemberRow = memo(function MemberRow({
         {stacked ? null : pill}
       </View>
       {manageable ? (
-        <MoreButton
-          accessibilityLabel={`Manage ${member.name}`}
-          onPress={(anchor) => onManage(member, anchor)}
-        />
+        <MoreMenu actions={actions} label={`Manage ${member.name}`} />
       ) : reserveAction ? (
         <View style={styles.reserved} />
       ) : null}
@@ -151,8 +164,5 @@ const styles = StyleSheet.create({
   },
   reserved: {
     width: metrics.hitTarget,
-  },
-  pressed: {
-    opacity: 0.5,
   },
 });
