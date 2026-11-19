@@ -31,17 +31,18 @@ import {
   currentHandledIds,
   currentSettledRequests,
   markInteractionHandled,
+  outcomesOf,
   type RequestAnswer,
   type RequestOutcome,
   rememberInteraction,
   type SettledRequest,
+  sendAnswer,
   settleRequests,
   useHandledInteractionIds,
   useSettledRequests,
 } from "../../../src/lib/inbox-cache";
 import { previewActive, previewPending, previewProjects } from "../../../src/lib/inbox-preview";
 import { createFocusRefreshPolicy, createRefreshSequence } from "../../../src/lib/inbox-refresh";
-import { submitInteractionResponse } from "../../../src/lib/interactions";
 import { TabRootToolbar } from "../../../src/ui/account-button";
 import { EmptyState, ErrorState, isNetworkError, LoadingState } from "../../../src/ui/empty-state";
 import { List, Row, Section } from "../../../src/ui/list";
@@ -62,12 +63,6 @@ const DOCS_URL = "https://hark.fyi/docs";
  * began to fade in.)
  */
 const ARRIVAL_GUARD_MS = 1_000;
-/**
- * A request that leaves the open list within this long of its expiry
- * expired (the server's clock decides, and the two clocks differ a little).
- */
-const EXPIRY_SLACK_MS = 60_000;
-
 /** The notification actions that answer a request, as the Inbox words them. */
 const PUSH_ANSWERS: Record<string, RequestAnswer> = {
   [HARK_APPROVE_ACTION_ID]: "approve",
@@ -107,33 +102,6 @@ function requestEntries(
 }
 
 /**
- * What happened to requests that left the server's open list: past their
- * expiry, answered (History's response feed has the answer, but not where
- * it was given; answers given here never get this far), else withdrawn by
- * whoever asked. Without the feed it can't tell answered from withdrawn.
- */
-async function outcomesOf(
-  vanished: readonly InboxInteractionDto[],
-  now: number,
-): Promise<SettledRequest[]> {
-  const expired = (item: InboxInteractionDto) =>
-    Date.parse(item.expiresAt) <= now + EXPIRY_SLACK_MS;
-  let answers: Map<string, string | null> | null = new Map();
-  if (vanished.some((item) => !expired(item))) {
-    answers = await api.listActivityFeed("response", 0).then(
-      (page) => new Map(page.items.map((entry) => [entry.id, entry.result])),
-      () => null,
-    );
-  }
-  return vanished.map((interaction): SettledRequest => {
-    if (expired(interaction)) return { interaction, outcome: { kind: "expired" } };
-    const result = answers?.get(`response:${interaction.id}`);
-    if (result) return { interaction, outcome: { kind: "answeredElsewhere", result } };
-    return { interaction, outcome: { kind: answers ? "withdrawn" : "gone" } };
-  });
-}
-
-/**
  * Inbox (DESIGN.md 5.3), the first tab and the reference screen: what needs
  * you (requests that expire), what is running (Live Activities), and what
  * arrived (projects), then History. `List` is the first child so the large
@@ -166,6 +134,13 @@ export default function InboxScreen() {
   // A push or another tab has fully covered the Inbox (`transitionEnd`),
   // until it is focused again. A sheet only blurs it: the rows stay in view.
   const covered = useRef(false);
+  // The first refresh once the Inbox is back in sight (after a push,
+  // another tab or the background) shows rest order: newest first, not
+  // arrivals pinned at the end below the fold (R3-P2-1).
+  const restNext = useRef(false);
+  // A pull to refresh is a drag, not a tap: its result arrives in rest
+  // order, in one animated change (R3V-06).
+  const pulling = useRef(false);
   // When each request that arrived in sight appeared (ARRIVAL_GUARD_MS).
   const arrivedAt = useRef(new Map<string, number>());
   const arrivedJustNow = useCallback((id: string) => {
@@ -226,11 +201,20 @@ export default function InboxScreen() {
     // notifications; the server never sends badge values itself).
     publishInboxCounts({ unread: totalUnread, waiting: next.pending.length });
     setLoadFailure(null);
+    const visible = !covered.current && AppState.currentState === "active";
+    const atRest = pulling.current || restNext.current;
+    if (visible) restNext.current = false;
     // Polling only re-renders when something changed.
     const json = JSON.stringify(next);
     if (json === summaryJson.current) return;
     const before = shown.current;
-    if (before.summary && !covered.current && AppState.currentState === "active") {
+    if (visible && atRest) {
+      // Settled rows fade out and arrivals fade in at their place by age in
+      // the same animated change as the new data, not in two commits that
+      // swapped rows in one frame (R3V-06).
+      animateListChange();
+      restOrder();
+    } else if (before.summary && visible) {
       // In sight, a request that left the open list (answered on another
       // device, expired, withdrawn) stays where it is and says so, like one
       // answered here; one that arrived joins the end of Needs You, so no
@@ -259,7 +243,11 @@ export default function InboxScreen() {
           ).map((entry) => entry.item.id);
         const arrived = Date.now();
         for (const item of arrivals) arrivedAt.current.set(item.id, arrived);
-        const nextOrder = [...base, ...arrivals.map((item) => item.id)];
+        const placed = new Set(base);
+        const nextOrder = [
+          ...base,
+          ...arrivals.filter((item) => !placed.has(item.id)).map((item) => item.id),
+        ];
         shown.current = { ...shown.current, order: nextOrder };
         // The new row fades in; only what is below Needs You slides down.
         animateListChange();
@@ -270,7 +258,7 @@ export default function InboxScreen() {
     summaryJson.current = json;
     shown.current = { ...shown.current, summary: next };
     setSummary(next);
-  }, [refreshSequence]);
+  }, [refreshSequence, restOrder]);
 
   const load = useCallback(() => {
     void refresh().catch((error: unknown) => {
@@ -286,7 +274,10 @@ export default function InboxScreen() {
     const received = Notifications.addNotificationReceivedListener(quiet);
     const appState = AppState.addEventListener("change", (state) => {
       if (state === "active") quiet();
-      else if (state === "background") restOrder();
+      else if (state === "background") {
+        restOrder();
+        restNext.current = true;
+      }
     });
     return () => {
       clearInterval(timer);
@@ -306,6 +297,7 @@ export default function InboxScreen() {
     const unsubscribeEnd = navigation.addListener("transitionEnd", (event) => {
       if (!event.data.closing) return;
       covered.current = true;
+      restNext.current = true;
       restOrder();
     });
     const unsubscribeFocus = navigation.addListener("focus", () => {
@@ -358,9 +350,10 @@ export default function InboxScreen() {
     }, [focusRefreshPolicy]),
   );
 
-  // A pull is a drag, not a tap on a button: once the refresh control has
-  // let go, settled rows fade out and arrivals move to their place by age.
-  // In the same commit as the control's end they left in one frame (P2-02).
+  // A pull whose data didn't change still clears settled rows: once the
+  // refresh control has let go, they fade out and arrivals move to their
+  // place by age. In the same commit as the control's end they left in one
+  // frame (P2-02). A pull that brought new data did this already.
   const tidyAfterRefresh = useRef(false);
   useEffect(() => {
     if (refreshing || !tidyAfterRefresh.current) return;
@@ -372,12 +365,14 @@ export default function InboxScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
+    pulling.current = true;
     try {
       await refresh();
     } catch (error) {
       // Keep showing the last data; only an empty screen shows the failure.
       if (!summaryJson.current) setLoadFailure(isNetworkError(error) ? "network" : "other");
     } finally {
+      pulling.current = false;
       tidyAfterRefresh.current = true;
       setRefreshing(false);
     }
@@ -389,16 +384,34 @@ export default function InboxScreen() {
       sending.current = item.id;
       setSendingId(item.id);
       try {
-        if (!simulatorPreview) {
-          await submitInteractionResponse(item.id, { action, actionDigest: item.actionDigest });
+        const sent = simulatorPreview ? "sent" : await sendAnswer(item, { action });
+        if (sent === "sent") {
+          haptic.success();
+          // No list animation: the row stays and shows the answer where its
+          // buttons were, so nothing moves under the finger that tapped.
+          markInteractionHandled(item, action);
+          AccessibilityInfo.announceForAccessibility(ANSWER_LABELS[action]);
+        } else {
+          // Already closed on the server (a stale tap after an answer on
+          // another device): the row settles with what really happened,
+          // never with the answer tapped here (R3-02).
+          const [settledHere] = await outcomesOf([item], Date.now());
+          haptic.warning();
+          if (settledHere) {
+            settleRequests([settledHere]);
+            const { outcome } = settledHere;
+            AccessibilityInfo.announceForAccessibility(
+              outcome.kind === "answeredElsewhere"
+                ? `${outcome.result}, answered on another device`
+                : outcome.kind === "expired"
+                  ? "Expired"
+                  : "No longer waiting",
+            );
+          }
         }
-        haptic.success();
-        // No list animation: the row stays and shows the answer where its
-        // buttons were, so nothing moves under the finger that tapped.
-        markInteractionHandled(item, action);
-        AccessibilityInfo.announceForAccessibility(ANSWER_LABELS[action]);
         void refresh().catch(() => {});
       } catch (error) {
+        // Not sent: the buttons come back (nothing settled) and it says so.
         alertFailure("Couldn’t Send Response", error);
       } finally {
         sending.current = null;

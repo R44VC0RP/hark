@@ -1,5 +1,8 @@
 import type { InboxInteractionDto } from "@hark/contracts";
+import * as SecureStore from "expo-secure-store";
 import { useSyncExternalStore } from "react";
+import { ApiError, api } from "./api";
+import { DEVICE_ID_KEY } from "./interactions";
 
 /**
  * Hands a request from the Inbox to the Reply sheet (DESIGN.md 5.5) and
@@ -99,6 +102,71 @@ export function clearSettledRequests(): void {
   if (settled.size === 0) return;
   settled = new Map();
   notify();
+}
+
+/**
+ * A request that leaves the open list within this long of its expiry
+ * expired (the server's clock decides, and the two clocks differ a little).
+ */
+const EXPIRY_SLACK_MS = 60_000;
+
+/**
+ * What happened to requests that left the server's open list: past their
+ * expiry, answered (History's response feed has the answer, but not where
+ * it was given), else withdrawn by whoever asked. Without the feed it
+ * can't tell answered from withdrawn.
+ */
+export async function outcomesOf(
+  vanished: readonly InboxInteractionDto[],
+  now: number,
+): Promise<SettledRequest[]> {
+  const expired = (item: InboxInteractionDto) =>
+    Date.parse(item.expiresAt) <= now + EXPIRY_SLACK_MS;
+  let answers: Map<string, string | null> | null = new Map();
+  if (vanished.some((item) => !expired(item))) {
+    answers = await api.listActivityFeed("response", 0).then(
+      (page) => new Map(page.items.map((entry) => [entry.id, entry.result])),
+      () => null,
+    );
+  }
+  return vanished.map((interaction): SettledRequest => {
+    const result = answers?.get(`response:${interaction.id}`);
+    if (result) return { interaction, outcome: { kind: "answeredElsewhere", result } };
+    if (expired(interaction)) return { interaction, outcome: { kind: "expired" } };
+    return { interaction, outcome: { kind: answers ? "withdrawn" : "gone" } };
+  });
+}
+
+/**
+ * Sends an answer given in the app (the Inbox's buttons, the Reply sheet)
+ * straight to the server, not through the background queue that
+ * notification actions use: the person is looking at the request and must
+ * learn at once whether the answer counted (R3-02). Resolves "sent", or
+ * "taken" when the server says the request already closed (answered on
+ * another device, withdrawn, expired: ask `outcomesOf` which); any other
+ * failure throws, and nothing is retried later.
+ */
+export async function sendAnswer(
+  interaction: InboxInteractionDto,
+  answer: { action: Exclude<RequestAnswer, "reply"> } | { action: "reply"; response: string },
+): Promise<"sent" | "taken"> {
+  const deviceId = await SecureStore.getItemAsync(DEVICE_ID_KEY);
+  if (!deviceId) throw new Error("This device isn’t registered with Hark.");
+  try {
+    await api.respondToInteraction(interaction.id, {
+      ...answer,
+      actionDigest: interaction.actionDigest,
+      deviceId,
+    });
+    return "sent";
+  } catch (error) {
+    // 409 "already terminal" (the other 409 is a changed request, an error).
+    const taken =
+      error instanceof ApiError &&
+      (error.status === 404 || (error.status === 409 && /terminal/i.test(error.message)));
+    if (taken) return "taken";
+    throw error;
+  }
 }
 
 /** An unsent reply, kept per request so closing the sheet never loses it. */
