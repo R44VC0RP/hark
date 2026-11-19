@@ -6,7 +6,7 @@ import { StyleSheet, View } from "react-native";
 import { roleLabel } from "../../lib/teams";
 import { spoken } from "../../ui/a11y";
 import { Avatar } from "../../ui/avatar";
-import { Cell, useStackedRows, useTextMeasure } from "../../ui/list";
+import { Cell, useBreakable, useLeadingAbove, useStackedRows, useTextMeasure } from "../../ui/list";
 import { Text } from "../../ui/text";
 import { colors, metrics, radius, space } from "../../ui/tokens";
 import { RowMenu } from "./row-menu";
@@ -78,6 +78,10 @@ export const MemberRow = memo(function MemberRow({
 }) {
   const stacked = useStackedRows();
   const measure = useTextMeasure();
+  // At accessibility sizes on iPhone the avatar goes above the name, as in `Row`, and
+  // the address breaks after "@", not inside a word (SS-02).
+  const breakable = useBreakable();
+  const above = useLeadingAbove();
   const role = roleLabel(member.role);
   const pill = <RolePill label={role} />;
   const manageable = actions.length > 0;
@@ -90,12 +94,12 @@ export const MemberRow = memo(function MemberRow({
       <View
         accessibilityLabel={spoken(self ? `${member.name}, you` : member.name, role, member.email)}
         accessible
-        style={styles.identity}
+        style={[styles.identity, above && styles.identityStacked]}
       >
         <Avatar image={member.image} name={member.name} size={AVATAR} />
-        <View style={[styles.copy, measure]}>
+        <View style={[styles.copy, measure, above && styles.copyStacked]}>
           <Text numberOfLines={stacked ? undefined : 1} variant="body">
-            {member.name}
+            {breakable(member.name)}
             {self ? (
               <Text color="secondaryLabel" variant="body">
                 {" · You"}
@@ -107,7 +111,7 @@ export const MemberRow = memo(function MemberRow({
             numberOfLines={stacked ? undefined : 1}
             variant="subheadline"
           >
-            {member.email}
+            {breakable(member.email)}
           </Text>
           {stacked ? <View style={styles.stackedPill}>{pill}</View> : null}
         </View>
@@ -135,10 +139,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: metrics.rowAccessoryGap,
   },
+  identityStacked: {
+    flexDirection: "column",
+    alignItems: "flex-start",
+  },
   copy: {
     minWidth: 0,
     flex: 1,
     gap: 2,
+  },
+  copyStacked: {
+    alignSelf: "stretch",
   },
   pill: {
     minHeight: PILL,

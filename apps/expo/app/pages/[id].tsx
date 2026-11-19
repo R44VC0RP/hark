@@ -36,7 +36,16 @@ import { hostOf } from "../../src/lib/web-apps";
 import { spoken } from "../../src/ui/a11y";
 import { Button } from "../../src/ui/button";
 import { EmptyState, ErrorState, isNetworkError, LoadingState } from "../../src/ui/empty-state";
-import { ActionRow, Cell, LabeledRow, List, Row, Section, useStackedRows } from "../../src/ui/list";
+import {
+  ActionRow,
+  Cell,
+  LabeledRow,
+  List,
+  Row,
+  Section,
+  useBreakable,
+  useStackedRows,
+} from "../../src/ui/list";
 import { Text, useFontScale } from "../../src/ui/text";
 import { type ColorName, metrics, palette, space } from "../../src/ui/tokens";
 
@@ -741,6 +750,8 @@ function TimelineRow({ event, now }: { event: OncallPageEventDto; now: number })
   const accessibilitySize = useStackedRows();
   const { regular } = useLayout();
   const stacked = accessibilitySize || !regular;
+  // "Acknowledged" broke as "Acknowledg / ed" at AX5 on a 375-pt iPhone (SS-02).
+  const breakable = useBreakable();
   const label = timelineLabel(event);
   const time = formatDateTime(event.at, now);
   return (
@@ -753,7 +764,7 @@ function TimelineRow({ event, now }: { event: OncallPageEventDto; now: number })
       <LeadingDot color={TIMELINE_DOT[event.kind]} size={8} />
       <View style={[styles.timelineCopy, stacked && styles.timelineStacked]}>
         <Text style={stacked ? null : styles.flex} variant="body">
-          {label}
+          {breakable(label)}
         </Text>
         <Text color="secondaryLabel" tabular variant="subheadline">
           {time}

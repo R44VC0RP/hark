@@ -110,6 +110,100 @@ function boldKeyedSize(variant: TextVariant, bold: boolean): TextStyle | null {
   return bold ? { fontSize: typography[variant].fontSize + 0.1 } : null;
 }
 
+/** Letters kept together at the start and the end of a hyphenated word. */
+const HYPHEN_START = 3;
+const HYPHEN_END = 4;
+const SOFT_HYPHEN = "\u00AD";
+const ZERO_WIDTH_SPACE = "\u200B";
+const WORD = /[A-Za-zÀ-ÖØ-öø-ÿ]+/g;
+const VOWEL = /[aeiouyàáâãäåæèéêëìíîïòóôõöøùúûüý]/i;
+/** Consonant pairs that stay together, so a break goes before or after both. */
+const DIGRAPHS = new Set(["ch", "ck", "gh", "ph", "qu", "sh", "th", "wh"]);
+
+function isVowel(word: string, index: number): boolean {
+  const letter = word[index];
+  if (letter === undefined) return false;
+  return VOWEL.test(letter) && !(index === 0 && letter.toLowerCase() === "y");
+}
+
+/**
+ * Soft hyphens between the syllables of one long word: before a single
+ * consonant between vowels ("Noti-fi-ca-tions"), after the first of two or
+ * three ("Regis-tra-tion"), never inside "ck", "th" and the like
+ * ("Ack-now-ledge"), and at least three letters from the start and four from the end
+ * ("Unre-gis-tered"). Text
+ * layout breaks a line at one only when the word doesn't fit, and then
+ * draws the hyphen.
+ */
+function hyphenateWord(word: string): string {
+  const breaks: number[] = [];
+  let index = 1;
+  while (index < word.length) {
+    if (isVowel(word, index) || !isVowel(word, index - 1)) {
+      index += 1;
+      continue;
+    }
+    let end = index;
+    while (end < word.length && !isVowel(word, end)) end += 1;
+    if (end < word.length) {
+      const run = end - index;
+      const pair = word.slice(index, index + 2).toLowerCase();
+      const at =
+        run === 1
+          ? index
+          : run === 2
+            ? DIGRAPHS.has(pair)
+              ? index
+              : index + 1
+            : index + (DIGRAPHS.has(pair) ? 2 : 1);
+      if (at >= HYPHEN_START && at <= word.length - HYPHEN_END) breaks.push(at);
+    }
+    index = end;
+  }
+  let result = "";
+  let last = 0;
+  for (const at of breaks) {
+    result += word.slice(last, at) + SOFT_HYPHEN;
+    last = at;
+  }
+  return result + word.slice(last);
+}
+
+/**
+ * Text whose words may be wider than its line (accessibility sizes on a
+ * narrow iPhone, SS-02). React Native's iOS text can't hyphenate by itself
+ * and breaks such a word anywhere, without a hyphen ("Notificatio / ns",
+ * "jordan@exa / mple.com"). Words longer than `maxLetters` get soft
+ * hyphens between syllables, and shorter words are left alone, so a word
+ * that fits its own line moves down whole instead of being hyphenated.
+ * Addresses and hosts longer than half that get invisible break points
+ * after "@" and "/" and before ".", where a hyphen would change them (their
+ * digits and punctuation are wider than letters, so a 14-character host
+ * broke inside a number at the length a word still fit). Only for display: keep the original
+ * for accessibility labels, and don't use it on selectable text (a copy
+ * would carry the invisible characters).
+ */
+export function breakableText(text: string, maxLetters: number): string {
+  return text.replace(/\S+/g, (token) => {
+    // "@", "/" or a dot inside the token; a sentence's final period isn't one.
+    const address = /[@/]|\.(?=\S)/.test(token);
+    if (token.length <= (address ? maxLetters / 2 : maxLetters)) return token;
+    if (address) {
+      let result = "";
+      for (let index = 0; index < token.length; index += 1) {
+        const character = token[index];
+        if (character === "." && index > 0 && index < token.length - 1) result += ZERO_WIDTH_SPACE;
+        result += character;
+        if ((character === "@" || character === "/") && index < token.length - 1) {
+          result += ZERO_WIDTH_SPACE;
+        }
+      }
+      return result;
+    }
+    return token.replace(WORD, (word) => (word.length > maxLetters ? hyphenateWord(word) : word));
+  });
+}
+
 export function Text({
   variant = "body",
   color = "label",

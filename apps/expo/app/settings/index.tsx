@@ -17,7 +17,15 @@ import { deviceNoun, isPad } from "../../src/lib/layout";
 import { leaveAppTo } from "../../src/lib/navigation";
 import { spoken } from "../../src/ui/a11y";
 import { Avatar } from "../../src/ui/avatar";
-import { ActionRow, Cell, List, Row, Section } from "../../src/ui/list";
+import {
+  ActionRow,
+  Cell,
+  List,
+  Row,
+  Section,
+  useBreakable,
+  useLeadingAbove,
+} from "../../src/ui/list";
 import { Text } from "../../src/ui/text";
 import { colors, metrics, space } from "../../src/ui/tokens";
 
@@ -44,6 +52,10 @@ export default function SettingsScreen() {
   const [appIcon, setAppIcon] = useState(() => appIconLabel(getAppIconName()));
   // Shown on the row from the confirmation until the sheet leaves.
   const [signingOut, setSigningOut] = useState(false);
+  // At accessibility sizes on iPhone the avatar goes above the name, like `Row`'s
+  // symbols, and the address breaks after "@" instead of inside a word.
+  const above = useLeadingAbove();
+  const breakable = useBreakable();
 
   const checkPermission = useCallback(() => {
     void Notifications.getPermissionsAsync().then((permission) =>
@@ -102,13 +114,14 @@ export default function SettingsScreen() {
               accessible
               minHeight={AVATAR + space.m}
               separatorInset={metrics.rowPaddingHorizontal + AVATAR + metrics.rowAccessoryGap}
+              style={above ? styles.identityStacked : null}
             >
               <Avatar image={user.image} name={user.name} size={AVATAR} />
-              <View style={styles.identity}>
-                <Text variant="title3">{user.name}</Text>
+              <View style={[styles.identity, above && styles.identityFull]}>
+                <Text variant="title3">{breakable(user.name)}</Text>
                 {user.email ? (
                   <Text color="secondaryLabel" variant="subheadline">
-                    {user.email}
+                    {breakable(user.email)}
                   </Text>
                 ) : null}
               </View>
@@ -192,6 +205,13 @@ const styles = StyleSheet.create({
     minWidth: 0,
     flex: 1,
     gap: 2,
+  },
+  identityStacked: {
+    flexDirection: "column",
+    alignItems: "flex-start",
+  },
+  identityFull: {
+    alignSelf: "stretch",
   },
   version: {
     marginTop: metrics.sectionGap,

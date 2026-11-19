@@ -15,7 +15,16 @@ import { cacheApps, cachedApp, hostOf } from "../../src/lib/web-apps";
 import { spoken } from "../../src/ui/a11y";
 import { Button } from "../../src/ui/button";
 import { EmptyState, ErrorState, isNetworkError, LoadingState } from "../../src/ui/empty-state";
-import { ActionRow, LabeledRow, List, Section, SwitchRow, useStackedRows } from "../../src/ui/list";
+import {
+  ActionRow,
+  LabeledRow,
+  List,
+  Section,
+  SwitchRow,
+  useBreakable,
+  useLeadingAbove,
+  useStackedRows,
+} from "../../src/ui/list";
 import { Text } from "../../src/ui/text";
 import { metrics, space } from "../../src/ui/tokens";
 
@@ -35,6 +44,10 @@ export default function AppInfoSheet() {
   const appId = String(id);
   const router = useRouter();
   const stacked = useStackedRows();
+  // At accessibility sizes on iPhone the icon goes above the name, like `Row`'s
+  // symbols, and the host breaks at its dots ("127.0.0.1:8 / 795", SS-02).
+  const breakable = useBreakable();
+  const above = useLeadingAbove();
   const { data: session } = useSession();
   const directory = useDirectory();
   const teams: TeamDto[] = directory?.teams ?? [];
@@ -271,13 +284,13 @@ export default function AppInfoSheet() {
                 accessibilityLabel={spoken(app.name, hostOf(app.origin))}
                 accessibilityRole="header"
                 accessible
-                style={styles.identityMain}
+                style={[styles.identityMain, above && styles.identityMainStacked]}
               >
                 <AppIcon iconUrl={app.iconUrl} name={app.name} size={ICON_SIZE} />
-                <View style={styles.identityCopy}>
-                  <Text variant="title3">{app.name}</Text>
+                <View style={[styles.identityCopy, above && styles.identityCopyStacked]}>
+                  <Text variant="title3">{breakable(app.name)}</Text>
                   <Text color="secondaryLabel" variant="subheadline">
-                    {hostOf(app.origin)}
+                    {breakable(hostOf(app.origin))}
                   </Text>
                 </View>
               </View>
@@ -386,10 +399,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: metrics.rowAccessoryGap + space.xxs,
   },
+  identityMainStacked: {
+    flexDirection: "column",
+    alignItems: "flex-start",
+  },
   identityCopy: {
     minWidth: 0,
     flex: 1,
     gap: 2,
+  },
+  identityCopyStacked: {
+    alignSelf: "stretch",
   },
   openStacked: {
     alignSelf: "flex-start",
