@@ -48,7 +48,7 @@ export function EmptyState({
         </Text>
         {message ? (
           <Text align="center" color="secondaryLabel" style={styles.message} variant="subheadline">
-            {message}
+            {withoutOrphan(message)}
           </Text>
         ) : null}
       </View>
@@ -57,6 +57,23 @@ export function EmptyState({
       ) : null}
     </View>
   );
+}
+
+/**
+ * Joins a message's last words with no-break spaces until they make at least
+ * 12 characters (at most three words), so a centred paragraph never ends on
+ * a stray word or two ("…your teammate / sent.", "…access / to it.").
+ * React Native's `lineBreakStrategyIOS` doesn't do it (checked in the
+ * simulator).
+ */
+function withoutOrphan(text: string): string {
+  const words = text.split(" ");
+  let tail = words.length - 1;
+  while (tail > 0 && words.length - tail < 3 && words.slice(tail).join(" ").length < 12) {
+    tail -= 1;
+  }
+  if (tail <= 0) return text;
+  return `${words.slice(0, tail).join(" ")} ${words.slice(tail).join("\u00A0")}`;
 }
 
 /** First load only: a grey system spinner 120 pt below the header. */

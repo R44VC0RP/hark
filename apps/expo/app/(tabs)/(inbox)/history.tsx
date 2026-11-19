@@ -15,11 +15,31 @@ import { colors, metrics, space } from "../../../src/ui/tokens";
 
 type Filter = "all" | InboxActivityKind;
 
-const FILTERS: { value: Filter; label: string; empty: string }[] = [
-  { value: "all", label: "All Activity", empty: "No Activity Yet" },
-  { value: "notification", label: "Notifications", empty: "No Notifications" },
-  { value: "live_activity", label: "Live Activities", empty: "No Live Activities" },
-  { value: "response", label: "Responses", empty: "No Responses" },
+const FILTERS: { value: Filter; label: string; empty: string; message: string }[] = [
+  {
+    value: "all",
+    label: "All Activity",
+    empty: "No Activity Yet",
+    message: "Notifications, Live Activities and your answers to requests show up here.",
+  },
+  {
+    value: "notification",
+    label: "Notifications",
+    empty: "No Notifications",
+    message: "Notifications from your agents and scripts show up here.",
+  },
+  {
+    value: "live_activity",
+    label: "Live Activities",
+    empty: "No Live Activities",
+    message: "Live Activities show up here as they start and update.",
+  },
+  {
+    value: "response",
+    label: "Responses",
+    empty: "No Responses",
+    message: "Requests you approve, deny or reply to show up here.",
+  },
 ];
 
 /** The server's page size for the activity feed. */
@@ -158,6 +178,7 @@ export default function HistoryScreen() {
             />
           ) : (
             <EmptyState
+              message={current?.message}
               symbol="clock.arrow.circlepath"
               title={current?.empty ?? "No Activity Yet"}
             />
