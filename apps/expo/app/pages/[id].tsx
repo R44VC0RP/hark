@@ -13,6 +13,7 @@ import { useSession } from "../../src/lib/auth";
 import { haptic } from "../../src/lib/haptics";
 import { openTopLevelDestination } from "../../src/lib/inbox-body";
 import { previewPages, previewViewer } from "../../src/lib/inbox-preview";
+import { useLayout } from "../../src/lib/layout";
 import { leaveSheetThenPush } from "../../src/lib/navigation";
 import { dismissNotificationsForPage } from "../../src/lib/notification-withdrawals";
 import {
@@ -532,7 +533,9 @@ export default function PageSheet() {
 
 /** One line of the page's history: who was paged, claimed or resolved it, and when. */
 function TimelineRow({ event, now }: { event: OncallPageEventDto; now: number }) {
-  const stacked = useStackedRows();
+  // On compact widths the time goes under the label: once it carries a date
+  // ("Nov 17, 10:32 PM") a trailing time squeezed the label into two lines.
+  const stacked = useStackedRows() || !useLayout().regular;
   const label = timelineLabel(event);
   const time = formatHandoff(event.at, now);
   return (

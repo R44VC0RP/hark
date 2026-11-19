@@ -300,15 +300,18 @@ export default function OncallScreen() {
                   <Row
                     accessibilityHint="Chooses how often the alert repeats"
                     onPress={chooseInterval}
-                    ref={intervalRef}
                     title="Repeat Every"
                     trailing={
-                      <SymbolView
-                        name="chevron.up.chevron.down"
-                        size={13}
-                        tintColor={colors.placeholder}
-                        weight="semibold"
-                      />
+                      // The sheet points at this indicator, like a pop-up
+                      // button's menu (a popover on iPad).
+                      <View collapsable={false} ref={intervalRef}>
+                        <SymbolView
+                          name="chevron.up.chevron.down"
+                          size={13}
+                          tintColor={colors.placeholder}
+                          weight="semibold"
+                        />
+                      </View>
                     }
                     value={intervalLabel(settings.ringIntervalSeconds)}
                   />
