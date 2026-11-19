@@ -20,33 +20,51 @@ export function isRefusal(result: string): boolean {
 }
 
 /**
- * What a request that stopped waiting says where its buttons were: the
- * answer, worded as History words it ("Approved", "Yes"), wherever it was
- * given, or why it closed ("Expired", "Withdrawn"). An answer from another
- * device also says so where the countdown was (`note`). Answers keep the
- * check (green) or cross (grey) of V-10; closings are grey.
+ * What a request that stopped waiting says where its countdown and buttons
+ * were: the answer, worded as History words it ("Approved", "Yes"), or why
+ * it closed ("Expired", "Withdrawn"), with a short note so the countdown's
+ * line never stays empty (R3V-04). Answers keep the check (green) or cross
+ * (grey) of V-10; closings are grey.
  */
 export function outcomeLine(outcome: RequestOutcome): {
   text: string;
   symbol: SFSymbol;
   done: boolean;
-  note: string | null;
+  note: string;
 } {
-  const answer = (result: string, note: string | null) =>
+  const answer = (result: string, note: string) =>
     isRefusal(result)
       ? { text: result, symbol: "xmark.circle.fill" as const, done: false, note }
       : { text: result, symbol: "checkmark.circle.fill" as const, done: true, note };
   switch (outcome.kind) {
     case "answered":
-      return answer(ANSWER_LABELS[outcome.answer], null);
+      return answer(
+        ANSWER_LABELS[outcome.answer],
+        outcome.answer === "reply" ? "Reply sent" : "Answer sent",
+      );
     case "answeredElsewhere":
       return answer(outcome.result, "Answered on another device");
     case "expired":
-      return { text: "Expired", symbol: "clock.badge.xmark.fill", done: false, note: null };
+      return {
+        text: "Expired",
+        symbol: "clock.badge.xmark.fill",
+        done: false,
+        note: "No answer was sent",
+      };
     case "withdrawn":
-      return { text: "Withdrawn", symbol: "minus.circle.fill", done: false, note: null };
+      return {
+        text: "Withdrawn",
+        symbol: "minus.circle.fill",
+        done: false,
+        note: "No answer is needed",
+      };
     case "gone":
-      return { text: "No longer waiting", symbol: "minus.circle.fill", done: false, note: null };
+      return {
+        text: "No longer waiting",
+        symbol: "minus.circle.fill",
+        done: false,
+        note: "Answered or withdrawn elsewhere",
+      };
   }
 }
 

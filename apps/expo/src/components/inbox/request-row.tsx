@@ -38,11 +38,12 @@ interface RequestRowProps {
  * left, and its answers as flat buttons. The text is one VoiceOver element
  * with the answers as actions; the buttons stay separate elements.
  *
- * Once it stops waiting, the row keeps its exact size and shows what
- * happened ("Approved", "Approved on another device", "Expired") over the
- * space its buttons held, which no longer take touches; the countdown goes
- * and the title quietens. Nothing moves, so a tap on its way can't land on
- * the next request.
+ * Once it stops waiting, the row keeps its exact size at every text size
+ * and width: the countdown and the buttons stay laid out, invisible and
+ * inert, and what happened ("✓ Yes" over "Answered on another device")
+ * is drawn over the space they held, so no wording can change the row's
+ * height. The title quietens. Nothing moves, so a tap on its way can't
+ * land on the next request (R3-01).
  */
 export const RequestRow = memo(function RequestRow({
   item,
@@ -106,6 +107,34 @@ export const RequestRow = memo(function RequestRow({
     }
   };
 
+  // The countdown keeps its line in every state; settled, it is invisible
+  // and the note is drawn over it (wide) or over it and the buttons.
+  const countdown = (
+    <View
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={[styles.meta, settled && styles.spent]}
+    >
+      <SymbolView name="clock" size={Math.round(12 * scale)} tintColor={colors.tertiaryLabel} />
+      <Text color="tertiaryLabel" tabular variant="footnote">
+        {formatTimeLeft(item.expiresAt, now)}
+      </Text>
+    </View>
+  );
+  // Wide rows: the note sits on the countdown's line, the answer on the
+  // trailing edge where the buttons were.
+  const meta = (
+    <View>
+      {countdown}
+      {result && wide ? (
+        <View importantForAccessibility="no-hide-descendants" style={styles.noteOverlay}>
+          <Text color="secondaryLabel" numberOfLines={1} variant="footnote">
+            {result.note}
+          </Text>
+        </View>
+      ) : null}
+    </View>
+  );
   const copy = (
     <View
       accessibilityActions={actions}
@@ -141,32 +170,11 @@ export const RequestRow = memo(function RequestRow({
       <Text color="secondaryLabel" numberOfLines={stacked ? undefined : 6} variant="subheadline">
         {item.prompt}
       </Text>
-      {/*
-        Settled: the countdown no longer applies. An answer from another
-        device says so in its place; otherwise the line keeps its space.
-      */}
-      {result?.note ? (
-        <View importantForAccessibility="no-hide-descendants" style={styles.meta}>
-          <Text color="secondaryLabel" variant="footnote">
-            {result.note}
-          </Text>
-        </View>
-      ) : (
-        <View
-          accessibilityElementsHidden={settled}
-          importantForAccessibility={settled ? "no-hide-descendants" : "auto"}
-          style={[styles.meta, settled && styles.spent]}
-        >
-          <SymbolView name="clock" size={Math.round(12 * scale)} tintColor={colors.tertiaryLabel} />
-          <Text color="tertiaryLabel" tabular variant="footnote">
-            {formatTimeLeft(item.expiresAt, now)}
-          </Text>
-        </View>
-      )}
+      {wide ? meta : null}
     </View>
   );
   const buttons = (
-    <View style={styles.full}>
+    <View style={wide ? styles.full : [styles.full, styles.footButtons]}>
       {/*
         Settled: the buttons keep their space (so the row keeps its
         height) but are invisible, hidden from VoiceOver and take no
@@ -209,7 +217,7 @@ export const RequestRow = memo(function RequestRow({
           />
         )}
       </View>
-      {result ? <OutcomeLine {...result} scale={scale} trailing={wide} /> : null}
+      {result && wide ? <OutcomeLine {...result} scale={scale} trailing /> : null}
     </View>
   );
 
@@ -227,18 +235,59 @@ export const RequestRow = memo(function RequestRow({
       </Cell>
     );
   }
+  // Compact widths and accessibility sizes: the countdown and the buttons
+  // share one foot, and what happened is centred over all of it.
   return (
     <Cell style={styles.row}>
       {copy}
-      {buttons}
+      <View style={styles.foot}>
+        {countdown}
+        {buttons}
+        {result ? <OutcomeBlock {...result} scale={scale} /> : null}
+      </View>
     </Cell>
   );
 });
 
 /**
- * "✓ Approved" (accent), "✕ Denied" or "Expired" (secondary) where the
- * buttons were: centred under the request, or on the trailing edge of a
- * wide row, where the time above it sits.
+ * Compact: the answer with its note under it ("✓ Yes" / "Answered on
+ * another device"), centred over the countdown and the buttons. Drawn
+ * over them, so no wording or text size can change the row's height.
+ */
+function OutcomeBlock({
+  text,
+  symbol,
+  done,
+  note,
+  scale,
+}: ReturnType<typeof outcomeLine> & { scale: number }) {
+  return (
+    <View importantForAccessibility="no-hide-descendants" style={styles.block}>
+      <View style={styles.blockAnswer}>
+        <SymbolView
+          name={symbol}
+          size={Math.round(17 * scale)}
+          tintColor={done ? colors.accent : colors.secondaryLabel}
+        />
+        <Text
+          color={done ? "accent" : "secondaryLabel"}
+          style={styles.answerText}
+          variant="subheadline"
+          weight="600"
+        >
+          {text}
+        </Text>
+      </View>
+      <Text align="center" color="secondaryLabel" variant="footnote">
+        {note}
+      </Text>
+    </View>
+  );
+}
+
+/**
+ * Wide rows: "✓ Approved" (accent), "✕ Denied" or "Expired" (secondary)
+ * on the trailing edge where the buttons were, under the time.
  */
 function OutcomeLine({
   text,
@@ -338,6 +387,37 @@ const styles = StyleSheet.create({
   },
   spent: {
     opacity: 0,
+  },
+  /**
+   * Compact: the countdown and the buttons in one view, at exactly the
+   * places they had before (6 pt under the prompt, 12 pt above the
+   * buttons), so the overlay can cover both.
+   */
+  foot: {
+    // The copy's 2-pt gap instead of the row's 12-pt one; the countdown
+    // adds its own 4-pt top margin, as it did inside the copy.
+    marginTop: 2 - space.s,
+  },
+  footButtons: {
+    marginTop: space.s,
+  },
+  noteOverlay: {
+    ...StyleSheet.absoluteFill,
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: space.xxs,
+  },
+  block: {
+    ...StyleSheet.absoluteFill,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 2,
+    paddingHorizontal: space.m,
+  },
+  blockAnswer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.xs,
   },
   answer: {
     ...StyleSheet.absoluteFill,
