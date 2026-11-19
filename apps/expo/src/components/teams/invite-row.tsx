@@ -7,7 +7,7 @@ import { spoken } from "../../ui/a11y";
 import { Cell, useStackedRows } from "../../ui/list";
 import { Text } from "../../ui/text";
 import { colors, metrics, space } from "../../ui/tokens";
-import { unbroken } from "./page-row";
+import { phrases } from "./page-row";
 
 function expiryLabel(value: string): string {
   return new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric" });
@@ -27,20 +27,21 @@ export const InviteRow = memo(function InviteRow({
 }) {
   const stacked = useStackedRows();
   const title = invite.email ?? "Invite Link";
-  const subtitle = [
-    roleLabel(invite.role),
-    `from ${invite.invitedBy}`,
-    `expires ${expiryLabel(invite.expiresAt)}`,
-  ]
-    .map(unbroken)
-    .join(" · ");
+  const subtitle = phrases(
+    [
+      roleLabel(invite.role),
+      `from ${invite.invitedBy}`,
+      `expires ${expiryLabel(invite.expiresAt)}`,
+    ],
+    !stacked,
+  );
   return (
     <Cell
       minHeight={metrics.rowMinHeightSubtitle}
       separatorInset={
         metrics.rowPaddingHorizontal + metrics.rowSymbolColumn + metrics.rowAccessoryGap
       }
-      style={styles.row}
+      style={stacked ? styles.rowStacked : styles.row}
     >
       <View accessibilityLabel={spoken(title, subtitle)} accessible style={styles.identity}>
         <View style={styles.leading}>
@@ -65,7 +66,13 @@ export const InviteRow = memo(function InviteRow({
         accessibilityRole="button"
         hitSlop={{ top: 8, bottom: 8 }}
         onPress={() => onRevoke(invite)}
-        style={({ pressed }) => [styles.revoke, pressed && styles.pressed]}
+        // At accessibility sizes "Revoke" goes under the text, which then
+        // keeps the row's width instead of breaking inside words.
+        style={({ pressed }) => [
+          styles.revoke,
+          stacked && styles.revokeStacked,
+          pressed && styles.pressed,
+        ]}
       >
         <Text color="danger" variant="subheadline" weight="600">
           Revoke
@@ -80,9 +87,15 @@ const styles = StyleSheet.create({
     paddingRight: space.xs,
     gap: space.xxs,
   },
+  rowStacked: {
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: 0,
+  },
   identity: {
     minWidth: 0,
-    flex: 1,
+    flexGrow: 1,
+    flexShrink: 1,
     flexDirection: "row",
     alignItems: "center",
     gap: metrics.rowAccessoryGap,
@@ -100,6 +113,10 @@ const styles = StyleSheet.create({
     minHeight: metrics.hitTarget,
     justifyContent: "center",
     paddingHorizontal: space.xs,
+  },
+  revokeStacked: {
+    alignSelf: "flex-start",
+    marginLeft: metrics.rowSymbolColumn + metrics.rowAccessoryGap - space.xs,
   },
   pressed: {
     opacity: 0.5,

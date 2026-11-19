@@ -3,17 +3,18 @@ import { StyleSheet, View } from "react-native";
 import type { OncallMeDto } from "../../lib/api";
 import { currentShift, formatHandoff } from "../../lib/teams";
 import { spoken } from "../../ui/a11y";
-import { Cell, Chevron } from "../../ui/list";
+import { Cell, Chevron, useStackedRows } from "../../ui/list";
 import { Text } from "../../ui/text";
 import { colors, metrics } from "../../ui/tokens";
-import { LeadingDot, unbroken } from "./page-row";
+import { LeadingDot, phrases } from "./page-row";
 
 const DOT = 10;
 
 export interface OncallStatus {
   onCall: boolean;
   title: string;
-  subtitle: string;
+  /** The shift line; `phrases` keeps its parts together except at AX sizes. */
+  parts: string[];
 }
 
 /**
@@ -27,9 +28,7 @@ export function oncallStatus(me: OncallMeDto | null | undefined, now: number): O
     return {
       onCall: true,
       title: "You're On Call",
-      subtitle: [shift.groupName, shift.teamName, `until ${formatHandoff(shift.endsAt, now)}`]
-        .map(unbroken)
-        .join(" · "),
+      parts: [shift.groupName, shift.teamName, `until ${formatHandoff(shift.endsAt, now)}`],
     };
   }
   const next = shifts
@@ -38,9 +37,9 @@ export function oncallStatus(me: OncallMeDto | null | undefined, now: number): O
   return {
     onCall: false,
     title: "You're Not On Call",
-    subtitle: next
-      ? `Next: ${next.groupName}, ${unbroken(formatHandoff(next.startsAt, now))}`
-      : "No shifts scheduled for you.",
+    parts: next
+      ? [`Next: ${next.groupName}, ${formatHandoff(next.startsAt, now)}`]
+      : ["No shifts scheduled for you."],
   };
 }
 
@@ -59,10 +58,12 @@ export function OncallStatusRow({
   /** Fill the row with `accentSoft` while on call (On Call's status section). */
   tinted?: boolean;
 }) {
+  const stacked = useStackedRows();
+  const subtitle = phrases(status.parts, !stacked);
   return (
     <Cell
       accessibilityHint={onPress ? "Shows your shifts, pages and paging settings" : undefined}
-      accessibilityLabel={spoken(status.title, status.subtitle)}
+      accessibilityLabel={spoken(status.title, status.parts.join(", "))}
       accessibilityRole={onPress ? "button" : "summary"}
       accessible
       minHeight={metrics.rowMinHeightSubtitle}
@@ -74,7 +75,7 @@ export function OncallStatusRow({
       <View style={styles.copy}>
         <Text variant="headline">{status.title}</Text>
         <Text color="secondaryLabel" variant="subheadline">
-          {status.subtitle}
+          {subtitle}
         </Text>
       </View>
       {onPress ? (

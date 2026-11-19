@@ -59,6 +59,23 @@ function failed(title: string, cause: unknown): void {
   Alert.alert(title, errorText(cause));
 }
 
+/**
+ * "Alex Kim until Thu 5:00 AM" or "Nobody on call". At accessibility sizes
+ * the open-page count joins it instead of squeezing the name beside a
+ * capsule, and the handoff may wrap.
+ */
+function groupSubtitle(group: OncallGroupDto, viewerId: string | undefined, stacked: boolean) {
+  if (!group.current) {
+    return stacked && group.openPageCount > 0
+      ? `Nobody on call · ${group.openPageCount} open`
+      : "Nobody on call";
+  }
+  const who = group.current.person.userId === viewerId ? "You" : group.current.person.name;
+  const until = `until ${formatHandoff(group.current.endsAt)}`;
+  if (!stacked) return `${who} ${unbroken(until)}`;
+  return `${who} ${until}${group.openPageCount > 0 ? ` · ${group.openPageCount} open` : ""}`;
+}
+
 /** "Owner · 5 seats · Team plan" */
 function identityLine(team: TeamDto): string {
   return `${roleLabel(team.role)} · ${seatsLabel(team.seats)}${team.plan === "team" ? " · Team plan" : ""}`;
@@ -450,15 +467,11 @@ export default function TeamScreen() {
                         params: { team: team.id, name: team.name },
                       })
                     }
-                    subtitle={
-                      group.current
-                        ? `${group.current.person.userId === viewerId ? "You" : group.current.person.name} ${unbroken(`until ${formatHandoff(group.current.endsAt)}`)}`
-                        : "Nobody on call"
-                    }
+                    subtitle={groupSubtitle(group, viewerId, stacked)}
                     symbol="bell"
                     title={group.name}
                     trailing={
-                      group.openPageCount > 0 ? (
+                      group.openPageCount > 0 && !stacked ? (
                         <View
                           accessibilityLabel={`${group.openPageCount} open`}
                           style={styles.openCapsule}

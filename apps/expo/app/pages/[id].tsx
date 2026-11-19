@@ -462,8 +462,24 @@ export default function PageSheet() {
       </List>
       {page && !resolved ? (
         <Stack.Toolbar placement="bottom">
-          {/* Escalating needs an open page: the server refuses it once acknowledged. */}
-          {triggered ? (
+          {/*
+            Escalating needs an open page: the server refuses it once
+            acknowledged (409), so acknowledged pages offer Resolve only.
+            From xxxL text up the three labels no longer fit and UIKit folds
+            the last item, the prominent one, into "…"; there Escalate and
+            Resolve move into a More menu so the next step stays visible.
+          */}
+          {triggered && stacked ? (
+            <Stack.Toolbar.Menu accessibilityLabel="More Actions" icon="ellipsis">
+              <Stack.Toolbar.MenuAction disabled={busy !== null} onPress={() => escalate(page)}>
+                Escalate…
+              </Stack.Toolbar.MenuAction>
+              <Stack.Toolbar.MenuAction disabled={busy !== null} onPress={resolve}>
+                Resolve…
+              </Stack.Toolbar.MenuAction>
+            </Stack.Toolbar.Menu>
+          ) : null}
+          {triggered && !stacked ? (
             <Stack.Toolbar.Button
               accessibilityHint="Notifies the next responder now"
               disabled={busy !== null}
@@ -472,7 +488,7 @@ export default function PageSheet() {
               {busy === "escalate" ? "Escalating…" : "Escalate"}
             </Stack.Toolbar.Button>
           ) : null}
-          {triggered ? (
+          {triggered && !stacked ? (
             <Stack.Toolbar.Button
               accessibilityHint="Closes the page for everyone"
               disabled={busy !== null}

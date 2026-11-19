@@ -54,11 +54,18 @@ export function pageStateText(page: OncallPageDto): string {
   return pageStatusLabel(page);
 }
 
-/** "Platform primary · 4 min ago · Needs a responder", wrapping between phrases. */
-export function pageSubtitle(page: OncallPageDto, now: number): string {
-  return [page.groupName, timeAgo(page.createdAt, now), pageStateText(page)]
-    .map(unbroken)
-    .join(" · ");
+/**
+ * Joins phrases with " · ". With `keep` each phrase stays on one line, so a
+ * wrapped line breaks between phrases; at accessibility sizes a phrase can
+ * be wider than the row, so they wrap freely there.
+ */
+export function phrases(parts: string[], keep: boolean): string {
+  return (keep ? parts.map(unbroken) : parts).join(" · ");
+}
+
+/** "Platform primary · 4 min ago · Needs a responder". */
+export function pageSubtitle(page: OncallPageDto, now: number, keep = true): string {
+  return phrases([page.groupName, timeAgo(page.createdAt, now), pageStateText(page)], keep);
 }
 
 /** Open pages first, newest first within each status. */
@@ -101,7 +108,7 @@ export const PageRow = memo(function PageRow({ page, now }: { page: OncallPageDt
             numberOfLines={stacked ? undefined : 2}
             variant="subheadline"
           >
-            {pageSubtitle(page, now)}
+            {pageSubtitle(page, now, !stacked)}
           </Text>
         </View>
         <View style={styles.chevron}>
