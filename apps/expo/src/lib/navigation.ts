@@ -95,3 +95,20 @@ export function dropLeftoverPreviews(): void {
   const root = navigationRef?.getRootState() as NavigatorState | undefined;
   if (root && navigationRef) dropPreloadedRoutes(root, navigationRef.dispatch.bind(navigationRef));
 }
+
+/**
+ * Where a link that arrives while the app is running should go (called by
+ * `app/+native-intent.tsx`). `hark://` and `/home` re-run the launch chain
+ * (`/` → `/home` → `/inbox`), whose last step replaces the screen on top with
+ * the tabs: with the tabs already up that stacked a second, hidden tab bar
+ * (checked in the simulator). Inside the signed-in app they go straight to
+ * the Inbox; on Sign In and Set Up they are left alone.
+ */
+export function linkWhileRunning(url: string): string {
+  if (currentPath === "/" || currentPath === "/home") return url;
+  const match = /^([a-z][a-z0-9+.-]*:\/\/\/?)([^?#]*)(.*)$/i.exec(url);
+  if (!match) return url;
+  const [, scheme = "", path = "", rest = ""] = match;
+  const route = path.replace(/^\/+|\/+$/g, "");
+  return route === "" || route === "home" ? `${scheme}inbox${rest}` : url;
+}

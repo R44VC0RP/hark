@@ -142,7 +142,11 @@ export default function RootLayout() {
           name="home"
           options={{ ...stackScreenOptions, headerShown: true, title: "" }}
         />
-        <Stack.Screen name="(tabs)" />
+        {/*
+          Nothing belongs behind the tabs, so the edge swipe never pops them
+          (it popped a second tab bar that a launch-chain link had stacked).
+        */}
+        <Stack.Screen name="(tabs)" options={{ gestureEnabled: false }} />
         <Stack.Screen name="web/[id]" />
         <Stack.Screen name="apps/[id]" options={sheetOptions} />
         <Stack.Screen name="pages/[id]" options={sheetOptions} />
