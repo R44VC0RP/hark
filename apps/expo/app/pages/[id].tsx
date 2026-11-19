@@ -662,13 +662,20 @@ export default function PageSheet() {
           </>
         )}
       </List>
-      {toolbar.measure}
-      <SafeAreaProvider pointerEvents="none" style={StyleSheet.absoluteFill}>
+      {/*
+        One view beside the list (R3-P2-3): a form sheet with a scroll view
+        takes at most one other subview ("FormSheet with ScrollView expects
+        at most 2 subviews"), and the label measure, the inset reader and
+        the bottom toolbar's host were three. They share the provider that
+        fills the sheet, so each measures what it did before; the toolbar
+        host finds its screen through the responder chain.
+      */}
+      <SafeAreaProvider pointerEvents="box-none" style={StyleSheet.absoluteFill}>
+        {toolbar.measure}
         <BottomInset onChange={setBottomInset} />
-      </SafeAreaProvider>
-      {page && !resolved ? (
-        <Stack.Toolbar placement="bottom">
-          {/*
+        {page && !resolved ? (
+          <Stack.Toolbar placement="bottom">
+            {/*
             Every action keeps its place in every state, so nothing with a
             different meaning lands under a finger that just tapped (I-03: a
             double tap on Acknowledge used to hit the Resolve that took its
@@ -682,53 +689,54 @@ export default function PageSheet() {
             Bold Text), Resolve and Escalate fold into a More menu in the
             same leading place, so the trailing item stays visible.
           */}
-          {triggered && foldToolbar ? (
-            <Stack.Toolbar.Menu
-              accessibilityLabel="More Actions"
-              icon={labelFold ? undefined : "ellipsis"}
-            >
-              {labelFold ? <Stack.Toolbar.Label>More</Stack.Toolbar.Label> : null}
-              <Stack.Toolbar.MenuAction disabled={busy !== null} onPress={resolve}>
-                Resolve…
-              </Stack.Toolbar.MenuAction>
-              <Stack.Toolbar.MenuAction disabled={busy !== null} onPress={() => escalate(page)}>
-                Escalate
-              </Stack.Toolbar.MenuAction>
-            </Stack.Toolbar.Menu>
-          ) : (
+            {triggered && foldToolbar ? (
+              <Stack.Toolbar.Menu
+                accessibilityLabel="More Actions"
+                icon={labelFold ? undefined : "ellipsis"}
+              >
+                {labelFold ? <Stack.Toolbar.Label>More</Stack.Toolbar.Label> : null}
+                <Stack.Toolbar.MenuAction disabled={busy !== null} onPress={resolve}>
+                  Resolve…
+                </Stack.Toolbar.MenuAction>
+                <Stack.Toolbar.MenuAction disabled={busy !== null} onPress={() => escalate(page)}>
+                  Escalate
+                </Stack.Toolbar.MenuAction>
+              </Stack.Toolbar.Menu>
+            ) : (
+              <Stack.Toolbar.Button
+                accessibilityHint="Closes the page for everyone"
+                disabled={busy !== null}
+                onPress={resolve}
+                tintColor={triggered ? undefined : palette.accent}
+                variant={triggered ? "plain" : "prominent"}
+              >
+                Resolve
+              </Stack.Toolbar.Button>
+            )}
             <Stack.Toolbar.Button
-              accessibilityHint="Closes the page for everyone"
+              accessibilityHint="Notifies the next responder now"
               disabled={busy !== null}
-              onPress={resolve}
-              tintColor={triggered ? undefined : palette.accent}
-              variant={triggered ? "plain" : "prominent"}
+              hidden={!triggered || foldToolbar}
+              onPress={() => escalate(page)}
             >
-              Resolve
+              Escalate
             </Stack.Toolbar.Button>
-          )}
-          <Stack.Toolbar.Button
-            accessibilityHint="Notifies the next responder now"
-            disabled={busy !== null}
-            hidden={!triggered || foldToolbar}
-            onPress={() => escalate(page)}
-          >
-            Escalate
-          </Stack.Toolbar.Button>
-          <Stack.Toolbar.Spacer />
-          <Stack.Toolbar.Button
-            accessibilityHint={
-              triggered ? "Tells the team you’re on it and stops escalation" : undefined
-            }
-            disabled={!triggered || busy !== null}
-            hidden={!showAcknowledged}
-            onPress={() => void acknowledge()}
-            tintColor={triggered ? palette.accent : undefined}
-            variant={triggered ? "prominent" : "plain"}
-          >
-            {triggered ? "Acknowledge" : "Acknowledged"}
-          </Stack.Toolbar.Button>
-        </Stack.Toolbar>
-      ) : null}
+            <Stack.Toolbar.Spacer />
+            <Stack.Toolbar.Button
+              accessibilityHint={
+                triggered ? "Tells the team you’re on it and stops escalation" : undefined
+              }
+              disabled={!triggered || busy !== null}
+              hidden={!showAcknowledged}
+              onPress={() => void acknowledge()}
+              tintColor={triggered ? palette.accent : undefined}
+              variant={triggered ? "prominent" : "plain"}
+            >
+              {triggered ? "Acknowledge" : "Acknowledged"}
+            </Stack.Toolbar.Button>
+          </Stack.Toolbar>
+        ) : null}
+      </SafeAreaProvider>
     </>
   );
 }
