@@ -91,8 +91,13 @@ export const DeliveryRow = memo(function DeliveryRow({
       </View>
       <View style={styles.copy}>
         <View style={styles.titleLine}>
+          {/*
+            The title alone beside the time: with the service in front, a
+            375-pt iPhone kept 10–14 of its characters (SS-06). The service
+            leads the status line instead.
+          */}
           <Text numberOfLines={lines} style={styles.title} variant="subheadline" weight="600">
-            {event.serviceTitle} · {event.title}
+            {event.title}
           </Text>
           {stacked ? null : timeText}
         </View>
@@ -101,9 +106,20 @@ export const DeliveryRow = memo(function DeliveryRow({
             {event.body}
           </Text>
         ) : null}
-        <Text color="tertiaryLabel" numberOfLines={stacked ? undefined : 1} variant="footnote">
-          {status}
-        </Text>
+        {stacked ? (
+          <Text color="tertiaryLabel" variant="footnote">
+            {`${event.serviceTitle} · ${status}`}
+          </Text>
+        ) : (
+          <View style={styles.statusLine}>
+            <Text color="tertiaryLabel" numberOfLines={1} style={styles.source} variant="footnote">
+              {event.serviceTitle}
+            </Text>
+            <Text color="tertiaryLabel" numberOfLines={1} style={styles.status} variant="footnote">
+              {` · ${status}`}
+            </Text>
+          </View>
+        )}
         {stacked ? timeText : null}
       </View>
     </Cell>
@@ -138,5 +154,18 @@ const styles = StyleSheet.create({
   title: {
     minWidth: 0,
     flex: 1,
+  },
+  statusLine: {
+    flexDirection: "row",
+    minWidth: 0,
+  },
+  // The service gives way first; a long failure gives way only after it.
+  source: {
+    minWidth: 0,
+    flexShrink: 1,
+  },
+  status: {
+    minWidth: 0,
+    flexShrink: 0.01,
   },
 });
