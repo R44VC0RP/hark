@@ -1,24 +1,19 @@
 import type { InboxNotificationSummaryDto } from "@hark/contracts";
 import * as Device from "expo-device";
-import { Redirect, Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { StatusBar } from "expo-status-bar";
-import { SymbolView } from "expo-symbols";
+import { Redirect, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useRef, useState } from "react";
+import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, View } from "react-native";
 import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Pressable,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+  NOTIFICATION_DOT_COLUMN,
+  NOTIFICATION_DOT_GAP,
+  NotificationRow,
+} from "../../../../src/components/notification-row";
 import { api } from "../../../../src/lib/api";
 import { useSession } from "../../../../src/lib/auth";
+import { haptic } from "../../../../src/lib/haptics";
+import { openTopLevelDestination } from "../../../../src/lib/inbox-body";
 import { previewNotifications, previewProjects } from "../../../../src/lib/inbox-preview";
-import { readableColumn } from "../../../../src/lib/layout";
+import { openWebApp } from "../../../../src/lib/navigation";
 import {
   canMarkAllRead,
   loadedUnreadCount,
@@ -26,17 +21,32 @@ import {
   normalizeReadThroughToken,
   projectSummaryUnread,
 } from "../../../../src/lib/project-inbox";
-import { colors, fonts, tightTracking } from "../../../../src/lib/theme";
+import {
+  EmptyState,
+  ErrorState,
+  isNetworkError,
+  LoadingState,
+} from "../../../../src/ui/empty-state";
+import { PlainSeparator, useScreenMargin } from "../../../../src/ui/list";
+import { colors, space } from "../../../../src/ui/tokens";
 
 const PAGE_SIZE = 30;
+const simulatorPreview = __DEV__ && !Device.isDevice;
 
+type LoadFailure = "network" | "other";
+
+/**
+ * A project's notifications (DESIGN.md 5.6): a plain list like a Mail
+ * mailbox, newest first, loading older pages as you scroll. The filter and
+ * "Mark All as Read" live in one labelled toolbar menu instead of chips and
+ * an unlabelled icon.
+ */
 export default function ProjectScreen() {
   const { data: session, isPending: sessionPending } = useSession();
-  const router = useRouter();
   const params = useLocalSearchParams<{ project: string; name?: string }>();
   const projectParam = typeof params.project === "string" ? params.project : "unfiled";
   const title = typeof params.name === "string" && params.name ? params.name : "Notifications";
-  const simulatorPreview = __DEV__ && !Device.isDevice;
+  const margin = useScreenMargin();
 
   const [items, setItems] = useState<InboxNotificationSummaryDto[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -48,7 +58,7 @@ export default function ProjectScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [markingAll, setMarkingAll] = useState(false);
-  const [loadError, setLoadError] = useState(false);
+  const [loadFailure, setLoadFailure] = useState<LoadFailure | null>(null);
   // Server-issued snapshot boundary for mark-all-read: the server only marks
   // rows this token covered, so notifications arriving after the load stay
   // unread even when their timestamps tie with the newest loaded row.
@@ -71,7 +81,7 @@ export default function ProjectScreen() {
         setReadThrough("preview");
         setNextCursor(null);
         setSummaryUnread(projectSummaryUnread(previewProjects.projects, projectParam));
-        setLoadError(false);
+        setLoadFailure(null);
         return;
       }
       try {
@@ -85,13 +95,14 @@ export default function ProjectScreen() {
         setReadThrough(normalizeReadThroughToken(page.readThroughToken));
         setNextCursor(page.nextCursor);
         if (projects) setSummaryUnread(projectSummaryUnread(projects.projects, projectParam));
-        setLoadError(false);
-      } catch {
+        setLoadFailure(null);
+      } catch (error) {
         if (token !== loadToken.current) return;
-        setLoadError(true);
+        // Rows already on screen stay; only an empty list shows the failure.
+        setLoadFailure(isNetworkError(error) ? "network" : "other");
       }
     },
-    [projectParam, simulatorPreview],
+    [projectParam],
   );
 
   // Reload on every focus — including the return from the detail screen,
@@ -105,7 +116,7 @@ export default function ProjectScreen() {
         loadedOnce.current = true;
         setLoading(false);
       });
-    }, [loadFirstPage, session, simulatorPreview, unreadOnly]),
+    }, [loadFirstPage, session, unreadOnly]),
   );
 
   const loadMore = async () => {
@@ -124,14 +135,14 @@ export default function ProjectScreen() {
       });
       setNextCursor(page.nextCursor);
     } catch {
-      // Keep the loaded slice; the footer button retries on the next scroll.
+      // Keep the loaded slice; reaching the end again retries.
     } finally {
       setLoadingMore(false);
     }
   };
 
   const markAllRead = async () => {
-    // The button is disabled without a token; this guard covers races.
+    // The action is disabled without a token; this guard covers races.
     if (markingAll || !readThrough) return;
     setMarkingAll(true);
     try {
@@ -139,10 +150,7 @@ export default function ProjectScreen() {
         // The snapshot token marks every unread row the last load observed —
         // including older rows beyond the first page — while notifications
         // arriving mid-tap stay unread even on timestamp ties.
-        await api.markAllNotificationsRead({
-          readThrough,
-          project: projectParam,
-        });
+        await api.markAllNotificationsRead({ readThrough, project: projectParam });
       }
       setItems((current) => markLoadedItemsRead(current, new Date().toISOString()));
       setSummaryUnread(0);
@@ -150,14 +158,54 @@ export default function ProjectScreen() {
       // this refresh if a newer one starts first.
       if (!simulatorPreview) void loadFirstPage(unreadOnly);
     } catch (error) {
+      haptic.error();
       Alert.alert(
-        "Could not mark all read",
-        error instanceof Error ? error.message : "Please try again.",
+        "Couldn't Mark All as Read",
+        error instanceof Error ? error.message : "Check your connection, then try again.",
       );
     } finally {
       setMarkingAll(false);
     }
   };
+
+  // Row context menu: read state, then the link or app it opens.
+  const toggleRead = useCallback(async (item: InboxNotificationSummaryDto) => {
+    const markRead = item.readAt === null;
+    try {
+      let readAt: string | null = null;
+      if (markRead) {
+        readAt = simulatorPreview
+          ? new Date().toISOString()
+          : (await api.markNotificationRead(item.id)).readAt;
+      } else if (!simulatorPreview) {
+        await api.markNotificationUnread(item.id);
+      }
+      setItems((current) =>
+        current.map((candidate) =>
+          candidate.id === item.id ? { ...candidate, readAt } : candidate,
+        ),
+      );
+      setSummaryUnread((count) =>
+        count === null ? null : Math.max(0, count + (markRead ? -1 : 1)),
+      );
+    } catch (error) {
+      haptic.error();
+      Alert.alert(
+        "Couldn't Update Notification",
+        error instanceof Error ? error.message : "Check your connection, then try again.",
+      );
+    }
+  }, []);
+  const onToggleRead = useCallback(
+    (item: InboxNotificationSummaryDto) => void toggleRead(item),
+    [toggleRead],
+  );
+  const onOpenLink = useCallback((item: InboxNotificationSummaryDto) => {
+    if (item.url) void openTopLevelDestination(item.url);
+  }, []);
+  const onOpenApp = useCallback((item: InboxNotificationSummaryDto) => {
+    if (item.app) openWebApp(item.app.id, item.url ?? undefined);
+  }, []);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -168,305 +216,117 @@ export default function ProjectScreen() {
     }
   };
 
+  const retry = () => {
+    setLoading(true);
+    void loadFirstPage(unreadOnly).finally(() => setLoading(false));
+  };
+
   const unreadCount = loadedUnreadCount(items);
   const markAllAvailable = canMarkAllRead(unreadCount, summaryUnread, readThrough);
+
+  const renderItem = useCallback(
+    ({ item }: { item: InboxNotificationSummaryDto }) => (
+      <NotificationRow
+        item={item}
+        margin={margin}
+        onOpenApp={onOpenApp}
+        onOpenLink={onOpenLink}
+        onToggleRead={onToggleRead}
+      />
+    ),
+    [margin, onOpenApp, onOpenLink, onToggleRead],
+  );
+  const separatorInset = margin + NOTIFICATION_DOT_COLUMN + NOTIFICATION_DOT_GAP;
+  const Separator = useCallback(() => <PlainSeparator inset={separatorInset} />, [separatorInset]);
 
   if (!sessionPending && !session && !simulatorPreview) return <Redirect href="/" />;
 
   return (
-    <SafeAreaView edges={["top"]} style={styles.container}>
-      <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar style="dark" />
-      <View style={styles.header}>
-        <Pressable
-          accessibilityLabel="Back"
-          accessibilityRole="button"
-          onPress={() => (router.canGoBack() ? router.back() : router.replace("/inbox"))}
-          style={({ pressed }) => [styles.iconButton, pressed && styles.iconButtonPressed]}
+    <>
+      <Stack.Screen options={{ title }} />
+      <Stack.Toolbar placement="right">
+        <Stack.Toolbar.Menu
+          accessibilityLabel="Filter and Actions"
+          icon={
+            unreadOnly
+              ? "line.3.horizontal.decrease.circle.fill"
+              : "line.3.horizontal.decrease.circle"
+          }
         >
-          <SymbolView name="chevron.left" size={16} tintColor={colors.ink} weight="semibold" />
-        </Pressable>
-        <Text numberOfLines={1} style={styles.headerTitle}>
-          {title}
-        </Text>
-        <Pressable
-          accessibilityLabel="Mark all read"
-          accessibilityRole="button"
-          disabled={markingAll || !markAllAvailable}
-          onPress={() => void markAllRead()}
-          style={({ pressed }) => [
-            styles.iconButton,
-            (markingAll || !markAllAvailable) && styles.iconButtonDisabled,
-            pressed && markAllAvailable && styles.iconButtonPressed,
-          ]}
-        >
-          <SymbolView
-            name="checkmark.circle"
-            size={18}
-            tintColor={markAllAvailable ? colors.accent : colors.soft}
-          />
-        </Pressable>
-      </View>
-
-      <View style={styles.filterRow}>
-        {(
-          [
-            { label: "All", value: false },
-            { label: "Unread", value: true },
-          ] as const
-        ).map((option) => {
-          const selected = unreadOnly === option.value;
-          return (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ selected }}
-              key={option.label}
-              onPress={() => setUnreadOnly(option.value)}
-              style={({ pressed }) => [
-                styles.filterOption,
-                selected && styles.filterOptionSelected,
-                pressed && styles.filterOptionPressed,
-              ]}
-            >
-              <Text style={[styles.filterLabel, selected && styles.filterLabelSelected]}>
-                {option.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
-
-      {loading ? (
-        <ActivityIndicator color={colors.accent} style={styles.loading} />
-      ) : (
-        <FlatList
-          contentContainerStyle={styles.list}
-          data={items}
-          keyExtractor={(item) => item.id}
-          onEndReached={() => void loadMore()}
-          onEndReachedThreshold={0.4}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => void onRefresh()}
-              tintColor={colors.accent}
+          <Stack.Toolbar.MenuAction
+            icon="line.3.horizontal.decrease"
+            isOn={unreadOnly}
+            onPress={() => setUnreadOnly((on) => !on)}
+          >
+            Show Unread Only
+          </Stack.Toolbar.MenuAction>
+          <Stack.Toolbar.MenuAction
+            disabled={markingAll || !markAllAvailable}
+            icon="envelope.open"
+            onPress={() => void markAllRead()}
+          >
+            Mark All as Read
+          </Stack.Toolbar.MenuAction>
+        </Stack.Toolbar.Menu>
+      </Stack.Toolbar>
+      <FlatList
+        ItemSeparatorComponent={Separator}
+        ListEmptyComponent={
+          loading ? (
+            <LoadingState />
+          ) : loadFailure ? (
+            <ErrorState
+              network={loadFailure === "network"}
+              onRetry={retry}
+              title="Couldn't Load Notifications"
             />
-          }
-          ListEmptyComponent={
-            <Text style={styles.empty}>
-              {loadError
-                ? "Couldn’t load notifications. Pull to refresh."
-                : unreadOnly
-                  ? "No unread notifications."
-                  : "No notifications yet."}
-            </Text>
-          }
-          ListFooterComponent={
-            loadingMore ? (
-              <ActivityIndicator color={colors.accent} style={styles.footerLoading} />
-            ) : null
-          }
-          renderItem={({ item }) => (
-            <NotificationRow
-              item={item}
-              onPress={() =>
-                router.push({ pathname: "/notification/[id]", params: { id: item.id } })
-              }
+          ) : unreadOnly ? (
+            <EmptyState
+              message="You’ve read everything in this project."
+              symbol="tray"
+              title="No Unread Notifications"
             />
-          )}
-        />
-      )}
-    </SafeAreaView>
+          ) : (
+            <EmptyState
+              message="Notifications sent to this project show up here."
+              symbol="tray"
+              title="No Notifications"
+            />
+          )
+        }
+        ListFooterComponent={
+          loadingMore ? (
+            <View style={styles.footer}>
+              <ActivityIndicator accessibilityLabel="Loading more" />
+            </View>
+          ) : null
+        }
+        contentInsetAdjustmentBehavior="automatic"
+        data={loading ? [] : items}
+        initialNumToRender={12}
+        keyExtractor={(item) => item.id}
+        onEndReached={() => void loadMore()}
+        onEndReachedThreshold={0.4}
+        refreshControl={
+          loading ? undefined : (
+            <RefreshControl onRefresh={() => void onRefresh()} refreshing={refreshing} />
+          )
+        }
+        renderItem={renderItem}
+        style={styles.list}
+        windowSize={7}
+      />
+    </>
   );
-}
-
-function NotificationRow({
-  item,
-  onPress,
-}: {
-  item: InboxNotificationSummaryDto;
-  onPress: () => void;
-}) {
-  const unread = item.readAt === null;
-  return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={onPress}
-      style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-    >
-      <View style={[styles.unreadDot, !unread && styles.unreadDotHidden]} />
-      <View style={styles.rowCopy}>
-        <View style={styles.rowTopLine}>
-          <Text numberOfLines={1} style={[styles.rowTitle, unread && styles.rowTitleUnread]}>
-            {item.title}
-          </Text>
-          <Text style={styles.rowTime}>{formatTime(item.createdAt)}</Text>
-        </View>
-        <Text numberOfLines={2} style={styles.rowPreview}>
-          {item.preview}
-        </Text>
-        <Text numberOfLines={1} style={styles.rowMeta}>
-          {item.sourceName}
-        </Text>
-      </View>
-    </Pressable>
-  );
-}
-
-function formatTime(value: string): string {
-  const date = new Date(value);
-  const today = new Date();
-  if (date.toDateString() === today.toDateString()) {
-    return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  }
-  return date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.paper,
-  },
-  header: {
-    ...readableColumn,
-    minHeight: 56,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 12,
-  },
-  headerTitle: {
-    flex: 1,
-    color: colors.ink,
-    fontFamily: fonts.semibold,
-    fontSize: 17,
-    textAlign: "center",
-    letterSpacing: tightTracking(17),
-  },
-  iconButton: {
-    width: 44,
-    height: 44,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 22,
-  },
-  iconButtonDisabled: {
-    opacity: 0.4,
-  },
-  iconButtonPressed: {
-    backgroundColor: "#F0EFEC",
-    transform: [{ scale: 0.96 }],
-  },
-  filterRow: {
-    flexDirection: "row",
-    gap: 6,
-    paddingHorizontal: 24,
-    paddingBottom: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.line,
-  },
-  filterOption: {
-    minHeight: 36,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 13,
-    borderRadius: 18,
-  },
-  filterOptionSelected: {
-    backgroundColor: colors.accentSoft,
-  },
-  filterOptionPressed: {
-    opacity: 0.65,
-    transform: [{ scale: 0.96 }],
-  },
-  filterLabel: {
-    color: colors.muted,
-    fontFamily: fonts.medium,
-    fontSize: 12,
-    letterSpacing: tightTracking(12),
-  },
-  filterLabelSelected: {
-    color: colors.accent,
-  },
-  loading: {
-    paddingVertical: 40,
-  },
-  footerLoading: {
-    paddingVertical: 20,
-  },
   list: {
-    ...readableColumn,
-    paddingHorizontal: 24,
-    paddingBottom: 48,
-  },
-  empty: {
-    paddingVertical: 24,
-    color: colors.soft,
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    letterSpacing: tightTracking(13),
-  },
-  row: {
-    flexDirection: "row",
-    gap: 10,
-    paddingVertical: 13,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.line,
-  },
-  rowPressed: {
-    opacity: 0.7,
-  },
-  unreadDot: {
-    width: 8,
-    height: 8,
-    marginTop: 6,
-    borderRadius: 4,
-    backgroundColor: colors.accent,
-  },
-  unreadDotHidden: {
-    opacity: 0,
-  },
-  rowCopy: {
-    minWidth: 0,
     flex: 1,
+    backgroundColor: colors.background,
   },
-  rowTopLine: {
-    flexDirection: "row",
-    alignItems: "baseline",
-    justifyContent: "space-between",
-    gap: 10,
-  },
-  rowTitle: {
-    flex: 1,
-    color: colors.ink,
-    fontFamily: fonts.medium,
-    fontSize: 14,
-    lineHeight: 19,
-    letterSpacing: tightTracking(14),
-  },
-  rowTitleUnread: {
-    fontFamily: fonts.semibold,
-  },
-  rowTime: {
-    color: colors.soft,
-    fontFamily: fonts.regular,
-    fontSize: 11,
-    letterSpacing: tightTracking(11),
-  },
-  rowPreview: {
-    marginTop: 2,
-    color: colors.muted,
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    lineHeight: 18,
-    letterSpacing: tightTracking(13),
-  },
-  rowMeta: {
-    marginTop: 3,
-    color: colors.soft,
-    fontFamily: fonts.regular,
-    fontSize: 11,
-    lineHeight: 15,
-    letterSpacing: tightTracking(11),
+  footer: {
+    alignItems: "center",
+    paddingVertical: space.l,
   },
 });

@@ -1,22 +1,19 @@
 import type { InboxNotificationDetailDto } from "@hark/contracts";
 import * as Device from "expo-device";
-import { Redirect, Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { StatusBar } from "expo-status-bar";
-import { SymbolView } from "expo-symbols";
-import { useCallback, useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+  Redirect,
+  Stack,
+  useIsFocused,
+  useIsPreview,
+  useLocalSearchParams,
+  useRouter,
+} from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Alert, StyleSheet, View } from "react-native";
 import { AppIcon } from "../../../../src/components/app-icon";
 import { api, classifyNotificationDetailFailure } from "../../../../src/lib/api";
 import { useSession } from "../../../../src/lib/auth";
+import { haptic } from "../../../../src/lib/haptics";
 import {
   linkDestinationLabel,
   linkifyBody,
@@ -24,21 +21,49 @@ import {
   openTopLevelDestination,
 } from "../../../../src/lib/inbox-body";
 import { previewNotificationDetail } from "../../../../src/lib/inbox-preview";
-import { readableColumn } from "../../../../src/lib/layout";
-import { colors, fonts, tightTracking } from "../../../../src/lib/theme";
+import { openWebApp } from "../../../../src/lib/navigation";
+import { spoken } from "../../../../src/ui/a11y";
+import { SourceAvatar } from "../../../../src/ui/avatar";
+import { Button } from "../../../../src/ui/button";
+import {
+  EmptyState,
+  ErrorState,
+  isNetworkError,
+  LoadingState,
+} from "../../../../src/ui/empty-state";
+import { ActionRow, Cell, LabeledRow, List, Section } from "../../../../src/ui/list";
+import { Text } from "../../../../src/ui/text";
+import { metrics, space } from "../../../../src/ui/tokens";
 
+const simulatorPreview = __DEV__ && !Device.isDevice;
+const NO_TITLE = { title: "" };
+
+type Failure = "not_found" | "network" | "other";
+
+/**
+ * One notification (DESIGN.md 5.7), read like a message: who sent it and
+ * when, the title, the body with tappable links, then what it opens (its web
+ * app or link) and the delivery details. Opening it marks it read, except
+ * while it is only previewed from a project row (touch and hold).
+ */
 export default function NotificationDetailScreen() {
   const { data: session, isPending: sessionPending } = useSession();
   const router = useRouter();
+  const previewed = useIsPreview();
+  // A touch-and-hold preview also prefetches this screen as a hidden,
+  // unfocused route; only the screen people actually opened marks read.
+  const focused = useIsFocused();
   const params = useLocalSearchParams<{ id: string }>();
   const compositeId = typeof params.id === "string" ? params.id : "";
-  const simulatorPreview = __DEV__ && !Device.isDevice;
 
   const [notification, setNotification] = useState<InboxNotificationDetailDto | null>(null);
   const [loading, setLoading] = useState(true);
-  const [notFound, setNotFound] = useState(false);
-  const [loadError, setLoadError] = useState(false);
+  const [failure, setFailure] = useState<Failure | null>(null);
   const [togglingRead, setTogglingRead] = useState(false);
+  // Opening marks read once per notification; toggling it back to unread
+  // here must stick. Keyed by ID: a deep link can reuse this screen for
+  // another notification (checked in the simulator).
+  const markedOnOpen = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     if (simulatorPreview) {
@@ -47,44 +72,59 @@ export default function NotificationDetailScreen() {
       return;
     }
     setLoading(true);
-    setLoadError(false);
+    setFailure(null);
     try {
       const result = await api.getInboxNotification(compositeId);
       setNotification(result.notification);
-      // Mark read only after the full content actually loaded.
-      if (result.notification.readAt === null) {
-        try {
-          const marked = await api.markNotificationRead(compositeId);
-          setNotification({ ...result.notification, readAt: marked.readAt });
-        } catch {
-          // Unread state stays; the next open retries.
-        }
-      }
     } catch (error) {
-      const failure = classifyNotificationDetailFailure(error);
-      if (failure === "not_found") {
+      const kind = classifyNotificationDetailFailure(error);
+      if (kind === "not_found") {
         // A modern server confirmed the notification is gone.
-        setNotFound(true);
-      } else if (failure === "unsupported_server") {
+        setFailure("not_found");
+      } else if (kind === "unsupported_server") {
         // Old or self-hosted servers have no detail route; a push tap lands
         // here anyway, so return to the legacy inbox instead of a dead end.
         router.replace("/inbox");
         return;
       } else {
-        setLoadError(true);
+        setFailure(isNetworkError(error) ? "network" : "other");
       }
     } finally {
       setLoading(false);
     }
-  }, [compositeId, router, simulatorPreview]);
+  }, [compositeId, router]);
 
   useEffect(() => {
     if (!session && !simulatorPreview) return;
+    // Never show the previous notification while another one loads.
+    setNotification((current) => (current && current.id !== compositeId ? null : current));
     void load();
-  }, [load, session, simulatorPreview]);
+  }, [compositeId, load, session]);
+
+  // Mark read only after the full content loaded, and never while the screen
+  // is a touch-and-hold preview or its prefetched copy (it may never be
+  // opened). A preview that is tapped open becomes this same screen, focused,
+  // so this runs then.
+  const unreadOnArrival = notification?.id === compositeId && notification.readAt === null;
+  useEffect(() => {
+    if (previewed || !focused || !unreadOnArrival || markedOnOpen.current === compositeId) return;
+    if (simulatorPreview) return;
+    markedOnOpen.current = compositeId;
+    void api
+      .markNotificationRead(compositeId)
+      .then((marked) => {
+        setNotification((current) => (current ? { ...current, readAt: marked.readAt } : current));
+      })
+      .catch(() => {
+        // Unread state stays; the next open retries.
+        markedOnOpen.current = null;
+      });
+  }, [compositeId, focused, previewed, unreadOnArrival]);
 
   const toggleRead = async () => {
     if (!notification || togglingRead) return;
+    // Whatever happens next is the person's choice, not the automatic mark.
+    markedOnOpen.current = notification.id;
     setTogglingRead(true);
     try {
       if (notification.readAt === null) {
@@ -97,7 +137,11 @@ export default function NotificationDetailScreen() {
         setNotification({ ...notification, readAt: null });
       }
     } catch (error) {
-      Alert.alert("Could not update", error instanceof Error ? error.message : "Please try again.");
+      haptic.error();
+      Alert.alert(
+        "Couldn't Update Notification",
+        error instanceof Error ? error.message : "Check your connection, then try again.",
+      );
     } finally {
       setTogglingRead(false);
     }
@@ -105,131 +149,172 @@ export default function NotificationDetailScreen() {
 
   if (!sessionPending && !session && !simulatorPreview) return <Redirect href="/" />;
 
+  const read = notification?.readAt != null;
+
   return (
-    <SafeAreaView edges={["top"]} style={styles.container}>
-      <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar style="dark" />
-      <View style={styles.header}>
-        <Pressable
-          accessibilityLabel="Back"
-          accessibilityRole="button"
-          onPress={() => (router.canGoBack() ? router.back() : router.replace("/inbox"))}
-          style={({ pressed }) => [styles.iconButton, pressed && styles.iconButtonPressed]}
-        >
-          <SymbolView name="chevron.left" size={16} tintColor={colors.ink} weight="semibold" />
-        </Pressable>
-        <View style={styles.headerSpacer} />
+    <>
+      {/* A preview has no header; its navigation object must not be touched. */}
+      {previewed ? null : <Stack.Screen options={NO_TITLE} />}
+      {notification && !previewed ? (
+        <Stack.Toolbar placement="right">
+          <Stack.Toolbar.Button disabled={togglingRead} onPress={() => void toggleRead()}>
+            {read ? "Mark as Unread" : "Mark as Read"}
+          </Stack.Toolbar.Button>
+        </Stack.Toolbar>
+      ) : null}
+      <List reading>
         {notification ? (
-          <Pressable
-            accessibilityLabel={notification.readAt ? "Mark unread" : "Mark read"}
-            accessibilityRole="button"
-            disabled={togglingRead}
-            onPress={() => void toggleRead()}
-            style={({ pressed }) => [styles.iconButton, pressed && styles.iconButtonPressed]}
-          >
-            <SymbolView
-              name={notification.readAt ? "envelope.badge" : "envelope.open"}
-              size={17}
-              tintColor={colors.accent}
-            />
-          </Pressable>
-        ) : null}
-      </View>
-
-      {loading ? (
-        <ActivityIndicator color={colors.accent} style={styles.loading} />
-      ) : notFound ? (
-        <Text style={styles.missing}>This notification is no longer available.</Text>
-      ) : loadError || !notification ? (
-        <View style={styles.errorGroup}>
-          <Text style={styles.missing}>Couldn’t load this notification.</Text>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => void load()}
-            style={({ pressed }) => [styles.retryButton, pressed && styles.iconButtonPressed]}
-          >
-            <Text style={styles.retryText}>Try again</Text>
-          </Pressable>
-        </View>
-      ) : (
-        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-          <Text selectable style={styles.title}>
-            {notification.title}
-          </Text>
-          <View style={styles.metaBlock}>
-            <MetaRow label="From" value={notification.sourceName} />
-            {notification.projectName ? (
-              <MetaRow label="Project" value={notification.projectName} />
-            ) : null}
-            <MetaRow label="Received" value={formatFullTime(notification.createdAt)} />
-            {notification.status ? (
-              <MetaRow label="Status" value={statusLabel(notification.status)} />
-            ) : null}
-            <MetaRow label="State" value={notification.readAt ? "Read" : "Unread"} />
-          </View>
-
-          <BodyText body={notification.body} />
-
-          {notification.app ? (
-            <View style={styles.appCard}>
-              <View style={styles.appIdentity}>
-                <AppIcon
-                  iconUrl={notification.app.iconUrl}
-                  name={notification.app.name}
-                  size={44}
-                />
-                <View style={styles.appCopy}>
-                  <Text style={styles.appName}>{notification.app.name}</Text>
-                  <Text numberOfLines={1} style={styles.appHost}>
-                    {appDestinationLabel(notification.app.origin, notification.url)}
-                  </Text>
-                </View>
-              </View>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => {
-                  if (!notification.app) return;
-                  router.push({
-                    pathname: "/web/[id]",
-                    params: {
-                      id: notification.app.id,
-                      ...(notification.url ? { url: notification.url } : {}),
-                    },
-                  });
-                }}
-                style={({ pressed }) => [styles.appButton, pressed && styles.openButtonPressed]}
-              >
-                <Text style={styles.openButtonText}>Open app</Text>
-              </Pressable>
-              <View style={styles.appNote}>
-                <View style={styles.appNoteDot} />
-                <Text style={styles.appNoteText}>Signs you in with Hark. No password needed.</Text>
-              </View>
-            </View>
-          ) : notification.url ? (
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => {
-                if (notification.url) void openTopLevelDestination(notification.url);
-              }}
-              style={({ pressed }) => [styles.openButton, pressed && styles.openButtonPressed]}
-            >
-              <SymbolView name="arrow.up.right" size={14} tintColor="#FFFFFF" weight="semibold" />
-              <Text numberOfLines={1} style={styles.openButtonText}>
-                {openLinkLabel(notification.url)}
-              </Text>
-            </Pressable>
-          ) : null}
-        </ScrollView>
-      )}
-    </SafeAreaView>
+          <NotificationContent notification={notification} />
+        ) : loading ? (
+          <LoadingState />
+        ) : failure === "not_found" ? (
+          <EmptyState
+            message="It was removed or it expired."
+            symbol="tray"
+            title="Notification Unavailable"
+          />
+        ) : (
+          <ErrorState
+            network={failure === "network"}
+            onRetry={() => void load()}
+            title="Couldn't Load Notification"
+          />
+        )}
+      </List>
+    </>
   );
 }
 
-/** "Open link" plus where it goes, e.g. `Open link · ci.example.com`. */
+function NotificationContent({ notification }: { notification: InboxNotificationDetailDto }) {
+  const { app, url } = notification;
+  const received = formatHeaderTime(notification.createdAt);
+  // "Fieldnotes Shop · Fieldnotes Shop" says nothing twice (same rule as the Inbox).
+  const projectName =
+    notification.projectName &&
+    notification.projectName.toLowerCase() !== notification.sourceName.toLowerCase()
+      ? notification.projectName
+      : null;
+  return (
+    <>
+      <View
+        accessibilityLabel={spoken(
+          projectName ? `${notification.sourceName}, ${projectName}` : notification.sourceName,
+          received,
+        )}
+        accessible
+        style={styles.source}
+      >
+        <SourceAvatar name={notification.sourceName} size={32} url={notification.sourceImageUrl} />
+        <View style={styles.sourceCopy}>
+          <Text color="secondaryLabel" variant="subheadline">
+            <Text variant="subheadline" weight="600">
+              {notification.sourceName}
+            </Text>
+            {projectName ? ` · ${projectName}` : ""}
+          </Text>
+          <Text color="tertiaryLabel" variant="footnote">
+            {received}
+          </Text>
+        </View>
+      </View>
+      <Text accessibilityRole="header" selectable style={styles.title} variant="title2">
+        {notification.title}
+      </Text>
+      {notification.body ? <BodyText body={notification.body} /> : null}
+
+      {app ? (
+        <Section footer="Signs you in with Hark. No password needed.">
+          <Cell style={styles.appCell}>
+            <View
+              accessibilityLabel={spoken(app.name, appDestinationLabel(app.origin, url))}
+              accessible
+              style={styles.appIdentity}
+            >
+              <AppIcon iconUrl={app.iconUrl} name={app.name} size={44} />
+              <View style={styles.appCopy}>
+                <Text variant="headline">{app.name}</Text>
+                <Text color="secondaryLabel" variant="footnote">
+                  {appDestinationLabel(app.origin, url)}
+                </Text>
+              </View>
+            </View>
+            <Button
+              accessibilityHint="Opens the app signed in with Hark"
+              onPress={() => openWebApp(app.id, url ?? undefined)}
+              size="large"
+              title={`Open ${app.name}`}
+              variant="prominent"
+            />
+          </Cell>
+        </Section>
+      ) : url ? (
+        // A row, not a bordered button: the button's fill disappears on the
+        // grouped background (checked in the simulator).
+        <Section>
+          <ActionRow
+            accessibilityHint="Opens in Safari or the app it belongs to"
+            onPress={() => void openTopLevelDestination(url)}
+            symbol="arrow.up.right.square"
+            title={openLinkLabel(url)}
+          />
+        </Section>
+      ) : null}
+
+      <Section title="Details">
+        <LabeledRow label="Received" selectable value={formatFullTime(notification.createdAt)} />
+        {notification.status ? (
+          <LabeledRow label="Delivery" value={statusLabel(notification.status)} />
+        ) : null}
+        <LabeledRow label="State" value={notification.readAt ? "Read" : "Unread"} />
+      </Section>
+    </>
+  );
+}
+
+/**
+ * Selectable plain-text body with safe URL linkification. No HTML, no
+ * WebView, no remote previews; links are revalidated again on tap. Links are
+ * underlined as well as tinted: the accent and the ink are both dark.
+ */
+function BodyText({ body }: { body: string }) {
+  const segments = linkifyBody(body.trim());
+  // Character offsets make stable keys even when segment text repeats.
+  let offset = 0;
+  const keyed = segments.map((segment) => {
+    const key = `at-${offset}`;
+    offset += segment.text.length;
+    return { ...segment, key };
+  });
+  return (
+    <Text selectable style={styles.body} variant="body">
+      {keyed.map((segment) =>
+        segment.url ? (
+          <Text
+            accessibilityRole="link"
+            color="accent"
+            key={segment.key}
+            onPress={() => {
+              if (segment.url) void openBodyLink(segment.url);
+            }}
+            style={styles.link}
+            variant="body"
+          >
+            {segment.text}
+          </Text>
+        ) : (
+          <Text key={segment.key} variant="body">
+            {segment.text}
+          </Text>
+        ),
+      )}
+    </Text>
+  );
+}
+
+/** "Open Link" plus where it goes, e.g. `Open Link · ci.example.com`. */
 function openLinkLabel(url: string): string {
   const destination = linkDestinationLabel(url);
-  return destination ? `Open link · ${destination}` : "Open link";
+  return destination ? `Open Link · ${destination}` : "Open Link";
 }
 
 /** Host plus path of the page an app notification opens, e.g. `app.example.com/builds/185`. */
@@ -243,59 +328,14 @@ function appDestinationLabel(origin: string, url: string | null): string {
   }
 }
 
-/**
- * Selectable plaintext body with safe URL linkification. No HTML, no
- * WebView, no remote previews; links are revalidated again on tap.
- */
-function BodyText({ body }: { body: string }) {
-  const segments = linkifyBody(body);
-  // Character offsets make stable keys even when segment text repeats.
-  let offset = 0;
-  const keyed = segments.map((segment) => {
-    const key = `at-${offset}`;
-    offset += segment.text.length;
-    return { ...segment, key };
-  });
-  return (
-    <Text selectable style={styles.body}>
-      {keyed.map((segment) =>
-        segment.url ? (
-          <Text
-            key={segment.key}
-            onPress={() => {
-              if (segment.url) void openBodyLink(segment.url);
-            }}
-            style={styles.bodyLink}
-          >
-            {segment.text}
-          </Text>
-        ) : (
-          <Text key={segment.key}>{segment.text}</Text>
-        ),
-      )}
-    </Text>
-  );
-}
-
-function MetaRow({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.metaRow}>
-      <Text style={styles.metaLabel}>{label}</Text>
-      <Text selectable style={styles.metaValue}>
-        {value}
-      </Text>
-    </View>
-  );
-}
-
 function statusLabel(status: string): string {
   switch (status) {
     case "accepted":
       return "Delivered";
     case "partial":
-      return "Partially delivered";
+      return "Partially Delivered";
     case "no_devices":
-      return "No devices";
+      return "No Devices";
     case "failed":
       return "Failed";
     case "withdrawn":
@@ -306,204 +346,63 @@ function statusLabel(status: string): string {
   }
 }
 
-function formatFullTime(value: string): string {
+/** "Today at 9:41 PM", "Yesterday at 8:02 AM", "Nov 12 at 3:15 PM". */
+function formatHeaderTime(value: string): string {
   const date = new Date(value);
-  return date.toLocaleString([], {
+  const time = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (date.toDateString() === today.toDateString()) return `Today at ${time}`;
+  if (date.toDateString() === yesterday.toDateString()) return `Yesterday at ${time}`;
+  const sameYear = date.getFullYear() === today.getFullYear();
+  const day = date.toLocaleDateString([], {
     month: "short",
     day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
+    ...(sameYear ? {} : { year: "numeric" }),
   });
+  return `${day} at ${time}`;
+}
+
+/** "Nov 18, 2026 at 9:41 PM". */
+function formatFullTime(value: string): string {
+  return new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.paper,
-  },
-  header: {
-    ...readableColumn,
-    minHeight: 56,
+  source: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 12,
+    gap: space.s,
+    marginTop: space.xs,
   },
-  headerSpacer: {
+  sourceCopy: {
+    minWidth: 0,
     flex: 1,
-  },
-  iconButton: {
-    width: 44,
-    height: 44,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 22,
-  },
-  iconButtonPressed: {
-    backgroundColor: "#F0EFEC",
-    transform: [{ scale: 0.96 }],
-  },
-  loading: {
-    paddingVertical: 40,
-  },
-  missing: {
-    paddingHorizontal: 24,
-    paddingVertical: 24,
-    color: colors.soft,
-    fontFamily: fonts.regular,
-    fontSize: 14,
-    letterSpacing: tightTracking(14),
-  },
-  errorGroup: {
-    alignItems: "flex-start",
-  },
-  retryButton: {
-    minHeight: 40,
-    alignItems: "center",
-    justifyContent: "center",
-    marginLeft: 24,
-    paddingHorizontal: 16,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.line,
-    borderRadius: 20,
-    backgroundColor: colors.surface,
-  },
-  retryText: {
-    color: colors.accent,
-    fontFamily: fonts.medium,
-    fontSize: 13,
-    letterSpacing: tightTracking(13),
-  },
-  scroll: {
-    ...readableColumn,
-    paddingHorizontal: 24,
-    paddingBottom: 64,
   },
   title: {
-    color: colors.ink,
-    fontFamily: fonts.semibold,
-    fontSize: 20,
-    lineHeight: 26,
-    letterSpacing: tightTracking(20),
-  },
-  metaBlock: {
-    gap: 6,
-    marginTop: 14,
-    paddingVertical: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.line,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.line,
-  },
-  metaRow: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  metaLabel: {
-    width: 72,
-    color: colors.soft,
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    lineHeight: 18,
-    letterSpacing: tightTracking(13),
-  },
-  metaValue: {
-    flex: 1,
-    color: colors.muted,
-    fontFamily: fonts.medium,
-    fontSize: 13,
-    lineHeight: 18,
-    letterSpacing: tightTracking(13),
+    marginTop: space.l,
   },
   body: {
-    marginTop: 16,
-    color: colors.ink,
-    fontFamily: fonts.regular,
-    fontSize: 15,
-    lineHeight: 23,
-    letterSpacing: tightTracking(15),
+    marginTop: space.s,
   },
-  bodyLink: {
-    color: colors.accent,
+  link: {
     textDecorationLine: "underline",
   },
-  openButton: {
-    minHeight: 44,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 7,
-    marginTop: 24,
-    paddingHorizontal: 18,
-    borderRadius: 22,
-    backgroundColor: colors.accent,
-  },
-  openButtonPressed: {
-    backgroundColor: colors.accentPressed,
-    transform: [{ scale: 0.98 }],
-  },
-  appCard: {
-    gap: 14,
-    marginTop: 24,
-    padding: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.line,
-    borderRadius: 18,
-    backgroundColor: colors.surface,
+  appCell: {
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: space.m,
+    paddingVertical: space.m,
   },
   appIdentity: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: metrics.rowAccessoryGap,
   },
   appCopy: {
     minWidth: 0,
     flex: 1,
     gap: 2,
-  },
-  appName: {
-    color: colors.ink,
-    fontFamily: fonts.semibold,
-    fontSize: 15,
-    lineHeight: 20,
-    letterSpacing: tightTracking(15),
-  },
-  appHost: {
-    color: colors.muted,
-    fontFamily: fonts.regular,
-    fontSize: 12,
-    lineHeight: 16,
-    letterSpacing: tightTracking(12),
-  },
-  appButton: {
-    minHeight: 44,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 22,
-    backgroundColor: colors.accent,
-  },
-  appNote: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-  },
-  appNoteDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.accent,
-  },
-  appNoteText: {
-    color: colors.muted,
-    fontFamily: fonts.regular,
-    fontSize: 12,
-    letterSpacing: tightTracking(12),
-  },
-  openButtonText: {
-    flexShrink: 1,
-    color: "#FFFFFF",
-    fontFamily: fonts.medium,
-    fontSize: 14,
-    letterSpacing: tightTracking(14),
   },
 });
