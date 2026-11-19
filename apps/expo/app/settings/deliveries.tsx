@@ -86,7 +86,7 @@ export default function DeliveriesScreen() {
             <ErrorState
               network={failure === "network"}
               onRetry={reload}
-              title="Couldn't Load Deliveries"
+              title="Couldn’t Load Deliveries"
             />
           ) : (
             <EmptyState

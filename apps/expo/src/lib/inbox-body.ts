@@ -89,7 +89,7 @@ export interface OpenBodyLinkRuntime {
 
 async function confirmWithAlert(url: string): Promise<boolean> {
   return new Promise((resolve) => {
-    Alert.alert("Open in another app?", url, [
+    Alert.alert("Open in Another App?", url, [
       { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
       { text: "Open", onPress: () => resolve(true) },
     ]);

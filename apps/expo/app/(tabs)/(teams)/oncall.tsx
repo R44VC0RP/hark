@@ -178,7 +178,7 @@ export default function OncallScreen() {
       setSettings(previous);
       haptic.error();
       Alert.alert(
-        "Couldn't Save",
+        "Couldn’t Save",
         cause instanceof Error ? cause.message : "Check your connection, then try again.",
       );
     }
@@ -207,9 +207,9 @@ export default function OncallScreen() {
         >
           {unsupported ? (
             <EmptyState
-              message="This Hark server doesn't support on-call yet."
+              message="This Hark server doesn’t support on-call yet."
               symbol="bell.slash"
-              title="On Call Isn't Available"
+              title="On Call Isn’t Available"
             />
           ) : !me ? (
             failure ? (
@@ -219,7 +219,7 @@ export default function OncallScreen() {
                   setFailure(null);
                   void reload();
                 }}
-                title="Couldn't Load On Call"
+                title="Couldn’t Load On Call"
               />
             ) : (
               <LoadingState />
@@ -261,7 +261,7 @@ export default function OncallScreen() {
                 <Section prominent title="Team Rotations">
                   {rotationTeams.map((team) => (
                     <Row
-                      accessibilityHint="Shows the team's rotations and open pages"
+                      accessibilityHint="Shows the team’s rotations and open pages"
                       chevron
                       key={team.id}
                       leading={<Avatar name={team.name} size={TEAM_AVATAR} />}

@@ -45,10 +45,10 @@ const simulatorPreview = __DEV__ && !Device.isDevice;
 function signInError(error: unknown, provider: "Apple" | "Google"): string {
   const code = typeof error === "object" && error !== null && "code" in error ? error.code : null;
   if (typeof code === "string" && code.startsWith("ERR_")) {
-    return `Couldn't sign in with ${provider}. Try again.`;
+    return `Couldn’t sign in with ${provider}. Try again.`;
   }
   if (error instanceof Error && error.message) return error.message;
-  return `Couldn't sign in with ${provider}. Try again.`;
+  return `Couldn’t sign in with ${provider}. Try again.`;
 }
 
 /**

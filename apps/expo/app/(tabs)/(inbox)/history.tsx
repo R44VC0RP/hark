@@ -174,7 +174,7 @@ export default function HistoryScreen() {
             <ErrorState
               network={failure === "network"}
               onRetry={() => reload(filter)}
-              title="Couldn't Load History"
+              title="Couldn’t Load History"
             />
           ) : (
             <EmptyState
@@ -192,7 +192,7 @@ export default function HistoryScreen() {
           ) : status === "moreFailed" ? (
             <View style={styles.footer}>
               <Text align="center" color="secondaryLabel" variant="footnote">
-                Couldn't load more activity.
+                Couldn’t load more activity.
               </Text>
               <Button onPress={() => loadMore(true)} title="Try Again" variant="plain" />
             </View>

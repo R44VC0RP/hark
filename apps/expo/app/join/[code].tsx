@@ -115,7 +115,7 @@ export default function JoinTeamSheet() {
     } catch (cause) {
       haptic.error();
       if (isSeatLimitError(cause)) setSeatLimit(true);
-      else setJoinError(cause instanceof Error ? cause.message : "Couldn't join this team.");
+      else setJoinError(cause instanceof Error ? cause.message : "Couldn’t join this team.");
     } finally {
       setJoining(false);
     }
@@ -141,7 +141,7 @@ export default function JoinTeamSheet() {
                 setFailure(null);
                 load();
               }}
-              title="Couldn't Load Invite"
+              title="Couldn’t Load Invite"
             />
           ) : (
             <LoadingState />
@@ -154,7 +154,7 @@ export default function JoinTeamSheet() {
                 {`Join ${invite.teamName} on Hark`}
               </Text>
               <Text align="center" color="secondaryLabel" variant="body">
-                {`${invite.invitedBy} invited you. You'll see ${invite.teamName}'s apps in Hark and can be added to its on-call rotations.`}
+                {`${invite.invitedBy} invited you. You’ll see ${invite.teamName}’s apps in Hark and can be added to its on-call rotations.`}
               </Text>
             </View>
             <Section
@@ -172,7 +172,7 @@ export default function JoinTeamSheet() {
                   subtitle="Nothing changed, and the invite still works for someone else."
                   symbol="checkmark.circle.fill"
                   symbolColor="accent"
-                  title={`You're already on ${alreadyMember.name}`}
+                  title={`You’re already on ${alreadyMember.name}`}
                 />
               </Section>
             ) : null}
@@ -195,7 +195,7 @@ export default function JoinTeamSheet() {
           <Stack.Toolbar.Spacer />
           {alreadyMember ? (
             <Stack.Toolbar.Button
-              accessibilityHint={`Shows ${alreadyMember.name}'s apps`}
+              accessibilityHint={`Shows ${alreadyMember.name}’s apps`}
               onPress={() => showTeamApps(alreadyMember.id)}
               tintColor={palette.accent}
               variant="prominent"

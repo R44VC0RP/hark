@@ -211,7 +211,7 @@ export default function TeamScreen() {
         if (isSeatLimitError(cause)) {
           haptic.error();
           setSeatLimitHit(true);
-        } else failed("Couldn't Create Invite", cause);
+        } else failed("Couldn’t Create Invite", cause);
       } finally {
         setInviting(false);
       }
@@ -230,7 +230,7 @@ export default function TeamScreen() {
           setInvites((current) => current.filter((entry) => entry.id !== item.id));
           if (simulatorPreview) return;
           void api.revokeTeamInvite(team.id, item.id).catch((cause: unknown) => {
-            failed("Couldn't Revoke Invite", cause);
+            failed("Couldn’t Revoke Invite", cause);
             void load();
           });
         },
@@ -245,7 +245,7 @@ export default function TeamScreen() {
     );
     if (simulatorPreview) return;
     void api.updateTeamMember(team.id, member.userId, role).catch((cause: unknown) => {
-      failed("Couldn't Change Role", cause);
+      failed("Couldn’t Change Role", cause);
       void load();
     });
   };
@@ -254,7 +254,7 @@ export default function TeamScreen() {
     if (!team) return;
     Alert.alert(
       `Remove ${member.name}?`,
-      `They lose access to ${team.name}'s apps and on-call groups.`,
+      `They lose access to ${team.name}’s apps and on-call groups.`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -271,7 +271,7 @@ export default function TeamScreen() {
                 void refreshDirectory().catch(() => {});
               })
               .catch((cause: unknown) => {
-                failed("Couldn't Remove Member", cause);
+                failed("Couldn’t Remove Member", cause);
                 void load();
               });
           },
@@ -297,7 +297,7 @@ export default function TeamScreen() {
       });
     }
     actions.push({
-      label: "Remove from Team…",
+      label: "Remove from Team",
       icon: "person.badge.minus",
       destructive: true,
       run: () => removeMember(member),
@@ -327,7 +327,7 @@ export default function TeamScreen() {
                 void refreshDirectory().catch(() => {});
               })
               .catch((cause: unknown) => {
-                failed("Couldn't Rename Team", cause);
+                failed("Couldn’t Rename Team", cause);
                 setTeam(team);
               });
           },
@@ -349,7 +349,7 @@ export default function TeamScreen() {
     if (!team) return;
     Alert.alert(
       `Leave ${team.name}?`,
-      "Its apps disappear from your Apps tab and you're taken off its on-call rotations.",
+      "Its apps disappear from your Apps tab and you’re taken off its on-call rotations.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -360,7 +360,7 @@ export default function TeamScreen() {
             void api
               .leaveTeam(team.id)
               .then(leaveScreen)
-              .catch((cause: unknown) => failed("Couldn't Leave Team", cause));
+              .catch((cause: unknown) => failed("Couldn’t Leave Team", cause));
           },
         },
       ],
@@ -371,7 +371,7 @@ export default function TeamScreen() {
     if (!team) return;
     Alert.alert(
       `Delete ${team.name}?`,
-      "Its apps, on-call groups and pages are deleted for everyone. This can't be undone.",
+      "Its apps, on-call groups and pages are deleted for everyone. This can’t be undone.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -382,7 +382,7 @@ export default function TeamScreen() {
             void api
               .deleteTeam(team.id)
               .then(leaveScreen)
-              .catch((cause: unknown) => failed("Couldn't Delete Team", cause));
+              .catch((cause: unknown) => failed("Couldn’t Delete Team", cause));
           },
         },
       ],
@@ -405,7 +405,7 @@ export default function TeamScreen() {
           {!team ? (
             failure === "missing" ? (
               <EmptyState
-                message="It was deleted or you're no longer a member."
+                message="It was deleted or you’re no longer a member."
                 symbol="person.2"
                 title="Team Unavailable"
               />
@@ -416,7 +416,7 @@ export default function TeamScreen() {
                   setFailure(null);
                   void load();
                 }}
-                title="Couldn't Load Team"
+                title="Couldn’t Load Team"
               />
             ) : (
               <LoadingState />
@@ -439,7 +439,7 @@ export default function TeamScreen() {
 
               {admin ? (
                 <Section
-                  footer={"You'll get a link to send. It works once and expires in 7\u00A0days."}
+                  footer={"You’ll get a link to send. It works once and expires in 7\u00A0days."}
                 >
                   <RowMenu
                     disabled={inviting}

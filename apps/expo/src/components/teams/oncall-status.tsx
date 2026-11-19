@@ -31,7 +31,7 @@ export function oncallStatus(me: OncallMeDto | null | undefined, now: number): O
   if (shift) {
     return {
       onCall: true,
-      title: "You're On Call",
+      title: "You’re On Call",
       facts: [shift.groupName, shift.teamName],
       detail: `Until ${formatUpcoming(shift.endsAt, now)}`,
     };
@@ -41,7 +41,7 @@ export function oncallStatus(me: OncallMeDto | null | undefined, now: number): O
     .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt))[0];
   return {
     onCall: false,
-    title: "You're Not On Call",
+    title: "You’re Not On Call",
     facts: [],
     detail: next
       ? `Next: ${next.groupName}, ${formatUpcoming(next.startsAt, now)}`

@@ -67,7 +67,7 @@ export function KeyboardShortcuts() {
         { id: "reload", input: "r", modifiers: ["command"], title: "Reload" },
         { id: "back", input: "[", modifiers: ["command"], title: "Back" },
         { id: "forward", input: "]", modifiers: ["command"], title: "Forward" },
-        { id: "close", input: "w", modifiers: ["command"], title: "Close App" },
+        { id: "close", input: "w", modifiers: ["command"], title: "Back to Hark" },
       );
     }
     setKeyCommands(commands);

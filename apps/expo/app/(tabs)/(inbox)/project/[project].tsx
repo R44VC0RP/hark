@@ -165,7 +165,7 @@ export default function ProjectScreen() {
     } catch (error) {
       haptic.error();
       Alert.alert(
-        "Couldn't Mark All as Read",
+        "Couldn’t Mark All as Read",
         error instanceof Error ? error.message : "Check your connection, then try again.",
       );
     } finally {
@@ -196,7 +196,7 @@ export default function ProjectScreen() {
     } catch (error) {
       haptic.error();
       Alert.alert(
-        "Couldn't Update Notification",
+        "Couldn’t Update Notification",
         error instanceof Error ? error.message : "Check your connection, then try again.",
       );
     }
@@ -290,7 +290,7 @@ export default function ProjectScreen() {
             <ErrorState
               network={loadFailure === "network"}
               onRetry={retry}
-              title="Couldn't Load Notifications"
+              title="Couldn’t Load Notifications"
             />
           ) : unreadOnly ? (
             <EmptyState

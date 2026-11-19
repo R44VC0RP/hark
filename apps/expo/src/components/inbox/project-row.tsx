@@ -39,7 +39,7 @@ export const ProjectRow = memo(function ProjectRow({
       }}
     >
       <Cell
-        accessibilityHint="Shows the project's notifications"
+        accessibilityHint="Shows the project’s notifications"
         accessibilityLabel={spoken(
           unread ? `${item.name}, ${item.unreadCount} unread` : item.name,
           preview,

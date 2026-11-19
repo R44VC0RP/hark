@@ -47,7 +47,7 @@ export function LaunchErrorView({
   onRetry?: () => void;
   onClose: () => void;
 }) {
-  const title = `Couldn't Open ${app?.name ?? "This App"}`;
+  const title = `Couldn’t Open ${app?.name ?? "This App"}`;
   return (
     <View style={styles.screen}>
       <View style={styles.column}>

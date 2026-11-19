@@ -90,7 +90,7 @@ export default function TeamsScreen() {
       } catch (cause) {
         haptic.error();
         Alert.alert(
-          "Couldn't Create Team",
+          "Couldn’t Create Team",
           cause instanceof Error ? cause.message : "Check your connection, then try again.",
         );
       } finally {
@@ -136,16 +136,16 @@ export default function TeamsScreen() {
           loadFailed ? (
             <ErrorState
               onRetry={() => void refreshDirectory().catch(() => {})}
-              title="Couldn't Load Teams"
+              title="Couldn’t Load Teams"
             />
           ) : (
             <LoadingState />
           )
         ) : teams === null ? (
           <EmptyState
-            message="This Hark server doesn't support teams yet."
+            message="This Hark server doesn’t support teams yet."
             symbol="person.2"
-            title="Teams Aren't Available"
+            title="Teams Aren’t Available"
           />
         ) : teams.length === 0 ? (
           <EmptyState

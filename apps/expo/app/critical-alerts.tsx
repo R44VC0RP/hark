@@ -23,7 +23,7 @@ function stateLine(state: CriticalAlertState): string | null {
     case "denied":
       return "Critical Alerts are off. Turn them on in Settings › Notifications › Hark.";
     case "unavailable":
-      return "This version of Hark can't send Critical Alerts yet.";
+      return "This version of Hark can’t send Critical Alerts yet.";
     default:
       return null;
   }

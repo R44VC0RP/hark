@@ -145,7 +145,7 @@ async function deleteAccount(): Promise<void> {
   } catch (error) {
     haptic.error();
     Alert.alert(
-      "Couldn't Delete Account",
+      "Couldn’t Delete Account",
       error instanceof Error ? error.message : "Check your connection, then try again.",
     );
   }
@@ -174,7 +174,7 @@ export function confirmSignOut(onSigningOut?: () => void): void {
 export function confirmDeleteAccount(): void {
   Alert.alert(
     "Delete Account?",
-    "This permanently deletes your services, activity history and registered devices. This can't be undone.",
+    "This permanently deletes your services, activity history and registered devices. This can’t be undone.",
     [
       { text: "Cancel", style: "cancel" },
       { text: "Delete Account", style: "destructive", onPress: () => void deleteAccount() },

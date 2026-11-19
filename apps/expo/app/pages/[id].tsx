@@ -228,7 +228,7 @@ export default function PageSheet() {
       apply(next);
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) await alreadyHandled();
-      else failed("Couldn't Acknowledge", cause);
+      else failed("Couldn’t Acknowledge", cause);
     } finally {
       setBusy(null);
     }
@@ -255,7 +255,7 @@ export default function PageSheet() {
                   apply(next);
                 } catch (cause) {
                   if (cause instanceof ApiError && cause.status === 409) await alreadyHandled();
-                  else failed("Couldn't Escalate", cause);
+                  else failed("Couldn’t Escalate", cause);
                 } finally {
                   setBusy(null);
                 }
@@ -303,7 +303,7 @@ export default function PageSheet() {
                 apply(next);
               } catch (cause) {
                 if (cause instanceof ApiError && cause.status === 409) await alreadyHandled();
-                else failed("Couldn't Resolve", cause);
+                else failed("Couldn’t Resolve", cause);
               } finally {
                 setBusy(null);
               }
@@ -335,7 +335,7 @@ export default function PageSheet() {
         {!page ? (
           failure === "missing" ? (
             <EmptyState
-              message="It was deleted or you're no longer on its team."
+              message="It was deleted or you’re no longer on its team."
               symbol="bell.slash"
               title="Page Unavailable"
             />
@@ -346,7 +346,7 @@ export default function PageSheet() {
                 setFailure(null);
                 void load();
               }}
-              title="Couldn't Load Page"
+              title="Couldn’t Load Page"
             />
           ) : (
             <LoadingState />
@@ -512,7 +512,7 @@ export default function PageSheet() {
                 Resolve…
               </Stack.Toolbar.MenuAction>
               <Stack.Toolbar.MenuAction disabled={busy !== null} onPress={() => escalate(page)}>
-                Escalate…
+                Escalate
               </Stack.Toolbar.MenuAction>
             </Stack.Toolbar.Menu>
           ) : (
@@ -537,7 +537,7 @@ export default function PageSheet() {
           <Stack.Toolbar.Spacer />
           <Stack.Toolbar.Button
             accessibilityHint={
-              triggered ? "Tells the team you're on it and stops escalation" : undefined
+              triggered ? "Tells the team you’re on it and stops escalation" : undefined
             }
             disabled={!triggered || busy !== null}
             onPress={() => void acknowledge()}

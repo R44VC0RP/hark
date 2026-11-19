@@ -107,7 +107,7 @@ export default function ReplySheet() {
     } catch (error) {
       haptic.error();
       Alert.alert(
-        "Couldn't Send Reply",
+        "Couldn’t Send Reply",
         error instanceof Error ? error.message : "Check your connection, then try again.",
       );
       busy.current = false;

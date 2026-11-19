@@ -179,7 +179,7 @@ export default function NotificationDetailScreen() {
     } catch (error) {
       haptic.error();
       Alert.alert(
-        "Couldn't Update Notification",
+        "Couldn’t Update Notification",
         error instanceof Error ? error.message : "Check your connection, then try again.",
       );
     } finally {
@@ -226,7 +226,7 @@ export default function NotificationDetailScreen() {
           <ErrorState
             network={failure === "network"}
             onRetry={() => void load()}
-            title="Couldn't Load Notification"
+            title="Couldn’t Load Notification"
           />
         )}
       </List>

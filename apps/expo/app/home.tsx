@@ -179,7 +179,7 @@ export default function SetUpScreen() {
             Sign Out
           </Stack.Toolbar.MenuAction>
           <Stack.Toolbar.MenuAction destructive icon="trash" onPress={confirmDeleteAccount}>
-            Delete Account…
+            Delete Account
           </Stack.Toolbar.MenuAction>
         </Stack.Toolbar.Menu>
       </Stack.Toolbar>
@@ -226,7 +226,7 @@ export default function SetUpScreen() {
             subtitle={
               permission === "denied"
                 ? "Notifications are off. Turn them on for Hark in Settings."
-                : "Hark shows each webhook as a communication notification with your service's name and avatar."
+                : "Hark shows each webhook as a communication notification with your service’s name and avatar."
             }
             symbol="bell.badge"
             title="Allow Notifications"

@@ -226,7 +226,7 @@ export default function InboxScreen() {
       } catch (error) {
         haptic.error();
         Alert.alert(
-          "Couldn't Send Response",
+          "Couldn’t Send Response",
           error instanceof Error ? error.message : "Check your connection, then try again.",
         );
       } finally {
@@ -276,7 +276,7 @@ export default function InboxScreen() {
                 setLoadFailure(null);
                 load();
               }}
-              title="Couldn't Load Inbox"
+              title="Couldn’t Load Inbox"
             />
           ) : (
             <LoadingState />

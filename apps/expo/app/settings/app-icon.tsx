@@ -32,7 +32,7 @@ export default function AppIconScreen() {
     } catch (error) {
       haptic.error();
       Alert.alert(
-        "Couldn't Change App Icon",
+        "Couldn’t Change App Icon",
         error instanceof Error ? error.message : "Try again.",
       );
     } finally {
@@ -45,7 +45,7 @@ export default function AppIconScreen() {
       <Stack.Screen options={{ title: "App Icon" }} />
       <List>
         <Section
-          footer={supportsAlternateIcons ? undefined : "This device can't change app icons."}
+          footer={supportsAlternateIcons ? undefined : "This device can’t change app icons."}
         >
           {appIconOptions.map((option) => {
             const selected = option.alternateName === current;

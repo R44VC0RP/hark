@@ -112,7 +112,7 @@ export default function AppsScreen() {
     content = loadFailed ? (
       <ErrorState
         onRetry={() => void refreshDirectory().catch(() => {})}
-        title="Couldn't Load Apps"
+        title="Couldn’t Load Apps"
       />
     ) : (
       <LoadingState />

@@ -25,7 +25,7 @@ export function RolePill({ label }: { label: string }) {
   );
 }
 
-/** One item of a member's menu ("Make Admin", "Remove from Team…"). */
+/** One item of a member's menu ("Make Admin", "Remove from Team"). */
 export interface MemberAction {
   label: string;
   icon: SFSymbol;

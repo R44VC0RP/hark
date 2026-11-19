@@ -120,7 +120,7 @@ export default function AppInfoSheet() {
     } catch (cause) {
       setApp(previous);
       haptic.error();
-      Alert.alert("Couldn't Save", failureMessage(cause));
+      Alert.alert("Couldn’t Save", failureMessage(cause));
     } finally {
       setSaving(false);
     }
@@ -149,7 +149,7 @@ export default function AppInfoSheet() {
               })
               .catch((cause: unknown) => {
                 haptic.error();
-                Alert.alert("Couldn't Stop Signing In", failureMessage(cause));
+                Alert.alert("Couldn’t Stop Signing In", failureMessage(cause));
               });
           },
         },
@@ -177,7 +177,7 @@ export default function AppInfoSheet() {
         })
         .catch((cause: unknown) => {
           haptic.error();
-          Alert.alert(team ? "Couldn't Share App" : "Couldn't Move App", failureMessage(cause));
+          Alert.alert(team ? "Couldn’t Share App" : "Couldn’t Move App", failureMessage(cause));
         })
         .finally(() => setMoving(false));
     };
@@ -246,7 +246,7 @@ export default function AppInfoSheet() {
               })
               .catch((cause: unknown) => {
                 haptic.error();
-                Alert.alert("Couldn't Remove App", failureMessage(cause));
+                Alert.alert("Couldn’t Remove App", failureMessage(cause));
               });
           },
         },
@@ -279,7 +279,7 @@ export default function AppInfoSheet() {
                 setFailure(null);
                 load();
               }}
-              title="Couldn't Load App"
+              title="Couldn’t Load App"
             />
           ) : (
             <LoadingState />
