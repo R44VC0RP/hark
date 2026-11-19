@@ -6,32 +6,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { FlatList, RefreshControl, StyleSheet } from "react-native";
 import { DELIVERY_AVATAR, DeliveryRow } from "../../src/components/delivery-row";
 import { api } from "../../src/lib/api";
-import { PREVIEW_AVATAR_URL } from "../../src/lib/inbox-preview";
+import { previewEvents } from "../../src/lib/inbox-preview";
 import { EmptyState, ErrorState, isNetworkError, LoadingState } from "../../src/ui/empty-state";
 import { PlainSeparator, useScreenMargin } from "../../src/ui/list";
 import { colors, metrics } from "../../src/ui/tokens";
 
 const simulatorPreview = __DEV__ && !Device.isDevice;
-
-/** Simulator preview (`__DEV__` without a device): a few deliveries in every status. */
-const previewDeliveries: EventDto[] = [
-  ["delivered", "Deploy finished", "web-dashboard is live on production.", 2, null],
-  ["partial", "Nightly backup", "3 of 4 volumes copied.", 1, null],
-  ["failed", "Disk almost full", "db-replica-2 is at 91%.", 0, "No push token"],
-  ["withdrawn", "Build waiting", "", 0, null],
-].map(([status, title, body, deliveredCount, error], index) => ({
-  id: `evt_preview_${index}`,
-  serviceId: "svc_preview",
-  serviceTitle: index % 2 === 0 ? "GitHub Actions" : "Backups",
-  title: String(title),
-  body: String(body),
-  imageUrl: index === 0 ? PREVIEW_AVATAR_URL : null,
-  url: null,
-  status: String(status),
-  deliveredCount: Number(deliveredCount),
-  error: error === null ? null : String(error),
-  createdAt: new Date(Date.now() - index * 47 * 60_000).toISOString(),
-}));
 
 type Status = "loading" | "ready" | "error";
 
@@ -49,7 +29,7 @@ export default function DeliveriesScreen() {
   const eventsJson = useRef("");
 
   const load = useCallback(async () => {
-    const next = simulatorPreview ? previewDeliveries : (await api.listEvents()).events;
+    const next = simulatorPreview ? previewEvents : (await api.listEvents()).events;
     setStatus("ready");
     const json = JSON.stringify(next);
     if (json === eventsJson.current) return;

@@ -1,5 +1,6 @@
 import type {
   AppDto,
+  EventDto,
   InboxActivityDto,
   InboxInteractionDto,
   InboxLiveActivityDto,
@@ -551,3 +552,23 @@ export function previewNotificationDetail(id: string): InboxNotificationDetailDt
     status: "accepted",
   };
 }
+
+/** Recent Deliveries (5.17): a few webhooks in every delivery status. */
+export const previewEvents: EventDto[] = [
+  ["delivered", "Deploy finished", "web-dashboard is live on production.", 2, null],
+  ["partial", "Nightly backup", "3 of 4 volumes copied.", 1, null],
+  ["failed", "Disk almost full", "db-replica-2 is at 91%.", 0, "No push token"],
+  ["withdrawn", "Build waiting", "", 0, null],
+].map(([status, title, body, deliveredCount, error], index) => ({
+  id: `evt_preview_${index}`,
+  serviceId: "svc_preview",
+  serviceTitle: index % 2 === 0 ? "GitHub Actions" : "Backups",
+  title: String(title),
+  body: String(body),
+  imageUrl: index === 0 ? PREVIEW_AVATAR_URL : null,
+  url: null,
+  status: String(status),
+  deliveredCount: Number(deliveredCount),
+  error: error === null ? null : String(error),
+  createdAt: new Date(Date.now() - index * 47 * 60_000).toISOString(),
+}));
