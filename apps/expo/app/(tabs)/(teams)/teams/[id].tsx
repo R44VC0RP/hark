@@ -147,16 +147,19 @@ export default function TeamScreen() {
     }
   }, [id]);
 
-  // Back from On Call or the share sheet: show what changed meanwhile.
+  // Back from On Call or the share sheet: show what changed meanwhile. The
+  // app directory reloads with it, so the open-page counts here, the Teams
+  // badge and the pages accessory agree (I-05).
   useFocusEffect(
     useCallback(() => {
       void load();
+      void refreshDirectory().catch(() => {});
     }, [load]),
   );
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await load();
+    await Promise.all([load(), refreshDirectory().catch(() => {})]);
     setRefreshing(false);
   };
 

@@ -125,6 +125,13 @@ export default function PageSheet() {
       const result = await api.getPage(id);
       setPage(result.page);
       setFailure(null);
+      // The page changed since the app directory last loaded (someone else
+      // acknowledged it, or it is new): reload it, so the Teams badge, the
+      // pages accessory and Open Pages agree with this sheet (I-05).
+      const known = directoryRef.current?.oncall?.pages.find((item) => item.id === id);
+      if (known ? known.status !== result.page.status : result.page.status !== "resolved") {
+        void refreshDirectory().catch(() => {});
+      }
       return result.page;
     } catch (cause) {
       setFailure(

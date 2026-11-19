@@ -18,7 +18,7 @@ import {
 import { PageRow, sortPages } from "../../../src/components/teams/page-row";
 import { MenuShield, RowMenu } from "../../../src/components/teams/row-menu";
 import { api, type OncallMeDto } from "../../../src/lib/api";
-import { useDirectory } from "../../../src/lib/app-directory";
+import { refreshDirectory, useDirectory } from "../../../src/lib/app-directory";
 import { useSession } from "../../../src/lib/auth";
 import { criticalAlertsEnabled, reportCriticalAlertState } from "../../../src/lib/critical-alerts";
 import { haptic } from "../../../src/lib/haptics";
@@ -127,15 +127,25 @@ export default function OncallScreen() {
     }
   }, [teamId]);
 
+  /**
+   * Reloads this screen together with the app directory, so the Teams
+   * badge, the pages accessory and these lists always agree (I-05: a pull
+   * showed two pages needing a responder under "1 Page Needs You").
+   */
+  const reload = useCallback(
+    () => Promise.all([load(), refreshDirectory().catch(() => {})]),
+    [load],
+  );
+
   // Back from a page sheet or Critical Alerts: show what changed there.
   useFocusEffect(
     useCallback(() => {
-      void load();
-    }, [load]),
+      void reload();
+    }, [reload]),
   );
 
   // Someone else claimed a page.
-  useEffect(() => onPageClaimed(() => void load()), [load]);
+  useEffect(() => onPageClaimed(() => void reload()), [reload]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), TICK_MS);
@@ -144,7 +154,7 @@ export default function OncallScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await load();
+    await reload();
     setRefreshing(false);
   };
 
@@ -206,7 +216,7 @@ export default function OncallScreen() {
                 network={failure === "network"}
                 onRetry={() => {
                   setFailure(null);
-                  void load();
+                  void reload();
                 }}
                 title="Couldn't Load On Call"
               />
