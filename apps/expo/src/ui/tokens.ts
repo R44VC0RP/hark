@@ -213,6 +213,10 @@ export const sheetOptions = {
   headerTransparent: true,
   headerBackButtonDisplayMode: "minimal",
   headerTintColor: palette.label,
+  // Same soft edge as stacks. With "automatic" the Reply sheet drew the hard
+  // style (opaque band and divider) under its header even at rest, because
+  // its list starts under the header (checked in the simulator).
+  scrollEdgeEffects: { top: "soft", bottom: "automatic", left: "automatic", right: "automatic" },
   sheetAllowedDetents: [1],
   contentStyle: { backgroundColor: palette.groupedBackground },
 } satisfies NativeStackNavigationOptions;

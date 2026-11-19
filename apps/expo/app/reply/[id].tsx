@@ -82,11 +82,12 @@ export default function ReplySheet() {
       {/*
         At the half-height detent iOS lays the first frame out before the
         sheet's header exists, so the request would start under the header
-        (checked in the simulator). The header height is applied by hand.
+        (checked in the simulator). The header height is applied by hand,
+        plus 16 pt so the first line also clears the soft edge's fade.
       */}
       <List
         automaticallyAdjustKeyboardInsets
-        contentContainerStyle={{ paddingTop: headerHeight + space.xs }}
+        contentContainerStyle={{ paddingTop: headerHeight + space.m }}
         contentInsetAdjustmentBehavior="never"
         scrollIndicatorInsets={{ top: headerHeight }}
         style={styles.transparent}
