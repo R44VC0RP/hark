@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import {
+  AccessibilityInfo,
   Dimensions,
   Text as NativeText,
   type TextProps as NativeTextProps,
@@ -55,6 +56,34 @@ export function useFontScale(): number {
 }
 
 /**
+ * Bold Text (Settings › Accessibility › Display & Text Size). Switching it
+ * while Hark runs only reached text that re-rendered (ticking times turned
+ * bold, titles beside them did not, V2-06), so every `Text` re-renders when
+ * it changes, with a font keyed to it (`boldKeyedSize`).
+ */
+let boldText = false;
+const boldTextListeners = new Set<() => void>();
+function setBoldText(enabled: boolean) {
+  if (enabled === boldText) return;
+  boldText = enabled;
+  for (const listener of boldTextListeners) listener();
+}
+void AccessibilityInfo.isBoldTextEnabled().then(setBoldText);
+AccessibilityInfo.addEventListener("boldTextChanged", setBoldText);
+
+function useBoldText(): boolean {
+  return useSyncExternalStore(
+    (listener) => {
+      boldTextListeners.add(listener);
+      return () => {
+        boldTextListeners.delete(listener);
+      };
+    },
+    () => boldText,
+  );
+}
+
+/**
  * Re-measures every text after a live text-size change. React Native measures
  * Dynamic Type text as soon as the size changes, while UIFontMetrics still
  * reports the old size, and caches that height under the new size, so text
@@ -70,6 +99,17 @@ function sizeKeyedSpacing(variant: TextVariant, scale: number): TextStyle | null
   return { letterSpacing: (ramp.letterSpacing ?? 0) + (scale - 1) * 0.1 };
 }
 
+/**
+ * With Bold Text on, text is 0.1 pt larger, which doesn't show. React
+ * Native caches fonts by size and weight only, so text re-rendered after
+ * the switch kept the font (and the widths) made before it: it drew bold
+ * in widths measured for the regular weight and truncated ("2 Pa…").
+ * Another size is another cache entry, made under the current setting.
+ */
+function boldKeyedSize(variant: TextVariant, bold: boolean): TextStyle | null {
+  return bold ? { fontSize: typography[variant].fontSize + 0.1 } : null;
+}
+
 export function Text({
   variant = "body",
   color = "label",
@@ -82,6 +122,7 @@ export function Text({
 }: TextProps) {
   const ramp: TypeRamp = typography[variant];
   const scale = useFontScale();
+  const bold = useBoldText();
   return (
     <NativeText
       dynamicTypeRamp={ramp.dynamicTypeRamp}
@@ -93,6 +134,7 @@ export function Text({
         tabular ? styles.tabular : null,
         align ? alignStyles[align] : null,
         sizeKeyedSpacing(variant, scale),
+        boldKeyedSize(variant, bold),
         style,
       ]}
       {...props}
