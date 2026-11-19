@@ -3,7 +3,7 @@ import { router, usePathname, useRootNavigationState } from "expo-router";
 import { useEffect, useRef } from "react";
 import { type Directory, useDirectory } from "../lib/app-directory";
 import { type KeyCommand, onKeyCommand, setKeyCommands } from "../lib/key-commands";
-import { closeTopSheet, openWebApp, SHEET_ROUTES } from "../lib/navigation";
+import { escapeTopSheet, openWebApp, SHEET_ROUTES } from "../lib/navigation";
 import { groupAppsByTeam } from "../lib/teams";
 
 /** Web apps in launcher order: your own, then each team's. */
@@ -56,8 +56,9 @@ export function KeyboardShortcuts() {
       { id: "settings", input: ",", modifiers: ["command"], title: "Settings" },
     ];
     if (sheetOnTop) {
-      // Like a sheet on the Mac. A popover or alert inside the sheet is
-      // closer in the responder chain and takes Esc first.
+      // Like a sheet on the Mac. With the sheet's own prompt up (Reply's
+      // draft), Esc closes the prompt as Keep Editing instead: the focused
+      // reply field keeps Esc from ever reaching the popover.
       commands.push(
         { id: "closeSheet", input: "escape", modifiers: [], title: "Close" },
         { id: "closeSheetW", input: "w", modifiers: ["command"], title: "Close" },
@@ -84,8 +85,8 @@ export function KeyboardShortcuts() {
     const subscriptions = [
       onKeyCommand("apps", () => showTab("/apps", tabsOnTopRef.current)),
       onKeyCommand("inbox", () => showTab("/inbox", tabsOnTopRef.current)),
-      onKeyCommand("closeSheet", () => void closeTopSheet()),
-      onKeyCommand("closeSheetW", () => void closeTopSheet()),
+      onKeyCommand("closeSheet", () => void escapeTopSheet()),
+      onKeyCommand("closeSheetW", () => void escapeTopSheet()),
       // Settings opens over whatever is showing, once.
       onKeyCommand("settings", () => {
         if (!pathRef.current.startsWith("/settings")) router.push("/settings");

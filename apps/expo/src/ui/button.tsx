@@ -9,7 +9,7 @@ import {
   type View,
   type ViewStyle,
 } from "react-native";
-import { Text } from "./text";
+import { Text, useFontScale } from "./text";
 import { type ColorName, colors, radius, space } from "./tokens";
 
 /**
@@ -64,6 +64,10 @@ export function Button({
   ...props
 }: ButtonProps) {
   const inactive = Boolean(disabled || busy);
+  // The symbol grows with the label at larger text sizes, like the request
+  // clock and row symbols (3.10); a fixed 15 pt was a speck beside an AX5
+  // label (V2-09).
+  const symbolSize = Math.round((size === "large" ? 17 : 15) * useFontScale());
   const label = busy && busyTitle ? busyTitle : title;
   const labelColor = LABEL_COLOR[variant];
   return (
@@ -89,7 +93,7 @@ export function Button({
       ) : symbol ? (
         <SymbolView
           name={symbol}
-          size={size === "large" ? 17 : 15}
+          size={symbolSize}
           tintColor={colors[labelColor]}
           weight="semibold"
         />

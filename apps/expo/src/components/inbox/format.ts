@@ -1,4 +1,6 @@
 import type { InboxActivityKind, InboxProjectSummaryDto } from "@hark/contracts";
+import type { SFSymbol } from "expo-symbols";
+import type { RequestOutcome } from "../../lib/inbox-cache";
 
 /**
  * A request's answer as History words it ("Approved", "Denied", "Yes",
@@ -15,6 +17,37 @@ export const ANSWER_LABELS = {
 /** Denied and No read as a refusal, not a success: no green check (V-10). */
 export function isRefusal(result: string): boolean {
   return result === ANSWER_LABELS.deny || result === ANSWER_LABELS.no;
+}
+
+/**
+ * What a request that stopped waiting says where its buttons were: the
+ * answer, worded as History words it ("Approved", "Yes"), wherever it was
+ * given, or why it closed ("Expired", "Withdrawn"). An answer from another
+ * device also says so where the countdown was (`note`). Answers keep the
+ * check (green) or cross (grey) of V-10; closings are grey.
+ */
+export function outcomeLine(outcome: RequestOutcome): {
+  text: string;
+  symbol: SFSymbol;
+  done: boolean;
+  note: string | null;
+} {
+  const answer = (result: string, note: string | null) =>
+    isRefusal(result)
+      ? { text: result, symbol: "xmark.circle.fill" as const, done: false, note }
+      : { text: result, symbol: "checkmark.circle.fill" as const, done: true, note };
+  switch (outcome.kind) {
+    case "answered":
+      return answer(ANSWER_LABELS[outcome.answer], null);
+    case "answeredElsewhere":
+      return answer(outcome.result, "Answered on another device");
+    case "expired":
+      return { text: "Expired", symbol: "clock.badge.xmark.fill", done: false, note: null };
+    case "withdrawn":
+      return { text: "Withdrawn", symbol: "minus.circle.fill", done: false, note: null };
+    case "gone":
+      return { text: "No longer waiting", symbol: "minus.circle.fill", done: false, note: null };
+  }
 }
 
 export function activityKindLabel(kind: InboxActivityKind): string {

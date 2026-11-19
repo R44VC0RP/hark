@@ -17,8 +17,10 @@ export const LiveActivityRow = memo(function LiveActivityRow({
   item: InboxLiveActivityDto;
 }) {
   const stacked = useStackedRows();
-  // Wide windows: text and bar keep the measure and the percent moves to the
-  // row's trailing edge, where requests and projects keep theirs (3.6).
+  // Wide windows: the text keeps the measure, and the bar runs on under it to
+  // the percent on the row's trailing edge, where requests and projects keep
+  // theirs (3.6). A bar capped at the measure left "62%" 450 pt from its end
+  // (V2-04).
   const measure = useTextMeasure();
   const wide = measure !== null;
   const progress = item.props.progress;
@@ -41,28 +43,32 @@ export const LiveActivityRow = memo(function LiveActivityRow({
       separatorInset={metrics.rowPaddingHorizontal + AVATAR + metrics.rowAccessoryGap}
     >
       <SourceAvatar name={item.sourceName} size={AVATAR} url={item.sourceImageUrl} />
-      <View style={[styles.copy, measure]}>
-        <View style={styles.titleLine}>
-          <Text
-            numberOfLines={stacked ? undefined : 2}
-            style={styles.title}
-            variant="body"
-            weight="600"
-          >
-            {item.props.title}
+      <View style={styles.copy}>
+        <View style={[styles.text, measure]}>
+          <View style={styles.titleLine}>
+            <Text
+              numberOfLines={stacked ? undefined : 2}
+              style={styles.title}
+              variant="body"
+              weight="600"
+            >
+              {item.props.title}
+            </Text>
+            {percent !== null && !wide ? percentText : null}
+          </View>
+          <Text color="secondaryLabel" numberOfLines={stacked ? 2 : 1} variant="subheadline">
+            {detail}
           </Text>
-          {percent !== null && !wide ? percentText : null}
         </View>
-        <Text color="secondaryLabel" numberOfLines={stacked ? 2 : 1} variant="subheadline">
-          {detail}
-        </Text>
         {progress !== undefined ? (
           <View style={styles.progress}>
-            <ProgressBar value={progress} />
+            <View style={styles.bar}>
+              <ProgressBar value={progress} />
+            </View>
+            {percent !== null && wide ? percentText : null}
           </View>
         ) : null}
       </View>
-      {percent !== null && wide ? <View style={styles.trailingWide}>{percentText}</View> : null}
     </Cell>
   );
 });
@@ -71,11 +77,9 @@ const styles = StyleSheet.create({
   copy: {
     minWidth: 0,
     flex: 1,
-    gap: 2,
   },
-  trailingWide: {
-    alignSelf: "flex-start",
-    paddingTop: 2,
+  text: {
+    gap: 2,
   },
   titleLine: {
     flexDirection: "row",
@@ -86,6 +90,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   progress: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.m,
     marginTop: space.xs,
+  },
+  bar: {
+    flex: 1,
   },
 });

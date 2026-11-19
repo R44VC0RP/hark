@@ -1,8 +1,13 @@
 import * as Device from "expo-device";
 import { Stack, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
-import { useHeaderHeight, usePreventRemove } from "expo-router/react-navigation";
-import { useRef, useState } from "react";
-import { ActionSheetIOS, StyleSheet, TextInput, View } from "react-native";
+import {
+  type NavigationAction,
+  useHeaderHeight,
+  usePreventRemove,
+  useRoute,
+} from "expo-router/react-navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ActionSheetIOS, findNodeHandle, StyleSheet, TextInput, View } from "react-native";
 import { alertFailure, haptic } from "../../src/lib/haptics";
 import {
   cachedInteraction,
@@ -12,6 +17,7 @@ import {
 } from "../../src/lib/inbox-cache";
 import { submitInteractionResponse } from "../../src/lib/interactions";
 import { useLayout } from "../../src/lib/layout";
+import { setLeaveGuard } from "../../src/lib/navigation";
 import { SourceAvatar } from "../../src/ui/avatar";
 import { EmptyState } from "../../src/ui/empty-state";
 import { List, useStackedRows } from "../../src/ui/list";
@@ -26,6 +32,16 @@ const simulatorPreview = __DEV__ && !Device.isDevice;
  * which slid the request down 8 to 14 pt while the sheet was opening.
  */
 const SHEET_HEADER_HEIGHT = { compact: 70, regular: 64 } as const;
+
+/**
+ * Where the Cancel button sits in the sheet (measured in the simulator), so
+ * the draft prompt raised by a swipe, a tap outside, Esc or a link points at
+ * it on iPad, as Mail's does. iPhone action sheets ignore an anchor (React
+ * Native leaves the source out there).
+ */
+const CANCEL_FRAME = { left: 16, top: 12, width: 44, height: 44 } as const;
+
+type DraftChoice = "delete" | "save" | "keep";
 
 /**
  * Reply to a request (DESIGN.md 5.5): a form sheet at half height that the
@@ -50,34 +66,89 @@ export default function ReplySheet() {
   const [sending, setSending] = useState(false);
   const response = text.trim();
   const busy = useRef(false);
-  const sent = useRef(false);
-  const asking = useRef(false);
+  // Set once the sheet may close without asking: sent, or the draft was
+  // deleted or saved.
+  const leaving = useRef(false);
+  const hasDraft = Boolean(cached && response);
+  const route = useRoute();
+  const anchor = useRef<View>(null);
+  // The draft prompt on screen, if any: everything that wants to close the
+  // sheet while it is up waits for the same answer instead of asking again.
+  const prompt = useRef<{ answer: Promise<DraftChoice>; resolve: (c: DraftChoice) => void } | null>(
+    null,
+  );
 
-  // With unsent text the sheet can't be swiped or tapped away by accident
-  // (`preventNativeDismiss`, UIKit's `isModalInPresentation`). Cancel, a
-  // swipe, a tap outside or a link that would close it asks first, as Mail
-  // does: delete the draft, keep it for later, or keep editing.
-  usePreventRemove(Boolean(cached && response), ({ data }) => {
-    if (sent.current) {
-      navigation.dispatch(data.action);
-      return;
-    }
-    if (busy.current || asking.current) return;
-    asking.current = true;
+  const askAboutDraft = useCallback((): Promise<DraftChoice> => {
+    if (prompt.current) return prompt.current.answer;
+    let resolve: (choice: DraftChoice) => void = () => {};
+    const answer = new Promise<DraftChoice>((settle) => {
+      resolve = (choice) => {
+        if (prompt.current?.answer === answer) prompt.current = null;
+        settle(choice);
+      };
+    });
+    prompt.current = { answer, resolve };
     ActionSheetIOS.showActionSheetWithOptions(
       {
         options: ["Delete Draft", "Save Draft", "Keep Editing"],
         destructiveButtonIndex: 0,
         cancelButtonIndex: 2,
+        anchor: findNodeHandle(anchor.current) ?? undefined,
       },
-      (index) => {
-        asking.current = false;
-        if (index === 2) return;
-        if (index === 0) saveReplyDraft(String(id), "");
-        navigation.dispatch(data.action);
-      },
+      (index) => resolve(index === 0 ? "delete" : index === 1 ? "save" : "keep"),
     );
+    return answer;
+  }, []);
+
+  /** Closes the sheet once, deleting or keeping the draft, without asking again. */
+  const leave = useCallback(
+    (choice: "delete" | "save", action?: NavigationAction) => {
+      if (choice === "delete") saveReplyDraft(String(id), "");
+      if (leaving.current) return;
+      leaving.current = true;
+      if (action) navigation.dispatch(action);
+      else navigation.goBack();
+    },
+    [id, navigation],
+  );
+
+  // With unsent text the sheet can't be swiped or tapped away by accident
+  // (`preventNativeDismiss`, UIKit's `isModalInPresentation`). A swipe, a
+  // tap outside, Esc or anything else that would close it asks first, as
+  // Mail does: delete the draft, keep it for later, or keep editing.
+  usePreventRemove(hasDraft, ({ data }) => {
+    if (leaving.current) {
+      navigation.dispatch(data.action);
+      return;
+    }
+    if (busy.current) return;
+    void askAboutDraft().then((choice) => {
+      if (choice !== "keep") leave(choice, data.action);
+    });
   });
+
+  // A link that would close the sheet (`src/lib/navigation.ts`) asks the
+  // same question and waits: it opens once the sheet has closed, and is
+  // dropped on Keep Editing. Esc and ⌘W close the prompt as Keep Editing.
+  useEffect(() => {
+    if (!hasDraft) return;
+    return setLeaveGuard(route.key, {
+      ask: async () => {
+        if (leaving.current) return true;
+        const choice = await askAboutDraft();
+        if (choice === "keep") return false;
+        leave(choice);
+        return true;
+      },
+      cancel: () => {
+        const open = prompt.current;
+        if (!open) return false;
+        ActionSheetIOS.dismissActionSheet();
+        open.resolve("keep");
+        return true;
+      },
+    });
+  }, [askAboutDraft, hasDraft, leave, route.key]);
 
   const edit = (value: string) => {
     setText(value);
@@ -102,7 +173,7 @@ export default function ReplySheet() {
       // LayoutAnimation aborts the app when the same commit removes the sheet
       // (checked in the simulator). The Inbox row shows "Replied" in place.
       markInteractionHandled(interaction, "reply");
-      sent.current = true;
+      leaving.current = true;
       router.back();
     } catch (error) {
       alertFailure("Couldn’t Send Reply", error);
@@ -115,11 +186,24 @@ export default function ReplySheet() {
     <>
       <Stack.Screen options={{ title: "Reply" }} />
       <Stack.Toolbar placement="left">
-        <Stack.Toolbar.Button
-          accessibilityLabel="Cancel"
-          icon="xmark"
-          onPress={() => router.back()}
-        />
+        {hasDraft ? (
+          // With a draft, Cancel asks from the button itself, like Mail;
+          // a tap outside the menu keeps editing.
+          <Stack.Toolbar.Menu accessibilityLabel="Cancel" icon="xmark">
+            <Stack.Toolbar.MenuAction destructive icon="trash" onPress={() => leave("delete")}>
+              Delete Draft
+            </Stack.Toolbar.MenuAction>
+            <Stack.Toolbar.MenuAction icon="tray.and.arrow.down" onPress={() => leave("save")}>
+              Save Draft
+            </Stack.Toolbar.MenuAction>
+          </Stack.Toolbar.Menu>
+        ) : (
+          <Stack.Toolbar.Button
+            accessibilityLabel="Cancel"
+            icon="xmark"
+            onPress={() => router.back()}
+          />
+        )}
       </Stack.Toolbar>
       {cached ? (
         <Stack.Toolbar placement="right">
@@ -193,11 +277,17 @@ export default function ReplySheet() {
           />
         )}
       </List>
+      {/* Where the draft prompt points on iPad: the Cancel button's frame. */}
+      <View collapsable={false} pointerEvents="none" ref={anchor} style={styles.cancelAnchor} />
     </>
   );
 }
 
 const styles = StyleSheet.create({
+  cancelAnchor: {
+    position: "absolute",
+    ...CANCEL_FRAME,
+  },
   context: {
     gap: space.xxs,
   },

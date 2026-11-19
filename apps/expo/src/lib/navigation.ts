@@ -78,34 +78,89 @@ function rootStack(): NavigatorState | undefined {
   return container?.routes?.[0]?.state as NavigatorState | undefined;
 }
 
-/** Closes the sheet on top of the app, if any (iPad Esc and ⌘W, links). */
-export function closeTopSheet(): boolean {
+/** The root stack's top route when it is a sheet. */
+function topSheet(): { key: string; stackKey: string } | null {
   const stack = rootStack();
-  const top = stack?.routes[stack.index ?? stack.routes.length - 1];
-  if (!stack || !navigationRef || !top?.name || !SHEET_ROUTES.has(top.name)) return false;
-  navigationRef.dispatch({ ...StackActions.pop(), target: stack.key });
+  const top = stack?.routes[stack.index ?? stack.routes.length - 1] as
+    | { key?: string; name?: string }
+    | undefined;
+  if (!stack || !top?.key || !top.name || !SHEET_ROUTES.has(top.name)) return null;
+  return { key: top.key, stackKey: stack.key };
+}
+
+/** Closes the sheet on top of the app, if any (links, and Esc and ⌘W through `escapeTopSheet`). */
+export function closeTopSheet(): boolean {
+  const sheet = topSheet();
+  if (!sheet || !navigationRef) return false;
+  navigationRef.dispatch({ ...StackActions.pop(), target: sheet.stackKey });
   return true;
 }
 
-/** The sheet route a link opens ("/join/abc" → "join/[code]"), if it opens one. */
-function sheetRouteOf(path: string): string | null {
-  const route = path.replace(/^[a-z][a-z0-9+.-]*:\/\/\/?/i, "").replace(/^\/+/, "");
-  const [first = "", second] = route.split(/[/?#]/);
-  if (first === "apps") return second ? "apps/[id]" : null;
-  if (first === "critical-alerts" || first === "settings") return first;
-  if (first === "join") return "join/[code]";
-  if (first === "pages") return "pages/[id]";
-  if (first === "reply") return "reply/[id]";
-  return null;
+/**
+ * A sheet with unsaved work (Reply with a draft) that has to ask before it
+ * closes. `ask` shows its prompt (or joins the one already up) and resolves
+ * true once the sheet has closed, false when the person keeps editing.
+ * `cancel` closes the prompt as Keep Editing; false when none is up.
+ */
+export interface LeaveGuard {
+  ask(): Promise<boolean>;
+  cancel(): boolean;
+}
+
+let leaveGuard: { routeKey: string; guard: LeaveGuard } | null = null;
+
+/** Reply only, while it has a draft. Returns the removal. */
+export function setLeaveGuard(routeKey: string, guard: LeaveGuard): () => void {
+  const entry = { routeKey, guard };
+  leaveGuard = entry;
+  return () => {
+    if (leaveGuard === entry) leaveGuard = null;
+  };
+}
+
+function guardOfTopSheet(): LeaveGuard | null {
+  const sheet = topSheet();
+  return sheet && leaveGuard?.routeKey === sheet.key ? leaveGuard.guard : null;
 }
 
 /**
- * A link that opens a sheet while another sheet is up closes that one first,
- * so sheets never stack (a Reply link over the Join sheet showed both).
- * Called by `app/+native-intent.tsx` before the link is handled.
+ * Esc and ⌘W with a sheet up: close the sheet's prompt as Keep Editing when
+ * one is up (the reply field keeps the keyboard, so the popover never sees
+ * Esc), else close the sheet (which asks first when it has to).
  */
-export function closeSheetForLink(path: string): void {
-  if (sheetRouteOf(path)) closeTopSheet();
+export function escapeTopSheet(): boolean {
+  if (guardOfTopSheet()?.cancel()) return true;
+  return closeTopSheet();
+}
+
+/**
+ * Whether a link must not open inside a sheet: it opens a sheet itself
+ * ("/join/abc"), or a web app, which opens over the tabs (a web link over
+ * the iPad Page sheet opened inside it).
+ */
+function leavesSheets(path: string): boolean {
+  const route = path.replace(/^[a-z][a-z0-9+.-]*:\/\/\/?/i, "").replace(/^\/+/, "");
+  const [first = "", second] = route.split(/[/?#]/);
+  if (first === "apps" || first === "web") return Boolean(second);
+  return ["critical-alerts", "settings", "join", "pages", "reply"].includes(first);
+}
+
+/**
+ * A link that opens a sheet or a web app while a sheet is up closes that
+ * sheet first, so sheets never stack (a Reply link over the Join sheet
+ * showed both) and nothing opens inside a sheet. A sheet with unsaved work
+ * asks first and the link waits for the answer: it opens once the sheet has
+ * closed, and is dropped if the person keeps editing (a link that went
+ * ahead covered the prompt and left Reply unable to close, I2-02). Called
+ * by `app/+native-intent.tsx`, whose result Expo Router awaits; null drops
+ * the link.
+ */
+export function leaveSheetForLink(path: string): string | Promise<string | null> {
+  if (!leavesSheets(path)) return path;
+  const guard = guardOfTopSheet();
+  if (guard) return guard.ask().then((closed) => (closed ? path : null));
+  closeTopSheet();
+  return path;
 }
 
 interface NavigationRef {
