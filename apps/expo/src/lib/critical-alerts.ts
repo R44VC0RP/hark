@@ -61,16 +61,3 @@ export async function requestCriticalAlerts(): Promise<CriticalAlertState> {
   await SecureStore.setItemAsync(ASKED_KEY, "1");
   return reportCriticalAlertState();
 }
-
-export function criticalAlertLabel(state: CriticalAlertState | null | undefined): string {
-  switch (state) {
-    case "authorized":
-      return "On";
-    case "denied":
-      return "Off";
-    case "notDetermined":
-      return "Not set up";
-    default:
-      return "Not available yet";
-  }
-}
