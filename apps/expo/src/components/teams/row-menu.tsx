@@ -15,6 +15,12 @@ import { type StyleProp, StyleSheet, View, type ViewStyle } from "react-native";
 
 /** Larger than any row: the menu's hit area fills whatever the host is given. */
 const FILL = 100_000;
+/**
+ * How much of a row the menu takes its touches on and grows from: a pop-up
+ * button's value and chevrons at the trailing end, an action row's symbol
+ * and title at the leading end.
+ */
+const ANCHOR_WIDTH = { trailing: 160, leading: 300 } as const;
 
 export interface RowMenuProps {
   /** What VoiceOver reads for the control ("Repeat Every", "Manage Priya Shah"). */
@@ -27,6 +33,12 @@ export interface RowMenuProps {
   children: ReactNode;
   /** The menu's items (`Button`, `Toggle`, `Section`, `Divider` from `@expo/ui/swift-ui`). */
   menu: ReactNode;
+  /**
+   * The end of a full row that is the control: `trailing` for a pop-up
+   * button's value (as in Settings), `leading` for an action row's title.
+   * Without it the whole control opens the menu (a small button such as ⋯).
+   */
+  anchor?: "leading" | "trailing";
   style?: StyleProp<ViewStyle>;
 }
 
@@ -38,7 +50,21 @@ export interface RowMenuProps {
  * takes the touch. The tap that closes the menu never reaches the content
  * under it (`modules/hark-menu-gate`).
  */
-export function RowMenu({ label, hint, value, disabled, children, menu, style }: RowMenuProps) {
+export function RowMenu({
+  label,
+  hint,
+  value,
+  disabled,
+  children,
+  menu,
+  anchor,
+  style,
+}: RowMenuProps) {
+  // A menu grows from its whole label, so a label covering the full row
+  // opened it over the row's middle, on top of its title (V2-11). Anchored,
+  // the label is only the value's (or the title's) end of the row, like a
+  // pop-up button in Settings: the menu grows from there and the rest of
+  // the row stays readable.
   return (
     <View style={style}>
       <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
@@ -51,11 +77,12 @@ export function RowMenu({ label, hint, value, disabled, children, menu, style }:
               modifiers={[
                 foregroundStyle("#00000000"),
                 contentShape(shapes.rectangle()),
-                frame({ maxWidth: FILL, maxHeight: FILL }),
+                frame({ maxWidth: anchor ? ANCHOR_WIDTH[anchor] : FILL, maxHeight: FILL }),
               ]}
             />
           }
           modifiers={[
+            ...(anchor ? [frame({ maxWidth: FILL, maxHeight: FILL, alignment: anchor })] : []),
             menuOrder("fixed"),
             accessibilityLabel(label),
             ...(value ? [accessibilityValue(value)] : []),

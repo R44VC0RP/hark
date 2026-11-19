@@ -432,6 +432,7 @@ export default function TeamScreen() {
                 footer={"You’ll get a link to send. It works once and expires in 7\u00A0days."}
               >
                 <RowMenu
+                  anchor="leading"
                   disabled={inviting}
                   hint="Creates a join link and opens the share sheet"
                   label={inviting ? "Creating Link…" : "Invite People…"}

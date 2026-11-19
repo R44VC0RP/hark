@@ -301,8 +301,9 @@ export default function OncallScreen() {
                 />
                 {settings.ringUntilAcknowledged ? (
                   // A pop-up button (I-10): a native menu with the current
-                  // interval checked, opened from anywhere on the row.
+                  // interval checked, opened from the value (V2-11).
                   <RowMenu
+                    anchor="trailing"
                     hint="Chooses how often the alert repeats"
                     label="Repeat Every"
                     menu={RING_INTERVALS.map((option) => (
