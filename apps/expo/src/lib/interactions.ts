@@ -301,6 +301,17 @@ export async function registerInteractionCategories(): Promise<void> {
   ]);
 }
 
+/**
+ * Runs a notification tap's navigation. The root layout installs
+ * `afterSheets` (`src/lib/navigation.ts`) so a tap never pushes inside or
+ * under an open sheet; until then (and in tests) it navigates at once.
+ */
+let beforeNavigate: (open: () => void) => void = (open) => open();
+
+export function setNotificationNavigationGate(gate: (open: () => void) => void): void {
+  beforeNavigate = gate;
+}
+
 /** Best-effort push navigation that tolerates a not-yet-mounted router on cold start. */
 function navigateSoon(navigate: () => void): void {
   try {
@@ -318,12 +329,19 @@ function navigateSoon(navigate: () => void): void {
 
 function openPage(pageId: string, intent?: "escalate"): void {
   navigateSoon(() =>
-    router.push({ pathname: "/pages/[id]", params: { id: pageId, ...(intent ? { intent } : {}) } }),
+    beforeNavigate(() =>
+      router.push({
+        pathname: "/pages/[id]",
+        params: { id: pageId, ...(intent ? { intent } : {}) },
+      }),
+    ),
   );
 }
 
 function openJoin(code: string): void {
-  navigateSoon(() => router.push({ pathname: "/join/[code]", params: { code } }));
+  navigateSoon(() =>
+    beforeNavigate(() => router.push({ pathname: "/join/[code]", params: { code } })),
+  );
 }
 
 /** Handles taps and actions on on-call pages; returns false for other pushes. */
@@ -354,7 +372,9 @@ async function handlePageResponse(response: Notifications.NotificationResponse):
 /** Best-effort navigation that tolerates a not-yet-mounted router on cold start. */
 function openNotificationDetail(compositeId: string): void {
   const navigate = () => {
-    router.push({ pathname: "/notification/[id]", params: { id: compositeId } });
+    beforeNavigate(() =>
+      router.push({ pathname: "/notification/[id]", params: { id: compositeId } }),
+    );
   };
   try {
     navigate();
@@ -372,7 +392,9 @@ function openNotificationDetail(compositeId: string): void {
 /** Opens a Hark web app, retrying once if the router is not mounted yet. */
 function openWebApp(appId: string, url: string | undefined): void {
   const navigate = () => {
-    router.push({ pathname: "/web/[id]", params: { id: appId, ...(url ? { url } : {}) } });
+    beforeNavigate(() =>
+      router.push({ pathname: "/web/[id]", params: { id: appId, ...(url ? { url } : {}) } }),
+    );
   };
   try {
     navigate();

@@ -1,8 +1,8 @@
 import type { OncallPageDto } from "@hark/contracts";
-import { router } from "expo-router";
 import { NativeTabs } from "expo-router/unstable-native-tabs";
 import { SymbolView } from "expo-symbols";
 import { Pressable, StyleSheet, View } from "react-native";
+import { goTo } from "../lib/navigation";
 import { Text } from "../ui/text";
 import { colors, metrics } from "../ui/tokens";
 
@@ -32,10 +32,9 @@ export function PagesAccessory({ pages }: { pages: OncallPageDto[] }) {
   const title = one ? "1 Page Needs You" : `${count} Pages Need You`;
   const detail = `${page.groupName} · ${page.title}`;
 
-  const open = () => {
-    if (one) router.push({ pathname: "/pages/[id]", params: { id: page.id } });
-    else router.navigate("/oncall");
-  };
+  // By the links' rule (src/lib/navigation.ts): a sheet on top closes
+  // first; On Call opens as Teams › On Call.
+  const open = () => goTo(one ? `/pages/${encodeURIComponent(page.id)}` : "/oncall");
 
   return (
     <Pressable

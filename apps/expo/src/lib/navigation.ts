@@ -58,7 +58,7 @@ interface NavigatorState {
   key: string;
   type?: string;
   index?: number;
-  routes: { name?: string; state?: unknown }[];
+  routes: { key?: string; name?: string; params?: object; state?: unknown }[];
   preloadedRoutes?: unknown[];
 }
 
@@ -79,13 +79,13 @@ function rootStack(): NavigatorState | undefined {
 }
 
 /** The root stack's top route when it is a sheet. */
-function topSheet(): { key: string; stackKey: string } | null {
+function topSheet(): { key: string; name: string; stackKey: string } | null {
   const stack = rootStack();
   const top = stack?.routes[stack.index ?? stack.routes.length - 1] as
     | { key?: string; name?: string }
     | undefined;
   if (!stack || !top?.key || !top.name || !SHEET_ROUTES.has(top.name)) return null;
-  return { key: top.key, stackKey: stack.key };
+  return { key: top.key, name: top.name, stackKey: stack.key };
 }
 
 /** Closes the sheet on top of the app, if any (links, and Esc and ⌘W through `escapeTopSheet`). */
@@ -133,34 +133,225 @@ export function escapeTopSheet(): boolean {
   return closeTopSheet();
 }
 
-/**
- * Whether a link must not open inside a sheet: it opens a sheet itself
- * ("/join/abc"), or a web app, which opens over the tabs (a web link over
- * the iPad Page sheet opened inside it).
- */
-function leavesSheets(path: string): boolean {
-  const route = path.replace(/^[a-z][a-z0-9+.-]*:\/\/\/?/i, "").replace(/^\/+/, "");
-  const [first = "", second] = route.split(/[/?#]/);
-  if (first === "apps" || first === "web") return Boolean(second);
-  return ["critical-alerts", "settings", "join", "pages", "reply"].includes(first);
+/** The three tabs' stacks (`app/(tabs)`). */
+type TabName = "(inbox)" | "(apps)" | "(teams)";
+
+/** Where a link into a tab goes: the tab, and the screen above its root. */
+interface TabLink {
+  tab: TabName;
+  screen?: { name: string; params: Record<string, string> };
+}
+
+/** "a=1&b=two" → { a: "1", b: "two" } (React Native has no full URLSearchParams). */
+function queryParams(query: string): Record<string, string> {
+  const params: Record<string, string> = {};
+  for (const pair of query.split("&")) {
+    if (!pair) continue;
+    const [key = "", value = ""] = pair.split("=");
+    const decode = (text: string) => decodeURIComponent(text.replace(/\+/g, " "));
+    params[decode(key)] = decode(value);
+  }
+  return params;
 }
 
 /**
- * A link that opens a sheet or a web app while a sheet is up closes that
- * sheet first, so sheets never stack (a Reply link over the Join sheet
- * showed both) and nothing opens inside a sheet. A sheet with unsaved work
- * asks first and the link waits for the answer: it opens once the sheet has
- * closed, and is dropped if the person keeps editing (a link that went
- * ahead covered the prompt and left Reply unable to close, I2-02). Called
- * by `app/+native-intent.tsx`, whose result Expo Router awaits; null drops
- * the link.
+ * The tab and screen a link opens, for every route that lives in a tab's
+ * stack: Inbox (/inbox, /history, /project/…, /notification/…), Apps
+ * (/apps), Teams (/teams, /teams/…, /oncall). Null for anything else
+ * (sheets, web apps, Sign In, unknown links), which Expo Router handles.
  */
-export function leaveSheetForLink(path: string): string | Promise<string | null> {
-  if (!leavesSheets(path)) return path;
+function tabLinkOf(path: string): TabLink | null {
+  const match = /^(?:[a-z][a-z0-9+.-]*:\/\/\/?)?\/*([^?#]*)(?:\?([^#]*))?/i.exec(path);
+  if (!match) return null;
+  const segments = (match[1] ?? "").split("/").filter(Boolean).map(decodeURIComponent);
+  const query = queryParams(match[2] ?? "");
+  const [first, second, third] = segments;
+  if (third !== undefined) return null;
+  const screen = (name: string, extra: Record<string, string> = {}) => ({
+    name,
+    params: { ...query, ...extra },
+  });
+  switch (first) {
+    case "inbox":
+      return second ? null : { tab: "(inbox)" };
+    case "history":
+      return second ? null : { tab: "(inbox)", screen: screen("history") };
+    case "project":
+      return second
+        ? { tab: "(inbox)", screen: screen("project/[project]", { project: second }) }
+        : null;
+    case "notification":
+      return second
+        ? { tab: "(inbox)", screen: screen("notification/[id]", { id: second }) }
+        : null;
+    case "apps":
+      return second ? null : { tab: "(apps)" };
+    case "teams":
+      return second
+        ? { tab: "(teams)", screen: screen("teams/[id]", { id: second }) }
+        : { tab: "(teams)" };
+    case "oncall":
+      return second ? null : { tab: "(teams)", screen: screen("oncall") };
+    default:
+      return null;
+  }
+}
+
+function sameParams(a: object | undefined, b: Record<string, string>): boolean {
+  const left = (a ?? {}) as Record<string, unknown>;
+  const keys = new Set([...Object.keys(left), ...Object.keys(b)]);
+  return [...keys].every((key) => String(left[key] ?? "") === String(b[key] ?? ""));
+}
+
+/**
+ * Opens a link into a tab the same way every time (R3V-03): whatever was
+ * above the tabs (a web app) goes, the tab is selected, and its stack
+ * becomes [root, target] with Back to the root, whatever that stack held
+ * and whichever tab was showing. Expo Router's own handling depended on
+ * the tab's history: a team link from the Inbox landed on the Teams root
+ * without the team, or showed it under the root's bar items with no Back,
+ * and a link to a second team replaced the first in place. The root screen
+ * keeps its route (no remount), as does the target when it is already the
+ * one showing. False when the tabs aren't up (Sign In, Set Up) or the link
+ * isn't a tab route: Expo Router handles it then.
+ */
+function openTabLink(path: string): boolean {
+  const link = tabLinkOf(path);
+  const root = rootStack();
+  if (!link || !root || !navigationRef) return false;
+  const tabsIndex = root.routes.findIndex((route) => route.name === "(tabs)");
+  const tabs = root.routes[tabsIndex]?.state as NavigatorState | undefined;
+  const stack = tabs?.routes.find((route) => route.name === link.tab)?.state as
+    | NavigatorState
+    | undefined;
+  const home = stack?.routes[0];
+  if (!tabs || !stack || !home) return false;
+  const above = root.routes.length - 1 - tabsIndex;
+  if (above > 0) navigationRef.dispatch({ ...StackActions.pop(above), target: root.key });
+  navigationRef.dispatch({ ...CommonActions.navigate({ name: link.tab }), target: tabs.key });
+  const top = stack.routes[stack.routes.length - 1];
+  const target = link.screen;
+  const showing =
+    target &&
+    stack.routes.length === 2 &&
+    top?.name === target.name &&
+    sameParams(top.params, target.params);
+  if (showing || (!target && stack.routes.length === 1)) return true;
+  const routes = target ? [home, { name: target.name, params: target.params }] : [home];
+  navigationRef.dispatch({
+    ...CommonActions.reset({
+      ...stack,
+      index: routes.length - 1,
+      routes,
+      preloadedRoutes: [],
+    } as never),
+    target: stack.key,
+  });
+  return true;
+}
+
+/**
+ * Every link that arrives while the app runs (called by
+ * `app/+native-intent.tsx`, whose result Expo Router awaits; null means
+ * handled or dropped). The sheet on top, if any, closes first, so sheets
+ * never stack and nothing opens inside or under a sheet: a notification
+ * link that went ahead while Reply was up popped the sheet in the same
+ * action that pushed into the tab and left the lower half of the new
+ * screen blank and dead (R3-03). A sheet with unsaved work (Reply with a
+ * draft) asks first and the link waits: it opens once the sheet has
+ * closed, and is dropped if the person keeps editing (I2-02), for every
+ * link alike (R3-P2-2). Then a link into a tab opens through
+ * `openTabLink`; anything else (a sheet, a web app, an unknown link) goes
+ * to Expo Router.
+ */
+export function followLink(path: string): string | null | Promise<string | null> {
+  const open = () => (openTabLink(path) ? null : path);
+  const sheet = topSheet();
+  if (!sheet) return open();
+  return closeSheet(sheet).then((closed) => (closed ? open() : null));
+}
+
+/**
+ * Closes the sheet on top (Reply with a draft asks first) and resolves
+ * once it has gone: true, or false when the person keeps editing. Nothing
+ * opens before that. A screen that mounted while a sheet was still leaving
+ * was measured inside it: under Reply's half height, the pushed screen was
+ * 402 × 423 pt and its lower half stayed blank and dead (R3-03, with an
+ * empty Reply and with a draft); on iPad, Link Not Found opened as
+ * Critical Alerts closed got the sheet's card size.
+ */
+function closeSheet(sheet: { key: string }): Promise<boolean> {
   const guard = guardOfTopSheet();
-  if (guard) return guard.ask().then((closed) => (closed ? path : null));
-  closeTopSheet();
-  return path;
+  const closing = guard ? guard.ask() : Promise.resolve(closeTopSheet());
+  return closing.then((closed) => (closed ? sheetGone(sheet.key).then(() => true) : false));
+}
+
+/**
+ * Navigation from outside the screens (notification taps, keyboard
+ * shortcuts, the pages accessory) follows the links' rule: never push a
+ * tab or root screen inside or under a sheet. `open` runs at once without
+ * a sheet, else once the sheet has gone, and not at all if the person
+ * keeps editing a Reply draft.
+ */
+export function afterSheets(open: () => void): void {
+  const sheet = topSheet();
+  if (!sheet) {
+    open();
+    return;
+  }
+  void closeSheet(sheet).then((closed) => {
+    if (closed) open();
+  });
+}
+
+/**
+ * Opens an app path the way a link would (`followLink`): the sheet on top
+ * closes first; tab routes open as [root, target] in their tab; anything
+ * else is pushed.
+ */
+export function goTo(path: string): void {
+  afterSheets(() => {
+    if (!openTabLink(path)) router.push(path as Href);
+  });
+}
+
+/** Links waiting for a sheet to finish leaving, by the sheet's route key. */
+const leaving = new Map<string, () => void>();
+
+/**
+ * How long a sheet takes to be gone, in ms, for the sheets that never say
+ * so: of the sheets, only Reply's closing `transitionEnd` reaches the root
+ * stack when JavaScript closes it; Settings, App Info, Page, Join and
+ * Critical Alerts send nothing. The navigation state is already right;
+ * this only waits for UIKit and react-native-screens to finish with the
+ * sheet. Measured on iPad (Settings form sheet): the slide-out ends about
+ * 370 ms after it starts, but opening a screen 500 ms after the close
+ * still landed a layout pass on the dismissed sheet (red box
+ * "sheetPresentationController is null when attempting to set allowed
+ * detents", 4 of 4 links and notification taps); at 1000 ms and later,
+ * 0 of 4.
+ */
+const SHEET_DISMISS_MS = 1000;
+
+function sheetGone(routeKey: string): Promise<void> {
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(fallback);
+      leaving.delete(routeKey);
+      resolve();
+    };
+    const fallback = setTimeout(done, SHEET_DISMISS_MS);
+    leaving.set(routeKey, done);
+  });
+}
+
+/**
+ * Root layout only: a root screen finished its transition. A sheet that
+ * finished closing releases the link waiting for it (`followLink`).
+ */
+export function rootTransitionEnded(routeKey: string | undefined, closing: boolean): void {
+  if (!routeKey || !closing) return;
+  leaving.get(routeKey)?.();
 }
 
 interface NavigationRef {

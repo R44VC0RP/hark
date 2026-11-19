@@ -25,9 +25,15 @@ import {
   flushPageAcknowledgements,
   handleNotificationResponse,
   registerInteractionCategories,
+  setNotificationNavigationGate,
 } from "../src/lib/interactions";
 import { startLiveActivityTokenSync } from "../src/lib/live-activities";
-import { setCurrentPath, useNavigationForLinks } from "../src/lib/navigation";
+import {
+  afterSheets,
+  rootTransitionEnded,
+  setCurrentPath,
+  useNavigationForLinks,
+} from "../src/lib/navigation";
 import { PENDING_JOIN_CODE_KEY } from "../src/lib/teams";
 import { useLargeText } from "../src/ui/list";
 import { navigationTheme, palette, sheetOptions, stackScreenOptions } from "../src/ui/tokens";
@@ -43,6 +49,9 @@ setHourCycle(
       ? "h12"
       : undefined,
 );
+// Notification taps open screens by the same rule as links: never inside
+// or under a sheet (src/lib/navigation.ts).
+setNotificationNavigationGate(afterSheets);
 void registerInteractionCategories().catch((error) => {
   console.warn("Could not register notification actions", error);
 });
@@ -143,6 +152,10 @@ export default function RootLayout() {
     <ThemeProvider value={navigationTheme}>
       <LaunchNotificationResponse />
       <Stack
+        screenListeners={{
+          // A link waits for the sheet it closed to be gone (navigation.ts).
+          transitionEnd: (event) => rootTransitionEnded(event.target, event.data.closing),
+        }}
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: palette.background },
