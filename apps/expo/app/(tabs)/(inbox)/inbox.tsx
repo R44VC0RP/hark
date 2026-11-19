@@ -438,9 +438,11 @@ export default function InboxScreen() {
     const entries = requestEntries(summary?.pending ?? [], settled, handled);
     if (!order) return entries;
     const byId = new Map(entries.map((entry) => [entry.item.id, entry]));
+    // One row per id, whatever the pinned order holds: two rows with one
+    // key could let React reuse the wrong row's buttons.
     const pinned = new Set(order);
     return [
-      ...order.flatMap((id) => byId.get(id) ?? []),
+      ...[...pinned].flatMap((id) => byId.get(id) ?? []),
       ...entries.filter((entry) => !pinned.has(entry.item.id)),
     ];
   }, [handled, order, settled, summary]);
