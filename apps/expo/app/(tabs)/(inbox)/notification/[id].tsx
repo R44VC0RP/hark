@@ -258,7 +258,8 @@ function NotificationContent({ notification }: { notification: InboxNotification
             <Text variant="subheadline" weight="600">
               {notification.sourceName}
             </Text>
-            {projectName ? ` · ${projectName}` : ""}
+            {/* A no-break space: a wrapped line never starts with the "·". */}
+            {projectName ? ` · ${projectName}` : ""}
           </Text>
           <Text color="tertiaryLabel" variant="footnote">
             {received}
