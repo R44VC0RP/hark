@@ -7,16 +7,17 @@ import { spoken } from "../../ui/a11y";
 import { Cell, useStackedRows } from "../../ui/list";
 import { Text } from "../../ui/text";
 import { colors, metrics, space } from "../../ui/tokens";
-import { phrases } from "./page-row";
+import { FactLine } from "./fact-line";
 
 function expiryLabel(value: string): string {
   return new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 /**
- * A pending invite (DESIGN.md 5.13): who it is for, its role, who sent it and
- * when it expires. The row itself does nothing (tapping it used to revoke
- * it, P9); revoking is the explicit trailing "Revoke".
+ * A pending invite (DESIGN.md 5.13): who it is for, its role and who sent it
+ * on one line, when it expires on the next (no "·" ending a wrapped line,
+ * V-06). The row itself does nothing (tapping it used to revoke it, P9);
+ * revoking is the explicit trailing "Revoke".
  */
 export const InviteRow = memo(function InviteRow({
   invite,
@@ -27,14 +28,8 @@ export const InviteRow = memo(function InviteRow({
 }) {
   const stacked = useStackedRows();
   const title = invite.email ?? "Invite Link";
-  const subtitle = phrases(
-    [
-      roleLabel(invite.role),
-      `from ${invite.invitedBy}`,
-      `expires ${expiryLabel(invite.expiresAt)}`,
-    ],
-    !stacked,
-  );
+  const facts = [roleLabel(invite.role), `from ${invite.invitedBy}`];
+  const expires = `Expires ${expiryLabel(invite.expiresAt)}`;
   return (
     <Cell
       minHeight={metrics.rowMinHeightSubtitle}
@@ -43,7 +38,11 @@ export const InviteRow = memo(function InviteRow({
       }
       style={stacked ? styles.rowStacked : styles.row}
     >
-      <View accessibilityLabel={spoken(title, subtitle)} accessible style={styles.identity}>
+      <View
+        accessibilityLabel={spoken(title, ...facts, expires)}
+        accessible
+        style={styles.identity}
+      >
         <View style={styles.leading}>
           <SymbolView name="link" size={20} tintColor={colors.secondaryLabel} />
         </View>
@@ -51,12 +50,10 @@ export const InviteRow = memo(function InviteRow({
           <Text numberOfLines={stacked ? undefined : 1} variant="body">
             {title}
           </Text>
-          <Text
-            color="secondaryLabel"
-            numberOfLines={stacked ? undefined : 2}
-            variant="subheadline"
-          >
-            {subtitle}
+          {/* The inviter's name gives way before the role. */}
+          <FactLine facts={facts} shrink={1} />
+          <Text color="secondaryLabel" variant="subheadline">
+            {expires}
           </Text>
         </View>
       </View>

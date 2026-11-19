@@ -3,18 +3,21 @@ import { StyleSheet, View } from "react-native";
 import type { OncallMeDto } from "../../lib/api";
 import { currentShift, formatHandoff } from "../../lib/teams";
 import { spoken } from "../../ui/a11y";
-import { Cell, Chevron, useStackedRows } from "../../ui/list";
+import { Cell, Chevron } from "../../ui/list";
 import { Text } from "../../ui/text";
 import { colors, metrics } from "../../ui/tokens";
-import { LeadingDot, phrases } from "./page-row";
+import { FactLine } from "./fact-line";
+import { LeadingDot } from "./page-row";
 
 const DOT = 10;
 
 export interface OncallStatus {
   onCall: boolean;
   title: string;
-  /** The shift line; `phrases` keeps its parts together except at AX sizes. */
-  parts: string[];
+  /** Short facts of the shift ("Platform primary", "Northwind Platform"), one line. */
+  facts: string[];
+  /** The rest as its own line ("Until Sat 6:00 PM", "No shifts scheduled for you."). */
+  detail: string;
 }
 
 /**
@@ -28,7 +31,8 @@ export function oncallStatus(me: OncallMeDto | null | undefined, now: number): O
     return {
       onCall: true,
       title: "You're On Call",
-      parts: [shift.groupName, shift.teamName, `until ${formatHandoff(shift.endsAt, now)}`],
+      facts: [shift.groupName, shift.teamName],
+      detail: `Until ${formatHandoff(shift.endsAt, now)}`,
     };
   }
   const next = shifts
@@ -37,16 +41,18 @@ export function oncallStatus(me: OncallMeDto | null | undefined, now: number): O
   return {
     onCall: false,
     title: "You're Not On Call",
-    parts: next
-      ? [`Next: ${next.groupName}, ${formatHandoff(next.startsAt, now)}`]
-      : ["No shifts scheduled for you."],
+    facts: [],
+    detail: next
+      ? `Next: ${next.groupName}, ${formatHandoff(next.startsAt, now)}`
+      : "No shifts scheduled for you.",
   };
 }
 
 /**
- * The on-call status row: a dot (accent on shift), "You're On Call" and the
- * shift. On Teams it navigates to On Call; on On Call it is the status
- * itself and takes the accent tint while you are on shift.
+ * The on-call status row: a dot (accent on shift), "You're On Call", the
+ * shift's group and team on one line and the handoff on the next, so no "·"
+ * ends a wrapped line (V-06). On Teams it navigates to On Call; on On Call
+ * it is the status itself and takes the accent tint while you are on shift.
  */
 export function OncallStatusRow({
   status,
@@ -58,12 +64,10 @@ export function OncallStatusRow({
   /** Fill the row with `accentSoft` while on call (On Call's status section). */
   tinted?: boolean;
 }) {
-  const stacked = useStackedRows();
-  const subtitle = phrases(status.parts, !stacked);
   return (
     <Cell
       accessibilityHint={onPress ? "Shows your shifts, pages and paging settings" : undefined}
-      accessibilityLabel={spoken(status.title, status.parts.join(", "))}
+      accessibilityLabel={spoken(status.title, ...status.facts, status.detail)}
       accessibilityRole={onPress ? "button" : "summary"}
       accessible
       minHeight={metrics.rowMinHeightSubtitle}
@@ -74,8 +78,12 @@ export function OncallStatusRow({
       <LeadingDot color={status.onCall ? "accent" : "placeholder"} variant="headline" />
       <View style={styles.copy}>
         <Text variant="headline">{status.title}</Text>
+        {status.facts.length > 0 ? (
+          // The team gives way before the group you're on call for.
+          <FactLine facts={status.facts} shrink={status.facts.length - 1} />
+        ) : null}
         <Text color="secondaryLabel" variant="subheadline">
-          {subtitle}
+          {status.detail}
         </Text>
       </View>
       {onPress ? (

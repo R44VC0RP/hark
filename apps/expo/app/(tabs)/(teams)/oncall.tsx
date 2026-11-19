@@ -1,3 +1,4 @@
+import { Toggle } from "@expo/ui/swift-ui";
 import type {
   CriticalAlertState,
   OncallGroupDto,
@@ -7,16 +8,17 @@ import type {
 import * as Device from "expo-device";
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActionSheetIOS, Alert, findNodeHandle, StyleSheet, View } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Alert, StyleSheet, View } from "react-native";
 import {
   criticalAlertValue,
   OncallStatusRow,
   oncallStatus,
 } from "../../../src/components/teams/oncall-status";
 import { PageRow, sortPages } from "../../../src/components/teams/page-row";
+import { MenuShield, RowMenu } from "../../../src/components/teams/row-menu";
 import { api, type OncallMeDto } from "../../../src/lib/api";
-import { useDirectory } from "../../../src/lib/app-directory";
+import { refreshDirectory, useDirectory } from "../../../src/lib/app-directory";
 import { useSession } from "../../../src/lib/auth";
 import { criticalAlertsEnabled, reportCriticalAlertState } from "../../../src/lib/critical-alerts";
 import { haptic } from "../../../src/lib/haptics";
@@ -56,6 +58,11 @@ const RING_INTERVALS: Array<{ label: string; seconds: number | null }> = [
   { label: "5 Minutes", seconds: 300 },
 ];
 
+/** "repeats 1×, then everyone in the team" → "Repeats 1×, then everyone in the team." */
+function sentence(text: string): string {
+  return `${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
+}
+
 function intervalLabel(seconds: number | null): string {
   return RING_INTERVALS.find((option) => option.seconds === seconds)?.label ?? `${seconds} Seconds`;
 }
@@ -91,7 +98,6 @@ export default function OncallScreen() {
   const [settings, setSettings] = useState<OncallSettingsDto | null>(null);
   const [critical, setCritical] = useState<CriticalAlertState | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const intervalRef = useRef<View>(null);
 
   const load = useCallback(async () => {
     if (simulatorPreview) {
@@ -126,15 +132,25 @@ export default function OncallScreen() {
     }
   }, [teamId]);
 
+  /**
+   * Reloads this screen together with the app directory, so the Teams
+   * badge, the pages accessory and these lists always agree (I-05: a pull
+   * showed two pages needing a responder under "1 Page Needs You").
+   */
+  const reload = useCallback(
+    () => Promise.all([load(), refreshDirectory().catch(() => {})]),
+    [load],
+  );
+
   // Back from a page sheet or Critical Alerts: show what changed there.
   useFocusEffect(
     useCallback(() => {
-      void load();
-    }, [load]),
+      void reload();
+    }, [reload]),
   );
 
   // Someone else claimed a page.
-  useEffect(() => onPageClaimed(() => void load()), [load]);
+  useEffect(() => onPageClaimed(() => void reload()), [reload]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), TICK_MS);
@@ -143,7 +159,7 @@ export default function OncallScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await load();
+    await reload();
     setRefreshing(false);
   };
 
@@ -172,21 +188,6 @@ export default function OncallScreen() {
     }
   };
 
-  const chooseInterval = () => {
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        title: "Repeat the Alert Every",
-        options: [...RING_INTERVALS.map((option) => option.label), "Cancel"],
-        cancelButtonIndex: RING_INTERVALS.length,
-        anchor: findNodeHandle(intervalRef.current) ?? undefined,
-      },
-      (index) => {
-        const option = RING_INTERVALS[index];
-        if (option) void saveSettings({ ringIntervalSeconds: option.seconds });
-      },
-    );
-  };
-
   const status = oncallStatus(me, now);
   const upcoming = useMemo(
     () => (me?.shifts ?? []).filter((item) => Date.parse(item.startsAt) > now),
@@ -203,145 +204,169 @@ export default function OncallScreen() {
   return (
     <>
       <Stack.Screen options={{ title }} />
-      <List onRefresh={me || failure ? () => void onRefresh() : undefined} refreshing={refreshing}>
-        {unsupported ? (
-          <EmptyState
-            message="This Hark server doesn't support on-call yet."
-            symbol="bell.slash"
-            title="On Call Isn't Available"
-          />
-        ) : !me ? (
-          failure ? (
-            <ErrorState
-              network={failure === "network"}
-              onRetry={() => {
-                setFailure(null);
-                void load();
-              }}
-              title="Couldn't Load On Call"
+      <MenuShield>
+        <List
+          onRefresh={me || failure ? () => void onRefresh() : undefined}
+          refreshing={refreshing}
+        >
+          {unsupported ? (
+            <EmptyState
+              message="This Hark server doesn't support on-call yet."
+              symbol="bell.slash"
+              title="On Call Isn't Available"
             />
+          ) : !me ? (
+            failure ? (
+              <ErrorState
+                network={failure === "network"}
+                onRetry={() => {
+                  setFailure(null);
+                  void reload();
+                }}
+                title="Couldn't Load On Call"
+              />
+            ) : (
+              <LoadingState />
+            )
           ) : (
-            <LoadingState />
-          )
-        ) : (
-          <>
-            <Section>
-              <OncallStatusRow status={status} tinted />
-            </Section>
-
-            <Section
-              detail={pages.length > 0 ? `${pages.length} open` : undefined}
-              footer={pages.length === 0 ? "All quiet. No open pages." : undefined}
-              prominent
-              title={teamId ? "Open Pages" : "Your Pages"}
-            >
-              {pages.map((page) => (
-                <PageRow key={page.id} now={now} page={page} />
-              ))}
-            </Section>
-
-            {teamId && groups && groups.length > 0 ? (
-              <Section prominent title="Rotations">
-                {groups.map((group) => (
-                  <RotationRow
-                    group={group}
-                    groups={groups}
-                    key={group.id}
-                    now={now}
-                    viewerId={viewerId}
-                  />
-                ))}
+            <>
+              {/*
+                The same "Open Pages" and count as Teams (V-14). With none,
+                a quiet line under the status instead of a header over an
+                empty section (V-16).
+              */}
+              <Section footer={pages.length === 0 ? "All quiet. No open pages." : undefined}>
+                <OncallStatusRow status={status} tinted />
               </Section>
-            ) : null}
 
-            {!teamId && rotationTeams.length > 0 ? (
-              <Section prominent title="Team Rotations">
-                {rotationTeams.map((team) => (
-                  <Row
-                    accessibilityHint="Shows the team's rotations and open pages"
-                    chevron
-                    key={team.id}
-                    leading={<Avatar name={team.name} size={TEAM_AVATAR} />}
-                    leadingWidth={TEAM_AVATAR}
-                    onPress={() =>
-                      router.push({
-                        pathname: "/oncall",
-                        params: { team: team.id, name: team.name },
-                      })
-                    }
+              {pages.length > 0 ? (
+                <Section detail={String(pages.length)} prominent title="Open Pages">
+                  {pages.map((page) => (
+                    <PageRow key={page.id} now={now} page={page} />
+                  ))}
+                </Section>
+              ) : null}
+
+              {teamId && groups && groups.length > 0 ? (
+                <Section prominent title="Rotations">
+                  {groups.map((group) => (
+                    <RotationRow
+                      group={group}
+                      groups={groups}
+                      key={group.id}
+                      now={now}
+                      viewerId={viewerId}
+                    />
+                  ))}
+                </Section>
+              ) : null}
+
+              {!teamId && rotationTeams.length > 0 ? (
+                <Section prominent title="Team Rotations">
+                  {rotationTeams.map((team) => (
+                    <Row
+                      accessibilityHint="Shows the team's rotations and open pages"
+                      chevron
+                      key={team.id}
+                      leading={<Avatar name={team.name} size={TEAM_AVATAR} />}
+                      leadingWidth={TEAM_AVATAR}
+                      onPress={() =>
+                        router.push({
+                          pathname: "/oncall",
+                          params: { team: team.id, name: team.name },
+                        })
+                      }
+                      subtitle={
+                        team.oncallGroupCount === 1
+                          ? "1 on-call group"
+                          : `${team.oncallGroupCount} on-call groups`
+                      }
+                      title={team.name}
+                    />
+                  ))}
+                </Section>
+              ) : null}
+
+              {!teamId && settings ? (
+                <Section
+                  footer="Pages break through Focus with an alarm sound. Critical Alerts also ring through silent mode."
+                  prominent
+                  title="Paging"
+                >
+                  <SwitchRow
+                    onValueChange={(value) => void saveSettings({ ringUntilAcknowledged: value })}
                     subtitle={
-                      team.oncallGroupCount === 1
-                        ? "1 on-call group"
-                        : `${team.oncallGroupCount} on-call groups`
+                      settings.ringUntilAcknowledged
+                        ? "Pages repeat until someone acknowledges."
+                        : "Pages alert once."
                     }
-                    title={team.name}
+                    title="Ring Until Acknowledged"
+                    value={settings.ringUntilAcknowledged}
                   />
-                ))}
-              </Section>
-            ) : null}
-
-            {!teamId && settings ? (
-              <Section
-                footer="Pages break through Focus with an alarm sound. Critical Alerts also ring through silent mode."
-                prominent
-                title="Paging"
-              >
-                <SwitchRow
-                  onValueChange={(value) => void saveSettings({ ringUntilAcknowledged: value })}
-                  subtitle={
-                    settings.ringUntilAcknowledged
-                      ? "Pages repeat until someone acknowledges."
-                      : "Pages alert once."
-                  }
-                  title="Ring Until Acknowledged"
-                  value={settings.ringUntilAcknowledged}
-                />
-                {settings.ringUntilAcknowledged ? (
+                  {settings.ringUntilAcknowledged ? (
+                    // A pop-up button (I-10): a native menu with the current
+                    // interval checked, opened from anywhere on the row.
+                    <RowMenu
+                      hint="Chooses how often the alert repeats"
+                      label="Repeat Every"
+                      menu={(done) =>
+                        RING_INTERVALS.map((option) => (
+                          <Toggle
+                            isOn={option.seconds === settings.ringIntervalSeconds}
+                            key={option.label}
+                            label={option.label}
+                            onIsOnChange={() => {
+                              done();
+                              if (option.seconds !== settings.ringIntervalSeconds) {
+                                void saveSettings({ ringIntervalSeconds: option.seconds });
+                              }
+                            }}
+                          />
+                        ))
+                      }
+                      value={intervalLabel(settings.ringIntervalSeconds)}
+                    >
+                      <Row
+                        title="Repeat Every"
+                        trailing={
+                          <SymbolView
+                            name="chevron.up.chevron.down"
+                            size={13}
+                            tintColor={colors.placeholder}
+                            weight="semibold"
+                          />
+                        }
+                        value={intervalLabel(settings.ringIntervalSeconds)}
+                      />
+                    </RowMenu>
+                  ) : null}
                   <Row
-                    accessibilityHint="Chooses how often the alert repeats"
-                    onPress={chooseInterval}
-                    title="Repeat Every"
-                    trailing={
-                      // The sheet points at this indicator, like a pop-up
-                      // button's menu (a popover on iPad).
-                      <View collapsable={false} ref={intervalRef}>
-                        <SymbolView
-                          name="chevron.up.chevron.down"
-                          size={13}
-                          tintColor={colors.placeholder}
-                          weight="semibold"
-                        />
-                      </View>
+                    accessibilityHint={
+                      criticalEnabled ? "Explains Critical Alerts and turns them on" : undefined
                     }
-                    value={intervalLabel(settings.ringIntervalSeconds)}
+                    chevron={criticalEnabled}
+                    onPress={criticalEnabled ? () => router.push("/critical-alerts") : undefined}
+                    title="Critical Alerts"
+                    value={criticalAlertValue(critical)}
                   />
-                ) : null}
-                <Row
-                  accessibilityHint={
-                    criticalEnabled ? "Explains Critical Alerts and turns them on" : undefined
-                  }
-                  chevron={criticalEnabled}
-                  onPress={criticalEnabled ? () => router.push("/critical-alerts") : undefined}
-                  title="Critical Alerts"
-                  value={criticalAlertValue(critical)}
-                />
-              </Section>
-            ) : null}
+                </Section>
+              ) : null}
 
-            {!teamId && upcoming.length > 0 ? (
-              <Section prominent title="Your Next Shifts">
-                {upcoming.map((item) => (
-                  <Row
-                    key={`${item.groupId}-${item.startsAt}`}
-                    subtitle={`${item.teamName}\n${formatHandoff(item.startsAt, now)} – ${formatHandoff(item.endsAt, now)}`}
-                    title={item.groupName}
-                  />
-                ))}
-              </Section>
-            ) : null}
-          </>
-        )}
-      </List>
+              {!teamId && upcoming.length > 0 ? (
+                <Section prominent title="Your Next Shifts">
+                  {upcoming.map((item) => (
+                    <Row
+                      key={`${item.groupId}-${item.startsAt}`}
+                      subtitle={`${item.teamName}\n${formatHandoff(item.startsAt, now)} – ${formatHandoff(item.endsAt, now)}`}
+                      title={item.groupName}
+                    />
+                  ))}
+                </Section>
+              ) : null}
+            </>
+          )}
+        </List>
+      </MenuShield>
     </>
   );
 }
@@ -363,15 +388,21 @@ function RotationRow({
 }) {
   const stacked = useStackedRows();
   const schedule = `${group.rotation.period === "weekly" ? "Weekly" : "Daily"} · ${group.rotation.handoffAt}`;
-  const policy = escalationPolicySummary(
+  // "On call → 5 min → Everyone in the group · repeats 1× · then everyone in
+  // the team": the chain on one line, what follows it as a sentence on the
+  // next, so no "·" ends a wrapped line (V-06). An arrow keeps to the step
+  // before it, so a wrapped line ends with "→", never starts with one.
+  const [chain = "", ...extras] = escalationPolicySummary(
     group,
     (id) => group.rotation.members.find((member) => member.userId === id)?.name ?? "a teammate",
     (id) => groups.find((other) => other.id === id)?.name ?? "another group",
-  );
+  ).split(" · ");
+  const flow = chain.replace(/ →/g, "\u00A0→");
+  const then = extras.length > 0 ? sentence(extras.join(", ")) : null;
   return (
     <Cell style={styles.rotation}>
       <View
-        accessibilityLabel={spoken(group.name, schedule, policy)}
+        accessibilityLabel={spoken(group.name, schedule, chain, then)}
         accessible
         style={styles.rotationCopy}
       >
@@ -384,8 +415,13 @@ function RotationRow({
           </Text>
         </View>
         <Text color="secondaryLabel" variant="subheadline">
-          {policy}
+          {flow}
         </Text>
+        {then ? (
+          <Text color="secondaryLabel" variant="subheadline">
+            {then}
+          </Text>
+        ) : null}
       </View>
       {group.upcoming.slice(0, 4).map((item, index) => {
         const live = index === 0 && group.current !== null;

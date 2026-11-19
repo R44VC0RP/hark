@@ -8,6 +8,7 @@ import { Cell, Chevron, useStackedRows } from "../../ui/list";
 import { StatusDot } from "../../ui/status-dot";
 import { Text } from "../../ui/text";
 import { type ColorName, metrics, type TextVariant } from "../../ui/tokens";
+import { FactLine } from "./fact-line";
 
 const DOT = 10;
 
@@ -54,20 +55,6 @@ export function pageStateText(page: OncallPageDto): string {
   return pageStatusLabel(page);
 }
 
-/**
- * Joins phrases with " · ". With `keep` each phrase stays on one line, so a
- * wrapped line breaks between phrases; at accessibility sizes a phrase can
- * be wider than the row, so they wrap freely there.
- */
-export function phrases(parts: string[], keep: boolean): string {
-  return (keep ? parts.map(unbroken) : parts).join(" · ");
-}
-
-/** "Platform primary · 4 min ago · Needs a responder". */
-export function pageSubtitle(page: OncallPageDto, now: number, keep = true): string {
-  return phrases([page.groupName, timeAgo(page.createdAt, now), pageStateText(page)], keep);
-}
-
 /** Open pages first, newest first within each status. */
 export function sortPages(pages: OncallPageDto[]): OncallPageDto[] {
   return [...pages].sort((a, b) => {
@@ -79,8 +66,9 @@ export function sortPages(pages: OncallPageDto[]): OncallPageDto[] {
 /**
  * A page in Teams › Open Pages and On Call (DESIGN.md 5.12, 5.14): a status
  * dot (danger while it needs a responder, accent once acknowledged), the
- * title, and "{group} · {time ago} · {state}". Opens the page sheet. Open
- * pages get the heavier title, like unread mail, so they read first.
+ * title, "{group} · {time ago}" and the state on its own line, so no "·"
+ * ever ends a wrapped line (V-06). Opens the page sheet. Open pages get the
+ * heavier title, like unread mail, so they read first.
  */
 export const PageRow = memo(function PageRow({ page, now }: { page: OncallPageDto; now: number }) {
   const stacked = useStackedRows();
@@ -103,12 +91,9 @@ export const PageRow = memo(function PageRow({ page, now }: { page: OncallPageDt
           <Text numberOfLines={stacked ? undefined : 1} variant={open ? "headline" : "body"}>
             {page.title}
           </Text>
-          <Text
-            color="secondaryLabel"
-            numberOfLines={stacked ? undefined : 2}
-            variant="subheadline"
-          >
-            {pageSubtitle(page, now, !stacked)}
+          <FactLine facts={[page.groupName, ago]} />
+          <Text color="secondaryLabel" variant="subheadline">
+            {state}
           </Text>
         </View>
         <View style={styles.chevron}>

@@ -177,7 +177,13 @@ describe("on-call formatting", () => {
     const at = new Date(0).toISOString();
     expect(
       timelineLabel({ at, kind: "paged", level: 1, loop: 1, people: [maya], escalatedBy: sam }),
-    ).toBe("Sam escalated · Paged Maya · level 1, loop 2");
+    ).toBe("Sam escalated to Maya again");
+    expect(
+      timelineLabel({ at, kind: "paged", level: 1, loop: 0, people: [maya], escalatedBy: null }),
+    ).toBe("Escalated to Maya");
+    expect(
+      timelineLabel({ at, kind: "paged", level: 0, loop: 0, people: [maya], escalatedBy: null }),
+    ).toBe("Paged Maya");
     expect(
       timelineLabel({
         at,
@@ -187,7 +193,7 @@ describe("on-call formatting", () => {
         people: [maya],
         escalatedBy: null,
       }),
-    ).toBe("Claimed by Maya");
+    ).toBe("Acknowledged by Maya");
   });
 });
 

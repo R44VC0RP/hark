@@ -1,5 +1,7 @@
+import { Button as MenuButton } from "@expo/ui/swift-ui";
 import type {
   OncallGroupDto,
+  OncallPageDto,
   TeamDto,
   TeamInviteDto,
   TeamMemberDto,
@@ -7,11 +9,13 @@ import type {
 } from "@hark/contracts";
 import * as Device from "expo-device";
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useRef, useState } from "react";
-import { ActionSheetIOS, Alert, findNodeHandle, Share, StyleSheet, View } from "react-native";
+import { useCallback, useState } from "react";
+import { Alert, Share, StyleSheet, View } from "react-native";
+import { FactLine } from "../../../../src/components/teams/fact-line";
 import { InviteRow } from "../../../../src/components/teams/invite-row";
-import { MemberRow } from "../../../../src/components/teams/member-row";
+import { type MemberAction, MemberRow } from "../../../../src/components/teams/member-row";
 import { unbroken } from "../../../../src/components/teams/page-row";
+import { MenuShield, RowMenu } from "../../../../src/components/teams/row-menu";
 import { SeatLimitNotice } from "../../../../src/components/teams/seat-limit-notice";
 import { ApiError, api } from "../../../../src/lib/api";
 import { refreshDirectory } from "../../../../src/lib/app-directory";
@@ -19,6 +23,7 @@ import { useSession } from "../../../../src/lib/auth";
 import { haptic } from "../../../../src/lib/haptics";
 import {
   previewOncallGroups,
+  previewPages,
   previewTeamInvites,
   previewTeamMembers,
   previewTeams,
@@ -32,6 +37,7 @@ import {
   seatsFull,
   seatsLabel,
 } from "../../../../src/lib/teams";
+import { spoken } from "../../../../src/ui/a11y";
 import { Avatar } from "../../../../src/ui/avatar";
 import {
   EmptyState,
@@ -61,30 +67,30 @@ function failed(title: string, cause: unknown): void {
 
 /**
  * "Alex Kim until Thu 5:00 AM" or "Nobody on call". At accessibility sizes
- * the open-page count joins it instead of squeezing the name beside a
- * capsule, and the handoff may wrap.
+ * the open-page count goes on its own line instead of squeezing the name
+ * beside a capsule, and the handoff may wrap.
  */
 function groupSubtitle(group: OncallGroupDto, viewerId: string | undefined, stacked: boolean) {
-  if (!group.current) {
-    return stacked && group.openPageCount > 0
-      ? `Nobody on call · ${group.openPageCount} open`
-      : "Nobody on call";
-  }
+  const open = stacked && group.openPageCount > 0 ? `\n${group.openPageCount} open` : "";
+  if (!group.current) return `Nobody on call${open}`;
   const who = group.current.person.userId === viewerId ? "You" : group.current.person.name;
   const until = `until ${formatHandoff(group.current.endsAt)}`;
-  if (!stacked) return `${who} ${unbroken(until)}`;
-  return `${who} ${until}${group.openPageCount > 0 ? ` · ${group.openPageCount} open` : ""}`;
+  return `${who} ${stacked ? until : unbroken(until)}${open}`;
 }
 
-/** "Owner · 5 seats · Team plan" */
-function identityLine(team: TeamDto): string {
-  return `${roleLabel(team.role)} · ${seatsLabel(team.seats)}${team.plan === "team" ? " · Team plan" : ""}`;
+/** "Owner", "5 seats", "Team plan": one line, or one fact per line at AX sizes. */
+function identityFacts(team: TeamDto): string[] {
+  return [
+    roleLabel(team.role),
+    seatsLabel(team.seats),
+    ...(team.plan === "team" ? ["Team plan"] : []),
+  ];
 }
 
 /**
  * A team (DESIGN.md 5.13): who is in it, who is invited, its on-call groups,
  * and what you can do as its owner, admin or member. Admins rename it from
- * the header; every member action is an anchored action sheet.
+ * the header; inviting and managing members are native menus (I-07).
  */
 export default function TeamScreen() {
   const { data: session } = useSession();
@@ -97,11 +103,11 @@ export default function TeamScreen() {
   const [members, setMembers] = useState<TeamMemberDto[]>([]);
   const [invites, setInvites] = useState<TeamInviteDto[]>([]);
   const [groups, setGroups] = useState<OncallGroupDto[] | null>(null);
+  const [openPages, setOpenPages] = useState<OncallPageDto[]>([]);
   const [failure, setFailure] = useState<LoadFailure | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [seatLimitHit, setSeatLimitHit] = useState(false);
   const [inviting, setInviting] = useState(false);
-  const inviteRef = useRef<View>(null);
 
   const load = useCallback(async () => {
     if (simulatorPreview) {
@@ -119,21 +125,25 @@ export default function TeamScreen() {
       );
       setInvites(isAcme ? previewTeamInvites.filter((invite) => !invite.revokedAt) : []);
       setGroups(isAcme ? previewOncallGroups : []);
+      setOpenPages(previewPages.filter((page) => page.teamId === preview.id));
       return;
     }
     try {
       const result = await api.getTeam(id);
-      const [inviteResult, groupResult] = await Promise.all([
+      const [inviteResult, groupResult, pageResult] = await Promise.all([
         canManageTeam(result.team.role)
           ? api.listTeamInvites(id).catch(() => null)
           : Promise.resolve(null),
         // Older servers lack on-call; the section simply stays hidden.
         api.listOncallGroups(id).catch(() => null),
+        // Which groups have a page nobody has acknowledged yet (V-14).
+        api.listTeamPages(id, { status: "open" }).catch(() => null),
       ]);
       setTeam(result.team);
       setMembers(result.members);
       setInvites(inviteResult?.invites ?? []);
       setGroups(groupResult?.groups ?? null);
+      setOpenPages(pageResult?.pages ?? []);
       setFailure(null);
     } catch (cause) {
       setFailure(
@@ -146,19 +156,24 @@ export default function TeamScreen() {
     }
   }, [id]);
 
-  // Back from On Call or the share sheet: show what changed meanwhile.
+  // Back from On Call or the share sheet: show what changed meanwhile. The
+  // app directory reloads with it, so the open-page counts here, the Teams
+  // badge and the pages accessory agree (I-05).
   useFocusEffect(
     useCallback(() => {
       void load();
+      void refreshDirectory().catch(() => {});
     }, [load]),
   );
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await load();
+    await Promise.all([load(), refreshDirectory().catch(() => {})]);
     setRefreshing(false);
   };
 
+  const needsResponder = (groupId: string) =>
+    openPages.some((page) => page.groupId === groupId && page.status === "triggered");
   const admin = canManageTeam(team?.role);
   const owner = team?.role === "owner";
   const pendingInvites = invites.filter(
@@ -201,24 +216,6 @@ export default function TeamScreen() {
         setInviting(false);
       }
     })();
-  };
-
-  const chooseInviteRole = () => {
-    if (!team || inviting) return;
-    const anchor = findNodeHandle(inviteRef.current) ?? undefined;
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        title: `Invite to ${team.name}`,
-        message: "You'll get a link to send. It works once and expires in 7 days.",
-        options: ["Invite as Member", "Invite as Admin", "Cancel"],
-        cancelButtonIndex: 2,
-        anchor,
-      },
-      (index) => {
-        if (index === 0) invite("member");
-        else if (index === 1) invite("admin");
-      },
-    );
   };
 
   const revokeInvite = (item: TeamInviteDto) => {
@@ -283,25 +280,29 @@ export default function TeamScreen() {
     );
   };
 
-  const manageMember = (member: TeamMemberDto, anchor: number | undefined) => {
-    const options: Array<{ label: string; run: () => void; destructive?: boolean }> = [];
+  /** A member's menu: change their role, or remove them (confirmed first). */
+  const memberActions = (member: TeamMemberDto): MemberAction[] => {
+    const actions: MemberAction[] = [];
     if (member.role === "member") {
-      options.push({ label: "Make Admin", run: () => changeRole(member, "admin") });
+      actions.push({
+        label: "Make Admin",
+        icon: "person.badge.key",
+        run: () => changeRole(member, "admin"),
+      });
     } else if (member.role === "admin") {
-      options.push({ label: "Make Member", run: () => changeRole(member, "member") });
+      actions.push({
+        label: "Make Member",
+        icon: "person",
+        run: () => changeRole(member, "member"),
+      });
     }
-    options.push({ label: "Remove from Team", run: () => removeMember(member), destructive: true });
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        title: member.name,
-        message: `${roleLabel(member.role)} · ${member.email}`,
-        options: [...options.map((option) => option.label), "Cancel"],
-        destructiveButtonIndex: options.findIndex((option) => option.destructive),
-        cancelButtonIndex: options.length,
-        anchor,
-      },
-      (index) => options[index]?.run(),
-    );
+    actions.push({
+      label: "Remove from Team…",
+      icon: "person.badge.minus",
+      destructive: true,
+      run: () => removeMember(member),
+    });
+    return actions;
   };
 
   const rename = () => {
@@ -396,136 +397,165 @@ export default function TeamScreen() {
           <Stack.Toolbar.Button accessibilityLabel="Rename Team" icon="pencil" onPress={rename} />
         </Stack.Toolbar>
       ) : null}
-      <List
-        onRefresh={team || failure ? () => void onRefresh() : undefined}
-        refreshing={refreshing}
-      >
-        {!team ? (
-          failure === "missing" ? (
-            <EmptyState
-              message="It was deleted or you're no longer a member."
-              symbol="person.2"
-              title="Team Unavailable"
-            />
-          ) : failure ? (
-            <ErrorState
-              network={failure === "network"}
-              onRetry={() => {
-                setFailure(null);
-                void load();
-              }}
-              title="Couldn't Load Team"
-            />
+      <MenuShield>
+        <List
+          onRefresh={team || failure ? () => void onRefresh() : undefined}
+          refreshing={refreshing}
+        >
+          {!team ? (
+            failure === "missing" ? (
+              <EmptyState
+                message="It was deleted or you're no longer a member."
+                symbol="person.2"
+                title="Team Unavailable"
+              />
+            ) : failure ? (
+              <ErrorState
+                network={failure === "network"}
+                onRetry={() => {
+                  setFailure(null);
+                  void load();
+                }}
+                title="Couldn't Load Team"
+              />
+            ) : (
+              <LoadingState />
+            )
           ) : (
-            <LoadingState />
-          )
-        ) : (
-          <>
-            <View
-              accessibilityLabel={`${team.name}. ${identityLine(team)}`}
-              accessible
-              style={[styles.identity, stacked && styles.identityStacked]}
-            >
-              <Avatar name={team.name} size={AVATAR} />
-              <View style={styles.identityCopy}>
-                <Text accessibilityRole="header" variant="title3">
-                  {team.name}
-                </Text>
-                <Text color="secondaryLabel" variant="subheadline">
-                  {identityLine(team)}
-                </Text>
+            <>
+              <View
+                accessibilityLabel={spoken(team.name, ...identityFacts(team))}
+                accessible
+                style={[styles.identity, stacked && styles.identityStacked]}
+              >
+                <Avatar name={team.name} size={AVATAR} />
+                <View style={styles.identityCopy}>
+                  <Text accessibilityRole="header" variant="title3">
+                    {team.name}
+                  </Text>
+                  <FactLine facts={identityFacts(team)} />
+                </View>
               </View>
-            </View>
 
-            {admin ? (
-              <Section>
-                <ActionRow
-                  accessibilityHint="Creates a join link and opens the share sheet"
-                  disabled={inviting}
-                  onPress={chooseInviteRole}
-                  ref={inviteRef}
-                  symbol="person.badge.plus"
-                  title={inviting ? "Creating Link…" : "Invite People…"}
-                />
-              </Section>
-            ) : null}
+              {admin ? (
+                <Section
+                  footer={"You'll get a link to send. It works once and expires in 7\u00A0days."}
+                >
+                  <RowMenu
+                    disabled={inviting}
+                    hint="Creates a join link and opens the share sheet"
+                    label={inviting ? "Creating Link…" : "Invite People…"}
+                    menu={(done) => (
+                      <>
+                        <MenuButton
+                          label="Invite as Member"
+                          onPress={() => {
+                            done();
+                            invite("member");
+                          }}
+                          systemImage="person.badge.plus"
+                        />
+                        <MenuButton
+                          label="Invite as Admin"
+                          onPress={() => {
+                            done();
+                            invite("admin");
+                          }}
+                          systemImage="person.badge.key"
+                        />
+                      </>
+                    )}
+                  >
+                    <ActionRow
+                      disabled={inviting}
+                      symbol="person.badge.plus"
+                      title={inviting ? "Creating Link…" : "Invite People…"}
+                    />
+                  </RowMenu>
+                </Section>
+              ) : null}
 
-            {seatLimitHit || seatsFull(team.seats) ? (
-              <SeatLimitNotice owner={owner} teamName={team.name} />
-            ) : null}
+              {seatLimitHit || seatsFull(team.seats) ? (
+                <SeatLimitNotice owner={owner} teamName={team.name} />
+              ) : null}
 
-            {groups && groups.length > 0 ? (
-              <Section title="On Call">
-                {groups.map((group) => (
-                  <Row
-                    accessibilityHint="Shows shifts, rotations and open pages"
-                    chevron
-                    key={group.id}
-                    onPress={() =>
-                      router.push({
-                        pathname: "/oncall",
-                        params: { team: team.id, name: team.name },
-                      })
-                    }
-                    subtitle={groupSubtitle(group, viewerId, stacked)}
-                    symbol="bell"
-                    title={group.name}
-                    trailing={
-                      group.openPageCount > 0 && !stacked ? (
-                        <View
-                          accessibilityLabel={`${group.openPageCount} open`}
-                          style={styles.openCapsule}
-                        >
-                          <Text
-                            color="accent"
-                            maxFontSizeMultiplier={1.3}
-                            tabular
-                            variant="caption1"
-                            weight="600"
+              {groups && groups.length > 0 ? (
+                <Section prominent title="On Call">
+                  {groups.map((group) => (
+                    <Row
+                      accessibilityHint="Shows shifts, rotations and open pages"
+                      chevron
+                      key={group.id}
+                      onPress={() =>
+                        router.push({
+                          pathname: "/oncall",
+                          params: { team: team.id, name: team.name },
+                        })
+                      }
+                      subtitle={groupSubtitle(group, viewerId, stacked)}
+                      symbol="bell"
+                      title={group.name}
+                      trailing={
+                        group.openPageCount > 0 && !stacked ? (
+                          // Red while a page in the group needs a responder,
+                          // like every other open page in the app (V-14).
+                          <View
+                            accessibilityLabel={`${group.openPageCount} open`}
+                            style={[
+                              styles.openCapsule,
+                              needsResponder(group.id) ? styles.openCapsuleUrgent : null,
+                            ]}
                           >
-                            {`${group.openPageCount} open`}
-                          </Text>
-                        </View>
-                      ) : null
-                    }
-                  />
-                ))}
+                            <Text
+                              color={needsResponder(group.id) ? "danger" : "accent"}
+                              maxFontSizeMultiplier={1.3}
+                              tabular
+                              variant="caption1"
+                              weight="600"
+                            >
+                              {`${group.openPageCount} open`}
+                            </Text>
+                          </View>
+                        ) : null
+                      }
+                    />
+                  ))}
+                </Section>
+              ) : null}
+
+              <Section detail={String(members.length)} prominent title="Members">
+                {members.map((member) => {
+                  const self = member.userId === viewerId;
+                  // Admins manage members and admins; only owners touch other owners.
+                  const manageable = admin && !self && (member.role !== "owner" || owner);
+                  return (
+                    <MemberRow
+                      actions={manageable ? memberActions(member) : []}
+                      key={member.userId}
+                      member={member}
+                      reserveAction={admin}
+                      self={self}
+                    />
+                  );
+                })}
               </Section>
-            ) : null}
 
-            <Section detail={String(members.length)} title="Members">
-              {members.map((member) => {
-                const self = member.userId === viewerId;
-                // Admins manage members and admins; only owners touch other owners.
-                const manageable = admin && !self && (member.role !== "owner" || owner);
-                return (
-                  <MemberRow
-                    key={member.userId}
-                    manageable={manageable}
-                    member={member}
-                    onManage={manageMember}
-                    reserveAction={admin}
-                    self={self}
-                  />
-                );
-              })}
-            </Section>
+              {admin && pendingInvites.length > 0 ? (
+                <Section detail={String(pendingInvites.length)} prominent title="Pending Invites">
+                  {pendingInvites.map((item) => (
+                    <InviteRow invite={item} key={item.id} onRevoke={revokeInvite} />
+                  ))}
+                </Section>
+              ) : null}
 
-            {admin && pendingInvites.length > 0 ? (
-              <Section detail={String(pendingInvites.length)} title="Pending Invites">
-                {pendingInvites.map((item) => (
-                  <InviteRow invite={item} key={item.id} onRevoke={revokeInvite} />
-                ))}
+              <Section>
+                <ActionRow destructive onPress={leave} title="Leave Team" />
+                {owner ? <ActionRow destructive onPress={deleteTeam} title="Delete Team" /> : null}
               </Section>
-            ) : null}
-
-            <Section>
-              <ActionRow destructive onPress={leave} title="Leave Team" />
-              {owner ? <ActionRow destructive onPress={deleteTeam} title="Delete Team" /> : null}
-            </Section>
-          </>
-        )}
-      </List>
+            </>
+          )}
+        </List>
+      </MenuShield>
     </>
   );
 }
@@ -556,5 +586,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.capsule(CAPSULE),
     borderCurve: "continuous",
     backgroundColor: colors.accentSoft,
+  },
+  openCapsuleUrgent: {
+    backgroundColor: colors.dangerSoft,
   },
 });

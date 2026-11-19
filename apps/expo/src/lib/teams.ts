@@ -173,19 +173,21 @@ export function escalationLabel(
   return `${step} · next ${relativeMinutes(Date.parse(page.nextEscalationAt), now)}`;
 }
 
-/** One timeline line: "Paged Ana · level 0", "Cal escalated · paged Ben · level 1", "Claimed by Ben". */
+/**
+ * One timeline line in plain words: "Paged Ana", "Escalated to Ben",
+ * "Cal escalated to Ben", "Paged Ana again" (the policy started over),
+ * "Acknowledged by Ben". No "level 1, loop 2" jargon (V-17).
+ */
 export function timelineLabel(event: OncallPageEventDto): string {
-  const names = event.people.map((person) => person.name).join(", ");
-  if (event.kind === "acknowledged") return `Claimed by ${names}`;
+  // A name never breaks across lines (no-break spaces); a list wraps between names.
+  const names = event.people.map((person) => person.name.replace(/ /g, "\u00A0")).join(", ");
+  if (event.kind === "acknowledged") return `Acknowledged by ${names}`;
   if (event.kind === "resolved") return `Resolved by ${names}`;
-  const where = [
-    event.level !== null ? `level ${event.level}` : null,
-    event.loop ? `loop ${event.loop + 1}` : null,
-  ]
-    .filter(Boolean)
-    .join(", ");
-  const paged = `Paged ${names || "nobody"}${where ? ` · ${where}` : ""}`;
-  return event.escalatedBy ? `${event.escalatedBy.name} escalated · ${paged}` : paged;
+  const who = names || "nobody";
+  const again = event.loop ? " again" : "";
+  if (event.escalatedBy) return `${event.escalatedBy.name} escalated to ${who}${again}`;
+  if (event.level) return `Escalated to ${who}${again}`;
+  return `Paged ${who}${again}`;
 }
 
 /** Readable escalation policy: "On call → 5 min → Next in rotation → 10 min → Everyone in the group". */
