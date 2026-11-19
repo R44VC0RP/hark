@@ -3,11 +3,19 @@ import type { TeamMemberDto } from "@hark/contracts";
 import { type SFSymbol, SymbolView } from "expo-symbols";
 import { memo } from "react";
 import { StyleSheet, View } from "react-native";
+import { useLayout } from "../../lib/layout";
 import { roleLabel } from "../../lib/teams";
 import { spoken } from "../../ui/a11y";
 import { Avatar } from "../../ui/avatar";
-import { Cell, useBreakable, useLeadingAbove, useStackedRows, useTextMeasure } from "../../ui/list";
-import { Text } from "../../ui/text";
+import {
+  Cell,
+  useBreakable,
+  useLargeText,
+  useLeadingAbove,
+  useStackedRows,
+  useTextMeasure,
+} from "../../ui/list";
+import { breakableText, Text } from "../../ui/text";
 import { colors, metrics, radius, space } from "../../ui/tokens";
 import { RowMenu } from "./row-menu";
 
@@ -76,7 +84,13 @@ export const MemberRow = memo(function MemberRow({
   actions: MemberAction[];
   reserveAction: boolean;
 }) {
-  const stacked = useStackedRows();
+  const accessibilitySize = useStackedRows();
+  const largeText = useLargeText();
+  const { regular } = useLayout();
+  // From xxxLarge on iPhone widths the role capsule goes under the email,
+  // as at accessibility sizes, and the name and email wrap: beside the
+  // capsule and ⋯ they were cut ("Diego Alva…", "diego@exam…", R-01).
+  const stacked = accessibilitySize || (largeText && !regular);
   const measure = useTextMeasure();
   // At accessibility sizes on iPhone the avatar goes above the name, as in `Row`, and
   // the address breaks after "@", not inside a word (SS-02).
@@ -111,7 +125,10 @@ export const MemberRow = memo(function MemberRow({
             numberOfLines={stacked ? undefined : 1}
             variant="subheadline"
           >
-            {breakable(member.email)}
+            {largeText && !accessibilitySize
+              ? // From xxxLarge an address breaks after "@" or before ".", never inside a word.
+                breakableText(member.email, 0)
+              : breakable(member.email)}
           </Text>
           {stacked ? <View style={styles.stackedPill}>{pill}</View> : null}
         </View>

@@ -17,7 +17,7 @@ import { memberCountLabel, roleLabel } from "../../../../src/lib/teams";
 import { TabRootToolbar } from "../../../../src/ui/account-button";
 import { Avatar } from "../../../../src/ui/avatar";
 import { EmptyState, ErrorState, LoadingState } from "../../../../src/ui/empty-state";
-import { List, Row, Section, useStackedRows } from "../../../../src/ui/list";
+import { List, Row, Section, useLargeText, useStackedRows } from "../../../../src/ui/list";
 
 const simulatorPreview = __DEV__ && !Device.isDevice;
 /** Relative times ("4 min ago") move on once a minute. */
@@ -44,6 +44,9 @@ function teamSubtitle(team: TeamDto, stacked: boolean): string {
 export default function TeamsScreen() {
   const router = useRouter();
   const stacked = useStackedRows();
+  // From xxxLarge a team's facts may take two lines ("Owner · 5 members ·
+  // 2 apps" was cut on the SE, R-02).
+  const largeText = useLargeText();
   const directory = useDirectory();
   const loadFailed = useDirectoryLoadFailed();
   const [refreshing, setRefreshing] = useState(false);
@@ -182,7 +185,7 @@ export default function TeamsScreen() {
                   leadingWidth={AVATAR}
                   onPress={() => router.push({ pathname: "/teams/[id]", params: { id: team.id } })}
                   subtitle={teamSubtitle(team, stacked)}
-                  subtitleLines={1}
+                  subtitleLines={largeText ? 2 : 1}
                   title={team.name}
                 />
               ))}

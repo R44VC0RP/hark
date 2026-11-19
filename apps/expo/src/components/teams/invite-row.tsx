@@ -5,8 +5,8 @@ import { Pressable, StyleSheet, View } from "react-native";
 import { formatUpcoming } from "../../lib/dates";
 import { roleLabel } from "../../lib/teams";
 import { spoken } from "../../ui/a11y";
-import { Cell, useBreakable, useStackedRows, useTextMeasure } from "../../ui/list";
-import { Text } from "../../ui/text";
+import { Cell, useBreakable, useLargeText, useStackedRows, useTextMeasure } from "../../ui/list";
+import { breakableText, Text } from "../../ui/text";
 import { colors, metrics, space } from "../../ui/tokens";
 import { FactLine } from "./fact-line";
 
@@ -24,6 +24,9 @@ export const InviteRow = memo(function InviteRow({
   onRevoke: (invite: TeamInviteDto) => void;
 }) {
   const stacked = useStackedRows();
+  // From xxxLarge the invite's email wraps instead of being cut
+  // ("lena@example.c…"): an admin reads the whole address before revoking (R-01).
+  const largeText = useLargeText();
   const measure = useTextMeasure();
   // An address breaks after "@", not inside a word, at accessibility sizes (SS-02).
   const breakable = useBreakable();
@@ -47,8 +50,12 @@ export const InviteRow = memo(function InviteRow({
           <SymbolView name="link" size={20} tintColor={colors.secondaryLabel} />
         </View>
         <View style={[styles.copy, measure]}>
-          <Text numberOfLines={stacked ? undefined : 1} variant="body">
-            {breakable(title)}
+          <Text numberOfLines={stacked || largeText ? undefined : 1} variant="body">
+            {invite.email && largeText && !stacked
+              ? // From xxxLarge an address may break after "@" or before ".",
+                // never inside a word ("ben@example.co / m").
+                breakableText(invite.email, 0)
+              : breakable(title)}
           </Text>
           {/* The inviter's name gives way before the role. */}
           <FactLine facts={facts} shrink={1} />

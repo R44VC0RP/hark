@@ -95,7 +95,8 @@ export const HistoryRow = memo(function HistoryRow({
       <SourceAvatar name={item.sourceName} size={HISTORY_AVATAR} url={item.sourceImageUrl} />
       <View style={[styles.copy, measure]}>
         <Text
-          numberOfLines={expanded || stacked ? undefined : 1}
+          // Two lines from xxxLarge (R-02: titles beside the result were cut).
+          numberOfLines={expanded || stacked ? undefined : largeText ? 2 : 1}
           variant="subheadline"
           weight="600"
         >
@@ -104,7 +105,7 @@ export const HistoryRow = memo(function HistoryRow({
         {item.detail ? (
           <Text
             color="secondaryLabel"
-            numberOfLines={expanded ? undefined : stacked ? 2 : 1}
+            numberOfLines={expanded ? undefined : stacked || largeText ? 2 : 1}
             variant="subheadline"
           >
             {item.detail}
