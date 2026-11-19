@@ -3,10 +3,11 @@ import * as Device from "expo-device";
 import { Stack, useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActionSheetIOS, Alert, Linking, Pressable, StyleSheet, View } from "react-native";
+import { Alert, Linking, Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 import type { ShouldStartLoadRequest } from "react-native-webview/lib/WebViewTypes";
+import { useActionSheet } from "../../src/components/apps/action-sheet";
 import { ConsentView } from "../../src/components/web/consent-view";
 import { HoldHint } from "../../src/components/web/hold-hint";
 import { LaunchErrorView, SigningInView } from "../../src/components/web/launch-state";
@@ -62,8 +63,8 @@ const stripColors = new Map<string, string>();
  * The first opens teach the gesture with a Liquid Glass hint.
  *
  * iPad regular windows get the native navigation bar in the page's colour
- * with glass items: Close, Back, Forward, Reload; Open in Safari, App Info
- * and More (Switch App, Stop Signing In).
+ * with glass items: Close, Back, Forward, Reload; Open in Safari, App Info,
+ * Switch App and More (Stop Signing In).
  */
 export default function WebAppScreen() {
   const params = useLocalSearchParams<{ id: string; url?: string }>();
@@ -73,11 +74,18 @@ export default function WebAppScreen() {
   const insets = useSafeAreaInsets();
   const simulatorPreview = __DEV__ && !Device.isDevice;
   const webView = useRef<WebView>(null);
-  const prefetched = useRef<Pass | null>(null);
+  // The pass requested while the page starts loading; the page's first
+  // getToken() takes it (or a fresh one when it failed or is about to expire).
+  const prefetched = useRef<Promise<Pass> | null>(null);
   const currentUrl = useRef<string | null>(null);
   const [app, setApp] = useState<AppDto | null>(() => cachedApp(id) ?? null);
   const [phase, setPhase] = useState<Phase>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // The app is gone (404): trying again can't help, only Back to Hark.
+  const [removed, setRemoved] = useState(false);
+  // "Signing you in…" stays over the web view until its first page has
+  // loaded, so opening an app never shows a blank page.
+  const [pageLoaded, setPageLoaded] = useState(false);
   const [canGoBack, setCanGoBack] = useState(false);
   const [canGoForward, setCanGoForward] = useState(false);
   // iPad-sized windows get the native bar instead of the hidden two-finger menu.
@@ -113,24 +121,34 @@ export default function WebAppScreen() {
   const start = useCallback(async () => {
     setPhase("loading");
     setErrorMessage(null);
+    setRemoved(false);
+    setPageLoaded(false);
     try {
       let current = cachedApp(id) ?? null;
       if (simulatorPreview) current = current ?? previewApps.find((item) => item.id === id) ?? null;
       else if (!current) current = (await api.getApp(id)).app;
-      if (!current) throw new Error("This app is no longer available.");
+      if (!current) {
+        setRemoved(true);
+        throw new Error("This app is no longer available.");
+      }
       cacheApps([current]);
       setApp(current);
       if (!current.consentedAt) {
         setPhase("consent");
         return;
       }
-      prefetched.current = await issuePass();
+      // The page starts loading while its pass is issued; a failure still
+      // ends in consent or the error view below.
+      const pass = issuePass();
+      prefetched.current = pass;
       setPhase("ready");
+      await pass;
     } catch (error) {
       if (error instanceof ApiError && error.code === API_ERROR_CODE_CONSENT_REQUIRED) {
         setPhase("consent");
         return;
       }
+      if (error instanceof ApiError && error.status === 404) setRemoved(true);
       setErrorMessage(
         error instanceof ApiError && error.status === 404
           ? "This app was removed."
@@ -206,7 +224,9 @@ export default function WebAppScreen() {
         cacheApps([approved]);
         setApp(approved);
       }
-      prefetched.current = await issuePass({ consent: true, ...sharing });
+      const pass = issuePass({ consent: true, ...sharing });
+      prefetched.current = pass;
+      await pass;
       setPhase("ready");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Couldn’t sign in.");
@@ -215,8 +235,9 @@ export default function WebAppScreen() {
   };
 
   const takePass = async (): Promise<string> => {
-    const cached = prefetched.current;
+    const pending = prefetched.current;
     prefetched.current = null;
+    const cached = pending ? await pending.catch(() => null) : null;
     if (cached && cached.expiresAt - Date.now() > PASS_REUSE_MARGIN_MS) return cached.token;
     return (await issuePass()).token;
   };
@@ -249,10 +270,12 @@ export default function WebAppScreen() {
 
   // The Hark menu: a two-finger hold on the page (or VoiceOver's action on
   // the status strip). On iPad the same actions live in the bar; a hold there
-  // shows this sheet as a centred popover.
+  // shows this sheet as a centred popover, with the shield over the page so
+  // the tap that closes it never reaches the page.
+  const actionSheet = useActionSheet();
   const showMenu = () => {
     if (!app) return;
-    ActionSheetIOS.showActionSheetWithOptions(
+    actionSheet.show(
       {
         title: app.name,
         message: `Signed in with Hark on ${new URL(app.origin).host}`,
@@ -386,7 +409,7 @@ export default function WebAppScreen() {
           app={app}
           message={errorMessage ?? "Something went wrong."}
           onClose={close}
-          onRetry={() => void start()}
+          onRetry={removed ? undefined : () => void start()}
         />
       </>
     );
@@ -444,6 +467,7 @@ export default function WebAppScreen() {
           injectedJavaScriptBeforeContentLoadedForMainFrameOnly
           key={reloadKey}
           onContentProcessDidTerminate={() => setReloadKey((key) => key + 1)}
+          onLoadEnd={() => setPageLoaded(true)}
           onError={(event) => {
             setErrorMessage(event.nativeEvent.description || "The page couldn’t be loaded.");
             setPhase("error");
@@ -471,6 +495,13 @@ export default function WebAppScreen() {
           webviewDebuggingEnabled={__DEV__}
         />
         {chrome === "bar" ? null : <HoldHint top={insets.top} />}
+        {pageLoaded ? null : (
+          <View style={styles.cover}>
+            <StatusBar style="dark" />
+            <SigningInView app={app} />
+          </View>
+        )}
+        {actionSheet.shield}
       </View>
     );
   }
@@ -504,6 +535,14 @@ const styles = StyleSheet.create({
   },
   webView: {
     flex: 1,
+  },
+  cover: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 5,
   },
   menuOverlay: {
     position: "absolute",

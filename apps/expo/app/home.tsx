@@ -1,30 +1,22 @@
 import type { EventDto } from "@hark/contracts";
-import Constants from "expo-constants";
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
 import { Redirect, Stack } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { type SFSymbol, SymbolView } from "expo-symbols";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, AppState, Linking, Platform, StyleSheet, View } from "react-native";
+import { ActivityIndicator, AppState, Linking, StyleSheet, View } from "react-native";
 import { DeliveryRow } from "../src/components/delivery-row";
 import {
-  APNS_TOKEN_KEY,
   confirmDeleteAccount,
   confirmSignOut,
   EXPO_TOKEN_KEY,
+  registerThisDevice,
 } from "../src/lib/account";
-import { trackAppEvent, trackOnboardingCompleted } from "../src/lib/analytics";
+import { trackAppEvent } from "../src/lib/analytics";
 import { api } from "../src/lib/api";
 import { useSession } from "../src/lib/auth";
-import { readCriticalAlertState } from "../src/lib/critical-alerts";
-import {
-  DEVICE_ID_KEY,
-  flushInteractionResponses,
-  registerInteractionCategories,
-} from "../src/lib/interactions";
 import { deviceNoun, isPad } from "../src/lib/layout";
-import { refreshLiveActivityTokenSync } from "../src/lib/live-activities";
 import { spoken } from "../src/ui/a11y";
 import { Button } from "../src/ui/button";
 import { Cell, List, Section, useStackedRows } from "../src/ui/list";
@@ -101,60 +93,12 @@ export default function SetUpScreen() {
   };
 
   const registerDevice = useCallback(async (preserveReadyState = false) => {
-    void trackAppEvent("device_registration_started", { path: "/home" });
     if (!preserveReadyState) setRegistration("working");
     setLastError(null);
     try {
-      if (!Device.isDevice) {
-        throw new Error(`Push notifications require a physical ${deviceNoun}.`);
-      }
-      const projectId =
-        (Constants.expoConfig?.extra?.eas as { projectId?: string } | undefined)?.projectId ??
-        process.env.EXPO_PUBLIC_EAS_PROJECT_ID;
-      const expoToken = (
-        await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : undefined)
-      ).data;
-
-      let apns: string | null = null;
-      try {
-        const nativeToken = await Notifications.getDevicePushTokenAsync();
-        apns = typeof nativeToken.data === "string" ? nativeToken.data : null;
-      } catch {
-        // APNs token is optional; delivery uses the Expo push token.
-      }
-
-      await registerInteractionCategories();
-      const criticalAlerts = await readCriticalAlertState().catch(() => undefined);
-      const registered = await api.registerDevice({
-        expoPushToken: expoToken,
-        ...(apns ? { apnsToken: apns } : {}),
-        platform: "ios",
-        deviceName: Device.deviceName ?? undefined,
-        interactionSchemaVersion: 1,
-        ...(!isPad && Number.parseFloat(String(Platform.Version)) >= 17
-          ? { liveActivityInteractionVersion: 1 as const }
-          : {}),
-        ...(criticalAlerts ? { criticalAlerts } : {}),
-      });
-
-      await SecureStore.setItemAsync(EXPO_TOKEN_KEY, expoToken);
-      await SecureStore.setItemAsync(DEVICE_ID_KEY, registered.device.id);
-      if (apns) {
-        await SecureStore.setItemAsync(APNS_TOKEN_KEY, apns);
-      } else {
-        await SecureStore.deleteItemAsync(APNS_TOKEN_KEY);
-      }
-
+      await registerThisDevice();
       setRegistration("registered");
-      void trackAppEvent("device_registration_completed", {
-        path: "/home",
-        outcome: "registered",
-      });
-      void trackOnboardingCompleted();
-      void flushInteractionResponses();
-      refreshLiveActivityTokenSync(registered.device.id);
     } catch (err) {
-      void trackAppEvent("device_registration_completed", { path: "/home", outcome: "failed" });
       if (!preserveReadyState) {
         setRegistration("error");
         setLastError(err instanceof Error ? err.message : "Registration failed.");
@@ -215,6 +159,9 @@ export default function SetUpScreen() {
   if (permission === "granted" && registration === "registered") {
     return <Redirect href="/inbox" />;
   }
+  // Until both are read (a few milliseconds), the steps would show the
+  // wrong state: Allow for notifications that are already on.
+  if (permission === "unknown" || !storageHydrated) return <View style={styles.pending} />;
 
   const allowed = permission === "granted";
   const registered = registration === "registered";
@@ -227,7 +174,7 @@ export default function SetUpScreen() {
         <Stack.Toolbar.Menu accessibilityLabel="More" icon="ellipsis">
           <Stack.Toolbar.MenuAction
             icon="rectangle.portrait.and.arrow.right"
-            onPress={confirmSignOut}
+            onPress={() => confirmSignOut()}
           >
             Sign Out
           </Stack.Toolbar.MenuAction>
@@ -416,6 +363,10 @@ function StepRow({
 }
 
 const styles = StyleSheet.create({
+  pending: {
+    flex: 1,
+    backgroundColor: colors.groupedBackground,
+  },
   wordmark: {
     flexDirection: "row",
     alignItems: "center",

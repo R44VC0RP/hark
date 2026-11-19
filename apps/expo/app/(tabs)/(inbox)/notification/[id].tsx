@@ -8,10 +8,11 @@ import {
   useLocalSearchParams,
   useRouter,
 } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Alert, StyleSheet, View } from "react-native";
 import { AppIcon } from "../../../../src/components/app-icon";
 import { api, classifyNotificationDetailFailure } from "../../../../src/lib/api";
+import { changeUnreadCount } from "../../../../src/lib/app-directory";
 import { useSession } from "../../../../src/lib/auth";
 import { haptic } from "../../../../src/lib/haptics";
 import {
@@ -74,6 +75,12 @@ export default function NotificationDetailScreen() {
   // here must stick. Keyed by ID: a deep link can reuse this screen for
   // another notification (checked in the simulator).
   const markedOnOpen = useRef<string | null>(null);
+  // A copy prefetched by a touch-and-hold preview loads while hidden and is
+  // the screen a later tap opens; by then its read state may have changed
+  // (the row's own Mark as Unread), so it reloads when it comes into view.
+  const focusedRef = useRef(focused);
+  focusedRef.current = focused;
+  const loadedHidden = useRef(false);
 
   const load = useCallback(async () => {
     if (simulatorPreview) {
@@ -85,6 +92,7 @@ export default function NotificationDetailScreen() {
     setFailure(null);
     try {
       const result = await api.getInboxNotification(compositeId);
+      loadedHidden.current = !focusedRef.current;
       setNotification(result.notification);
     } catch (error) {
       const kind = classifyNotificationDetailFailure(error);
@@ -111,13 +119,20 @@ export default function NotificationDetailScreen() {
     void load();
   }, [compositeId, load, session]);
 
+  useEffect(() => {
+    if (!focused || previewed || !loadedHidden.current) return;
+    loadedHidden.current = false;
+    void load();
+  }, [focused, load, previewed]);
+
   // Mark read only after the full content loaded, and never while the screen
   // is a touch-and-hold preview or its prefetched copy (it may never be
   // opened). A preview that is tapped open becomes this same screen, focused,
   // so this runs then. Optimistic, so the bar button and State row read
-  // "read" from the first frame instead of flipping a moment later.
+  // "read" from the first frame instead of flipping a moment later (a layout
+  // effect: the change lands before the loaded content is drawn).
   const unreadOnArrival = notification?.id === compositeId && notification.readAt === null;
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (previewed || !focused || !unreadOnArrival || markedOnOpen.current === compositeId) return;
     if (simulatorPreview) return;
     markedOnOpen.current = compositeId;
@@ -128,8 +143,7 @@ export default function NotificationDetailScreen() {
         ? { ...current, readAt: new Date().toISOString() }
         : current,
     );
-    void api
-      .markNotificationRead(compositeId)
+    void changeUnreadCount(-1, api.markNotificationRead(compositeId))
       .then((marked) => {
         setNotification((current) =>
           sameNotification(current) && current ? { ...current, readAt: marked.readAt } : current,
@@ -153,10 +167,12 @@ export default function NotificationDetailScreen() {
       if (notification.readAt === null) {
         const marked = simulatorPreview
           ? { readAt: new Date().toISOString() }
-          : await api.markNotificationRead(notification.id);
+          : await changeUnreadCount(-1, api.markNotificationRead(notification.id));
         setNotification({ ...notification, readAt: marked.readAt });
       } else {
-        if (!simulatorPreview) await api.markNotificationUnread(notification.id);
+        if (!simulatorPreview) {
+          await changeUnreadCount(1, api.markNotificationUnread(notification.id));
+        }
         setNotification({ ...notification, readAt: null });
       }
     } catch (error) {
@@ -179,14 +195,14 @@ export default function NotificationDetailScreen() {
       {/* A preview has no header; its navigation object must not be touched. */}
       {previewed ? null : <Stack.Screen options={NO_TITLE} />}
       {/*
-        Present from the first frame, so it slides in with the push instead of
-        popping in after it. While loading it reads "Mark as Unread": opening
-        a notification marks it read.
+        Present and enabled from the first frame, so it slides in with the
+        push instead of changing after it. While loading it reads "Mark as
+        Unread" (opening a notification marks it read) and a tap does nothing.
       */}
       {previewed ? null : (
         <Stack.Toolbar placement="right">
           <Stack.Toolbar.Button
-            disabled={!notification || togglingRead}
+            disabled={togglingRead}
             hidden={!notification && !loading}
             onPress={() => void toggleRead()}
           >
@@ -242,7 +258,8 @@ function NotificationContent({ notification }: { notification: InboxNotification
             <Text variant="subheadline" weight="600">
               {notification.sourceName}
             </Text>
-            {projectName ? ` · ${projectName}` : ""}
+            {/* A no-break space: a wrapped line never starts with the "·". */}
+            {projectName ? ` · ${projectName}` : ""}
           </Text>
           <Text color="tertiaryLabel" variant="footnote">
             {received}

@@ -43,7 +43,8 @@ export function LaunchErrorView({
 }: {
   app: AppDto | null;
   message: string;
-  onRetry: () => void;
+  /** Absent when trying again can't help (the app was removed). */
+  onRetry?: () => void;
   onClose: () => void;
 }) {
   const title = `Couldn't Open ${app?.name ?? "This App"}`;
@@ -60,8 +61,15 @@ export function LaunchErrorView({
           </Text>
         </View>
         <View style={styles.actions}>
-          <Button onPress={onRetry} size="large" title="Try Again" variant="prominent" />
-          <Button onPress={onClose} size="large" title="Back to Hark" variant="plain" />
+          {onRetry ? (
+            <Button onPress={onRetry} size="large" title="Try Again" variant="prominent" />
+          ) : null}
+          <Button
+            onPress={onClose}
+            size="large"
+            title="Back to Hark"
+            variant={onRetry ? "plain" : "prominent"}
+          />
         </View>
       </View>
     </View>

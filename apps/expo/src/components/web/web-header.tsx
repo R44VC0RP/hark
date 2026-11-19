@@ -3,6 +3,7 @@ import { type NativeStackNavigationOptions, Stack } from "expo-router";
 import { memo } from "react";
 import { useDirectory } from "../../lib/app-directory";
 import { openWebApp } from "../../lib/navigation";
+import { groupAppsByTeam } from "../../lib/teams";
 import { isDarkColor } from "../../lib/web-apps";
 import { palette, stackScreenOptions } from "../../ui/tokens";
 import { orderedApps } from "../keyboard-shortcuts";
@@ -66,7 +67,7 @@ export interface WebBarItemsProps {
 
 /**
  * The iPad bar's glass items: Close on its own, then Back, Forward and
- * Reload; on the right Open in Safari, App Info and More (Switch App, Stop
+ * Reload; on the right Open in Safari, App Info, Switch App and More (Stop
  * Signing In). Memoized with stable callbacks: every new toolbar element
  * re-configures the native bar.
  */
@@ -83,7 +84,12 @@ export const WebBarItems = memo(function WebBarItems({
   onInfo,
   onStopSigningIn,
 }: WebBarItemsProps) {
-  const apps = orderedApps(useDirectory());
+  const directory = useDirectory();
+  const apps = orderedApps(directory);
+  const groups = groupAppsByTeam(directory?.apps ?? [], directory?.teams ?? []);
+  const switchTo = (id: string) => {
+    if (app && id !== app.id) openWebApp(id);
+  };
   return (
     <>
       <Stack.Toolbar placement="left">
@@ -122,24 +128,47 @@ export const WebBarItems = memo(function WebBarItems({
             onPress={onSafari}
           />
           <Stack.Toolbar.Button accessibilityLabel="App Info" icon="info.circle" onPress={onInfo} />
-          {/* Inline: the toolbar reads its items by element type, so no wrapper components. */}
-          <Stack.Toolbar.Menu accessibilityLabel="More" icon="ellipsis">
-            {/* Every app stays two taps away (the native sidebar can't list them). */}
-            {apps.length > 1 ? (
-              <Stack.Toolbar.Menu icon="square.grid.2x2" title="Switch App">
-                {apps.map((item) => (
+          {/*
+            Inline: the toolbar reads its items by element type, so no wrapper
+            components. Every app is two taps away (the native sidebar can't
+            list them): its own item, your apps then each team's, with a
+            checkmark on this one. No app icons: react-native-screens sets a
+            menu item's remote image after the menu is built, and it never
+            shows (checked).
+          */}
+          {apps.length > 1 ? (
+            <Stack.Toolbar.Menu
+              accessibilityLabel="Switch App"
+              icon="square.grid.2x2"
+              title="Switch App"
+            >
+              <Stack.Toolbar.Menu inline title={groups.teams.length > 0 ? "Yours" : undefined}>
+                {groups.personal.map((item) => (
                   <Stack.Toolbar.MenuAction
                     isOn={item.id === app.id}
                     key={item.id}
-                    onPress={() => {
-                      if (item.id !== app.id) openWebApp(item.id);
-                    }}
+                    onPress={() => switchTo(item.id)}
                   >
                     {item.name}
                   </Stack.Toolbar.MenuAction>
                 ))}
               </Stack.Toolbar.Menu>
-            ) : null}
+              {groups.teams.map((group) => (
+                <Stack.Toolbar.Menu inline key={group.team.id} title={group.team.name}>
+                  {group.apps.map((item) => (
+                    <Stack.Toolbar.MenuAction
+                      isOn={item.id === app.id}
+                      key={item.id}
+                      onPress={() => switchTo(item.id)}
+                    >
+                      {item.name}
+                    </Stack.Toolbar.MenuAction>
+                  ))}
+                </Stack.Toolbar.Menu>
+              ))}
+            </Stack.Toolbar.Menu>
+          ) : null}
+          <Stack.Toolbar.Menu accessibilityLabel="More" icon="ellipsis">
             <Stack.Toolbar.MenuAction
               destructive
               icon="person.crop.circle.badge.xmark"
