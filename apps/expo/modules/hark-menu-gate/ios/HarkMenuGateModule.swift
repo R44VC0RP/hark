@@ -6,6 +6,10 @@ import UIKit.UIGestureRecognizerSubclass
 /**
  * Installs `MenuTouchGate` in every window. Nothing to call from
  * JavaScript: Expo creates the module at launch.
+ *
+ * Expo fixed the same bug upstream (`SystemMenuTouchGate` in
+ * expo-modules-core, expo/expo#48463 and #49775, newer than our 57.0.10).
+ * Delete this module when Hark upgrades to an Expo release that has it.
  */
 public class HarkMenuGateModule: Module {
   private var observer: NSObjectProtocol?
@@ -14,6 +18,18 @@ public class HarkMenuGateModule: Module {
     Name("HarkMenuGate")
 
     OnCreate {
+      #if DEBUG
+      // Without React Native's handler class the gate stays off and the
+      // tap that closes a menu presses the view under it again. Say so in
+      // development; release builds just skip the gate.
+      if MenuTouchGate.surfaceTouchHandler == nil {
+        assertionFailure(
+          "HarkMenuGate: RCTSurfaceTouchHandler not found, so the menu tap gate is off. "
+            + "Update the class name in HarkMenuGateModule.swift, or delete the module if Expo's "
+            + "SystemMenuTouchGate now covers this."
+        )
+      }
+      #endif
       DispatchQueue.main.async {
         for scene in UIApplication.shared.connectedScenes {
           for window in (scene as? UIWindowScene)?.windows ?? [] {
@@ -37,7 +53,7 @@ public class HarkMenuGateModule: Module {
 
 /**
  * Keeps the tap that closes a menu or popover away from React Native
- * (DESIGN.md 3.12).
+ * (DESIGN.md 3.12 rule 11).
  *
  * On iOS 26 a menu (bar button, SwiftUI `Menu`, context menu) or an iPad
  * popover is a presented view controller whose container lets touches
@@ -48,19 +64,22 @@ public class HarkMenuGateModule: Module {
  * surface, and it sends `touchStart` and `touchEnd` to JavaScript from its
  * own touch callbacks, so the press still happens.
  *
- * Before UIKit delivers a new touch to any recognizer, this gate asks one
- * question with public API: is a view controller presented over the content
- * the touch landed on, without that content being part of the presentation?
- * Then the touch went through the presentation, and React Native's handlers
- * are told to ignore it. It never claims the touch itself (it never
- * recognizes, cancels or delays anything), and with nothing presented it does
- * nothing, so it cannot leave the screen blocked. Content a presentation
- * deliberately leaves usable (an undimmed sheet detent, a popover's
- * passthrough views) and taps during a dismissal are left alone.
+ * When React Native ignores a touch: only when a view controller is
+ * presented over the window and the touch lands outside it (not in its
+ * container or its view). Then React Native never sees that touch. This
+ * holds for *any* presented view controller, not just menus: one that stays
+ * presented while invisible or transparent to touches (a dismissal that
+ * failed, an overlay presented on purpose) makes React Native ignore every
+ * tap outside it in that window until it goes away. So never leave an
+ * invisible view controller presented. Content a presentation deliberately
+ * leaves usable (an undimmed sheet detent, a popover's passthrough views)
+ * and taps during a dismissal are left alone. With nothing presented the
+ * gate changes nothing. It never takes part in a touch itself: it never
+ * recognizes, cancels or delays anything.
  */
 final class MenuTouchGate: UIGestureRecognizer, UIGestureRecognizerDelegate {
   /** React Native's touch handler, looked up by its public class name (no React headers in Swift). */
-  private static let surfaceTouchHandler: AnyClass? = NSClassFromString("RCTSurfaceTouchHandler")
+  static let surfaceTouchHandler: AnyClass? = NSClassFromString("RCTSurfaceTouchHandler")
 
   static func install(in window: UIWindow) {
     guard surfaceTouchHandler != nil,
@@ -81,18 +100,37 @@ final class MenuTouchGate: UIGestureRecognizer, UIGestureRecognizerDelegate {
 
   // MARK: - UIGestureRecognizerDelegate
 
-  /** UIKit asks this for every event before it delivers the event's touches to any recognizer. */
+  /**
+   * UIKit asks this for every event, and on iOS 26 to 27 it asks every
+   * recognizer before it delivers the event's touches to any of them. That
+   * order is not documented, and `UIGestureRecognizerSubclass.h` reserves
+   * `ignore(_:for:)` for a recognizer calling it on itself. So only a
+   * handler that has not started (`.possible`) is told to ignore the touch:
+   * React Native sets `.began` in its own `touchesBegan:`, and UIKit resets
+   * it to `.possible` after each touch sequence. If a future iOS delivered
+   * the touch to React Native first, the handler would already be `.began`,
+   * the gate would leave it alone and the tap would go through as before,
+   * instead of React Native holding a touch that never ends. The same holds
+   * while another finger is down.
+   */
   func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive event: UIEvent) -> Bool {
     for touch in event.allTouches ?? [] where touch.phase == .began {
       if let view = touch.view, Self.wentThroughPresentation(view) {
-        Self.reactHandlers(above: view).forEach { $0.ignore(touch, for: event) }
+        Self.reactHandlers(above: view)
+          .filter { $0.state == .possible }
+          .forEach { $0.ignore(touch, for: event) }
       }
     }
     return true
   }
 
-  /** The gate only looks: it never takes part in a touch. */
+  /** The gate only looks: it never takes part in a touch… */
   func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+    false
+  }
+
+  /** …or in a key press. */
+  func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive press: UIPress) -> Bool {
     false
   }
 
