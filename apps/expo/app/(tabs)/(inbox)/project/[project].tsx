@@ -38,9 +38,9 @@ type LoadFailure = "network" | "other";
 
 /**
  * A project's notifications (DESIGN.md 5.6): a plain list like a Mail
- * mailbox, newest first, loading older pages as you scroll. The filter and
- * "Mark All as Read" live in one labelled toolbar menu instead of chips and
- * an unlabelled icon.
+ * mailbox, newest first, loading older pages as you scroll. A one-tap
+ * Unread Only filter and a More menu with "Mark All as Read" replace the
+ * chips and the unlabelled icon.
  */
 export default function ProjectScreen() {
   const { data: session, isPending: sessionPending } = useSession();
@@ -228,6 +228,8 @@ export default function ProjectScreen() {
 
   const unreadCount = loadedUnreadCount(items);
   const markAllAvailable = canMarkAllRead(unreadCount, summaryUnread, readThrough);
+  // Nothing to filter or mark: the project has no notifications at all.
+  const emptyProject = !loading && !loadFailure && !unreadOnly && items.length === 0;
 
   const renderItem = useCallback(
     ({ item }: { item: InboxNotificationSummaryDto }) => (
@@ -249,22 +251,27 @@ export default function ProjectScreen() {
   return (
     <>
       <Stack.Screen options={{ title }} />
+      {/*
+        Like Mail: one tap on the filter shows unread only (the button reads
+        selected while it does); Mark All as Read stays a deliberate second
+        step in More. A project with nothing in it offers neither.
+      */}
       <Stack.Toolbar placement="right">
-        <Stack.Toolbar.Menu
-          accessibilityLabel="Filter and Actions"
+        <Stack.Toolbar.Button
+          accessibilityHint={
+            unreadOnly ? "Shows all notifications" : "Shows only unread notifications"
+          }
+          accessibilityLabel="Unread Only"
+          hidden={emptyProject}
           icon={
             unreadOnly
               ? "line.3.horizontal.decrease.circle.fill"
               : "line.3.horizontal.decrease.circle"
           }
-        >
-          <Stack.Toolbar.MenuAction
-            icon="line.3.horizontal.decrease"
-            isOn={unreadOnly}
-            onPress={() => setUnreadOnly((on) => !on)}
-          >
-            Show Unread Only
-          </Stack.Toolbar.MenuAction>
+          onPress={() => setUnreadOnly((on) => !on)}
+          selected={unreadOnly}
+        />
+        <Stack.Toolbar.Menu accessibilityLabel="More" hidden={emptyProject} icon="ellipsis">
           <Stack.Toolbar.MenuAction
             disabled={markingAll || !markAllAvailable}
             icon="envelope.open"
