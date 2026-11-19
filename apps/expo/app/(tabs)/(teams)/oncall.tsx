@@ -58,6 +58,11 @@ const RING_INTERVALS: Array<{ label: string; seconds: number | null }> = [
   { label: "5 Minutes", seconds: 300 },
 ];
 
+/** "repeats 1×, then everyone in the team" → "Repeats 1×, then everyone in the team." */
+function sentence(text: string): string {
+  return `${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
+}
+
 function intervalLabel(seconds: number | null): string {
   return RING_INTERVALS.find((option) => option.seconds === seconds)?.label ?? `${seconds} Seconds`;
 }
@@ -225,20 +230,22 @@ export default function OncallScreen() {
             )
           ) : (
             <>
-              <Section>
+              {/*
+                The same "Open Pages" and count as Teams (V-14). With none,
+                a quiet line under the status instead of a header over an
+                empty section (V-16).
+              */}
+              <Section footer={pages.length === 0 ? "All quiet. No open pages." : undefined}>
                 <OncallStatusRow status={status} tinted />
               </Section>
 
-              <Section
-                detail={pages.length > 0 ? `${pages.length} open` : undefined}
-                footer={pages.length === 0 ? "All quiet. No open pages." : undefined}
-                prominent
-                title={teamId ? "Open Pages" : "Your Pages"}
-              >
-                {pages.map((page) => (
-                  <PageRow key={page.id} now={now} page={page} />
-                ))}
-              </Section>
+              {pages.length > 0 ? (
+                <Section detail={String(pages.length)} prominent title="Open Pages">
+                  {pages.map((page) => (
+                    <PageRow key={page.id} now={now} page={page} />
+                  ))}
+                </Section>
+              ) : null}
 
               {teamId && groups && groups.length > 0 ? (
                 <Section prominent title="Rotations">
@@ -381,15 +388,21 @@ function RotationRow({
 }) {
   const stacked = useStackedRows();
   const schedule = `${group.rotation.period === "weekly" ? "Weekly" : "Daily"} · ${group.rotation.handoffAt}`;
-  const policy = escalationPolicySummary(
+  // "On call → 5 min → Everyone in the group · repeats 1× · then everyone in
+  // the team": the chain on one line, what follows it as a sentence on the
+  // next, so no "·" ends a wrapped line (V-06). An arrow keeps to the step
+  // before it, so a wrapped line ends with "→", never starts with one.
+  const [chain = "", ...extras] = escalationPolicySummary(
     group,
     (id) => group.rotation.members.find((member) => member.userId === id)?.name ?? "a teammate",
     (id) => groups.find((other) => other.id === id)?.name ?? "another group",
-  );
+  ).split(" · ");
+  const flow = chain.replace(/ →/g, "\u00A0→");
+  const then = extras.length > 0 ? sentence(extras.join(", ")) : null;
   return (
     <Cell style={styles.rotation}>
       <View
-        accessibilityLabel={spoken(group.name, schedule, policy)}
+        accessibilityLabel={spoken(group.name, schedule, chain, then)}
         accessible
         style={styles.rotationCopy}
       >
@@ -402,8 +415,13 @@ function RotationRow({
           </Text>
         </View>
         <Text color="secondaryLabel" variant="subheadline">
-          {policy}
+          {flow}
         </Text>
+        {then ? (
+          <Text color="secondaryLabel" variant="subheadline">
+            {then}
+          </Text>
+        ) : null}
       </View>
       {group.upcoming.slice(0, 4).map((item, index) => {
         const live = index === 0 && group.current !== null;

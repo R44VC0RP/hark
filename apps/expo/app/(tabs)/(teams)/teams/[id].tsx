@@ -1,6 +1,7 @@
 import { Button as MenuButton } from "@expo/ui/swift-ui";
 import type {
   OncallGroupDto,
+  OncallPageDto,
   TeamDto,
   TeamInviteDto,
   TeamMemberDto,
@@ -10,6 +11,7 @@ import * as Device from "expo-device";
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
 import { Alert, Share, StyleSheet, View } from "react-native";
+import { FactLine } from "../../../../src/components/teams/fact-line";
 import { InviteRow } from "../../../../src/components/teams/invite-row";
 import { type MemberAction, MemberRow } from "../../../../src/components/teams/member-row";
 import { unbroken } from "../../../../src/components/teams/page-row";
@@ -21,6 +23,7 @@ import { useSession } from "../../../../src/lib/auth";
 import { haptic } from "../../../../src/lib/haptics";
 import {
   previewOncallGroups,
+  previewPages,
   previewTeamInvites,
   previewTeamMembers,
   previewTeams,
@@ -34,6 +37,7 @@ import {
   seatsFull,
   seatsLabel,
 } from "../../../../src/lib/teams";
+import { spoken } from "../../../../src/ui/a11y";
 import { Avatar } from "../../../../src/ui/avatar";
 import {
   EmptyState,
@@ -63,24 +67,24 @@ function failed(title: string, cause: unknown): void {
 
 /**
  * "Alex Kim until Thu 5:00 AM" or "Nobody on call". At accessibility sizes
- * the open-page count joins it instead of squeezing the name beside a
- * capsule, and the handoff may wrap.
+ * the open-page count goes on its own line instead of squeezing the name
+ * beside a capsule, and the handoff may wrap.
  */
 function groupSubtitle(group: OncallGroupDto, viewerId: string | undefined, stacked: boolean) {
-  if (!group.current) {
-    return stacked && group.openPageCount > 0
-      ? `Nobody on call · ${group.openPageCount} open`
-      : "Nobody on call";
-  }
+  const open = stacked && group.openPageCount > 0 ? `\n${group.openPageCount} open` : "";
+  if (!group.current) return `Nobody on call${open}`;
   const who = group.current.person.userId === viewerId ? "You" : group.current.person.name;
   const until = `until ${formatHandoff(group.current.endsAt)}`;
-  if (!stacked) return `${who} ${unbroken(until)}`;
-  return `${who} ${until}${group.openPageCount > 0 ? ` · ${group.openPageCount} open` : ""}`;
+  return `${who} ${stacked ? until : unbroken(until)}${open}`;
 }
 
-/** "Owner · 5 seats · Team plan" */
-function identityLine(team: TeamDto): string {
-  return `${roleLabel(team.role)} · ${seatsLabel(team.seats)}${team.plan === "team" ? " · Team plan" : ""}`;
+/** "Owner", "5 seats", "Team plan": one line, or one fact per line at AX sizes. */
+function identityFacts(team: TeamDto): string[] {
+  return [
+    roleLabel(team.role),
+    seatsLabel(team.seats),
+    ...(team.plan === "team" ? ["Team plan"] : []),
+  ];
 }
 
 /**
@@ -99,6 +103,7 @@ export default function TeamScreen() {
   const [members, setMembers] = useState<TeamMemberDto[]>([]);
   const [invites, setInvites] = useState<TeamInviteDto[]>([]);
   const [groups, setGroups] = useState<OncallGroupDto[] | null>(null);
+  const [openPages, setOpenPages] = useState<OncallPageDto[]>([]);
   const [failure, setFailure] = useState<LoadFailure | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [seatLimitHit, setSeatLimitHit] = useState(false);
@@ -120,21 +125,25 @@ export default function TeamScreen() {
       );
       setInvites(isAcme ? previewTeamInvites.filter((invite) => !invite.revokedAt) : []);
       setGroups(isAcme ? previewOncallGroups : []);
+      setOpenPages(previewPages.filter((page) => page.teamId === preview.id));
       return;
     }
     try {
       const result = await api.getTeam(id);
-      const [inviteResult, groupResult] = await Promise.all([
+      const [inviteResult, groupResult, pageResult] = await Promise.all([
         canManageTeam(result.team.role)
           ? api.listTeamInvites(id).catch(() => null)
           : Promise.resolve(null),
         // Older servers lack on-call; the section simply stays hidden.
         api.listOncallGroups(id).catch(() => null),
+        // Which groups have a page nobody has acknowledged yet (V-14).
+        api.listTeamPages(id, { status: "open" }).catch(() => null),
       ]);
       setTeam(result.team);
       setMembers(result.members);
       setInvites(inviteResult?.invites ?? []);
       setGroups(groupResult?.groups ?? null);
+      setOpenPages(pageResult?.pages ?? []);
       setFailure(null);
     } catch (cause) {
       setFailure(
@@ -163,6 +172,8 @@ export default function TeamScreen() {
     setRefreshing(false);
   };
 
+  const needsResponder = (groupId: string) =>
+    openPages.some((page) => page.groupId === groupId && page.status === "triggered");
   const admin = canManageTeam(team?.role);
   const owner = team?.role === "owner";
   const pendingInvites = invites.filter(
@@ -413,7 +424,7 @@ export default function TeamScreen() {
           ) : (
             <>
               <View
-                accessibilityLabel={`${team.name}. ${identityLine(team)}`}
+                accessibilityLabel={spoken(team.name, ...identityFacts(team))}
                 accessible
                 style={[styles.identity, stacked && styles.identityStacked]}
               >
@@ -422,14 +433,14 @@ export default function TeamScreen() {
                   <Text accessibilityRole="header" variant="title3">
                     {team.name}
                   </Text>
-                  <Text color="secondaryLabel" variant="subheadline">
-                    {identityLine(team)}
-                  </Text>
+                  <FactLine facts={identityFacts(team)} />
                 </View>
               </View>
 
               {admin ? (
-                <Section footer="You'll get a link to send. It works once and expires in 7 days.">
+                <Section
+                  footer={"You'll get a link to send. It works once and expires in 7\u00A0days."}
+                >
                   <RowMenu
                     disabled={inviting}
                     hint="Creates a join link and opens the share sheet"
@@ -469,7 +480,7 @@ export default function TeamScreen() {
               ) : null}
 
               {groups && groups.length > 0 ? (
-                <Section title="On Call">
+                <Section prominent title="On Call">
                   {groups.map((group) => (
                     <Row
                       accessibilityHint="Shows shifts, rotations and open pages"
@@ -486,12 +497,17 @@ export default function TeamScreen() {
                       title={group.name}
                       trailing={
                         group.openPageCount > 0 && !stacked ? (
+                          // Red while a page in the group needs a responder,
+                          // like every other open page in the app (V-14).
                           <View
                             accessibilityLabel={`${group.openPageCount} open`}
-                            style={styles.openCapsule}
+                            style={[
+                              styles.openCapsule,
+                              needsResponder(group.id) ? styles.openCapsuleUrgent : null,
+                            ]}
                           >
                             <Text
-                              color="accent"
+                              color={needsResponder(group.id) ? "danger" : "accent"}
                               maxFontSizeMultiplier={1.3}
                               tabular
                               variant="caption1"
@@ -507,7 +523,7 @@ export default function TeamScreen() {
                 </Section>
               ) : null}
 
-              <Section detail={String(members.length)} title="Members">
+              <Section detail={String(members.length)} prominent title="Members">
                 {members.map((member) => {
                   const self = member.userId === viewerId;
                   // Admins manage members and admins; only owners touch other owners.
@@ -525,7 +541,7 @@ export default function TeamScreen() {
               </Section>
 
               {admin && pendingInvites.length > 0 ? (
-                <Section detail={String(pendingInvites.length)} title="Pending Invites">
+                <Section detail={String(pendingInvites.length)} prominent title="Pending Invites">
                   {pendingInvites.map((item) => (
                     <InviteRow invite={item} key={item.id} onRevoke={revokeInvite} />
                   ))}
@@ -570,5 +586,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.capsule(CAPSULE),
     borderCurve: "continuous",
     backgroundColor: colors.accentSoft,
+  },
+  openCapsuleUrgent: {
+    backgroundColor: colors.dangerSoft,
   },
 });

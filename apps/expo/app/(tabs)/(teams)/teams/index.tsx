@@ -17,18 +17,22 @@ import { memberCountLabel, roleLabel } from "../../../../src/lib/teams";
 import { TabRootToolbar } from "../../../../src/ui/account-button";
 import { Avatar } from "../../../../src/ui/avatar";
 import { EmptyState, ErrorState, LoadingState } from "../../../../src/ui/empty-state";
-import { List, Row, Section } from "../../../../src/ui/list";
+import { List, Row, Section, useStackedRows } from "../../../../src/ui/list";
 
 const simulatorPreview = __DEV__ && !Device.isDevice;
 /** Relative times ("4 min ago") move on once a minute. */
 const TICK_MS = 60_000;
 const AVATAR = 36;
 
-function teamSubtitle(team: TeamDto): string {
+/**
+ * "Owner · 5 members · 3 apps" on one line (the row never wraps it, so no "·"
+ * ends a line, V-06); one fact per line at accessibility sizes.
+ */
+function teamSubtitle(team: TeamDto, stacked: boolean): string {
   const apps = team.appCount === 1 ? "1 app" : `${team.appCount} apps`;
   return [roleLabel(team.role), memberCountLabel(team.memberCount), team.appCount > 0 ? apps : null]
     .filter(Boolean)
-    .join(" · ");
+    .join(stacked ? "\n" : " · ");
 }
 
 /**
@@ -39,6 +43,7 @@ function teamSubtitle(team: TeamDto): string {
  */
 export default function TeamsScreen() {
   const router = useRouter();
+  const stacked = useStackedRows();
   const directory = useDirectory();
   const loadFailed = useDirectoryLoadFailed();
   const [refreshing, setRefreshing] = useState(false);
@@ -145,7 +150,10 @@ export default function TeamsScreen() {
         ) : teams.length === 0 ? (
           <EmptyState
             actionTitle="Create a Team"
-            message="Create a team to share apps with the people you work with and take turns being on call. Got an invite? Open the link your teammate sent."
+            // The last two words keep together, so "sent." never sits alone (V-16).
+            message={
+              "Create a team to share apps with the people you work with and take turns being on call. Got an invite? Open the link your teammate\u00A0sent."
+            }
             onAction={newTeam}
             symbol="person.2"
             title="No Teams Yet"
@@ -177,7 +185,8 @@ export default function TeamsScreen() {
                   leading={<Avatar name={team.name} size={AVATAR} />}
                   leadingWidth={AVATAR}
                   onPress={() => router.push({ pathname: "/teams/[id]", params: { id: team.id } })}
-                  subtitle={teamSubtitle(team)}
+                  subtitle={teamSubtitle(team, stacked)}
+                  subtitleLines={1}
                   title={team.name}
                 />
               ))}
