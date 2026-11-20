@@ -17,7 +17,7 @@
     "@better-auth/expo": "^1.6.25",
     "@better-auth/oauth-provider": "1.6.25",
     "@hark/contracts": "workspace:*",
-    "@hono/node-server": "^1.19.15",
+    "@hono/node-server": "^2.1.3",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "autumn-js": "1.2.44",
     "better-auth": "^1.6.25",
