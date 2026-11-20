@@ -5,9 +5,12 @@ import { ANSWER_LABELS } from "../components/inbox/format";
 import { ApiError, api } from "./api";
 import {
   DEVICE_ID_KEY,
-  dropQueuedResponse,
+  flushInteractionResponses,
+  leaveAnswerToQueue,
   onQueuedResponseDone,
-  queueInteractionResponse,
+  removeQueuedAnswer,
+  saveAnswerBeforeSending,
+  visitQueuedAnswers,
 } from "./interactions";
 
 /**
@@ -130,13 +133,14 @@ function resettle(request: SettledRequest): void {
 }
 
 /**
- * The server refused a queued answer: if the request still waits (it
- * changed), the answer didn't count and its buttons come back; else the row
- * says how it closed (answered on another device, expired, withdrawn).
+ * The server refused a queued answer (or the queue no longer has it): if
+ * the request still waits, the answer didn't count and its buttons come
+ * back; else the row says how it closed (answered here or on another
+ * device, expired, withdrawn).
  */
 async function settleRefused(
   interaction: InboxInteractionDto,
-  mayHaveArrived: RequestAnswer | null,
+  mayHaveArrived: RequestAnswer,
 ): Promise<void> {
   const open = await api.listPendingInteractions().then(
     (result) => result.interactions,
@@ -150,11 +154,11 @@ async function settleRefused(
   }
   const [closed] = await outcomesOf([interaction], Date.now());
   if (!closed) return;
-  // The first attempt timed out but may have reached the server after all
-  // (and the queue's retry was then refused as already answered): a
-  // request that closed with exactly that answer got this answer.
+  // An earlier attempt may have reached the server after all (one that
+  // timed out, lost its response, or was out when the app was closed or
+  // killed), and the queue's retry was then refused as already answered:
+  // a request that closed with exactly this answer got this answer.
   const ours =
-    mayHaveArrived &&
     closed.outcome.kind === "answeredElsewhere" &&
     closed.outcome.result === ANSWER_LABELS[mayHaveArrived];
   resettle(ours ? { interaction, outcome: { kind: "answered", answer: mayHaveArrived } } : closed);
@@ -172,10 +176,10 @@ const LATE_ATTEMPT_WAIT_MS = 30_000;
 /** A late first attempt arrived: the answer counted, so the queued retry isn't needed. */
 function lateAttemptArrived(id: string): void {
   lateAttempts.delete(id);
+  void removeQueuedAnswer(id).catch(() => {});
   const queued = queuedAnswers.get(id);
   if (!queued) return;
   queuedAnswers.delete(id);
-  void dropQueuedResponse(id);
   resettle({
     interaction: queued.interaction,
     outcome: { kind: "answered", answer: queued.answer },
@@ -210,9 +214,41 @@ onQueuedResponseDone((id, delivered) => {
           interaction: queued.interaction,
           outcome: { kind: "answered", answer: queued.answer },
         })
-      : settleRefused(queued.interaction, late ? queued.answer : null),
+      : settleRefused(queued.interaction, queued.answer),
   );
 });
+
+/**
+ * Open requests that already have an answer waiting in the retry queue
+ * (given in the app before it was closed or killed, or from a notification
+ * without a connection): their rows say it will be sent instead of offering
+ * the buttons again, and settle when the queue sends it (R4-02). And a row
+ * that says its answer waits when the queue no longer has it (sent or
+ * dropped without word reaching this row) takes the server's real outcome,
+ * so no row stays on "Will send" for ever. Called with each list the Inbox
+ * loads.
+ */
+export async function showQueuedAnswers(open: readonly InboxInteractionDto[]): Promise<void> {
+  const byId = new Map(open.map((item) => [item.id, item]));
+  let found = false;
+  const orphans: { interaction: InboxInteractionDto; answer: RequestAnswer }[] = [];
+  await visitQueuedAnswers((answers) => {
+    const waiting = new Set(answers.map((item) => item.interactionId));
+    for (const { interactionId, input } of answers) {
+      const interaction = byId.get(interactionId);
+      if (!interaction || handled.has(interactionId)) continue;
+      markInteractionQueued(interaction, input.action, "slow");
+      found = true;
+    }
+    for (const [id, queued] of queuedAnswers) {
+      if (waiting.has(id)) continue;
+      queuedAnswers.delete(id);
+      orphans.push(queued);
+    }
+  });
+  if (found) void flushInteractionResponses();
+  for (const { interaction, answer } of orphans) void settleRefused(interaction, answer);
+}
 
 /**
  * Requests that left the server's open list while the Inbox showed them
@@ -288,18 +324,21 @@ export const ANSWER_WAIT_MS = 10_000;
 
 /**
  * Sends an answer given in the app (the Inbox's buttons, the Reply sheet)
- * straight to the server first: the person is looking at the request and
- * should learn at once whether the answer counted (R3-02). Resolves "sent";
- * "taken" when the server says the request already closed (answered on
- * another device, withdrawn, expired: ask `outcomesOf` which); "offline"
- * when no response came back at all (no connection) and "slow" when none
- * came within `ANSWER_WAIT_MS`: either way the answer goes to the retry
- * queue that notification actions use and is sent when the connection
- * works, as before the redesign. A slow first attempt may still arrive; it
- * can't count twice, because the server takes one answer per request and
- * refuses the other with a conflict, and the row ends up showing whichever
- * answer the server kept (`lateAttempts`, `onQueuedResponseDone`). Any
- * other server response throws.
+ * straight to the server: the person is looking at the request and should
+ * learn at once whether the answer counted (R3-02). It is saved in the
+ * retry queue that notification actions use first, as before the redesign,
+ * so it survives the app being closed or killed while the request is out
+ * (R4-02); the queue leaves it alone while this attempt is out. Resolves
+ * "sent"; "taken" when the server says the request already closed (answered
+ * on another device, withdrawn, expired: ask `outcomesOf` which); either
+ * way, and when the server refuses it (thrown), it leaves the queue.
+ * "offline" when no response came back at all (no connection) and "slow"
+ * when none came within `ANSWER_WAIT_MS`: the saved answer is then the
+ * queue's to send when the connection works. A slow first attempt may still
+ * arrive; it can't count twice, because the server takes one answer per
+ * request and refuses the other with a conflict, and the row ends up
+ * showing whichever answer the server kept (`lateAttempts`,
+ * `onQueuedResponseDone`).
  */
 export async function sendAnswer(
   interaction: InboxInteractionDto,
@@ -308,6 +347,7 @@ export async function sendAnswer(
   const deviceId = await SecureStore.getItemAsync(DEVICE_ID_KEY);
   if (!deviceId) throw new Error("This device isn’t registered with Hark.");
   const input = { ...answer, actionDigest: interaction.actionDigest };
+  await saveAnswerBeforeSending(interaction.id, input);
   const attempt = api.respondToInteraction(interaction.id, { ...input, deviceId });
   let timer: ReturnType<typeof setTimeout> | undefined;
   const wait = new Promise<"slow">((resolve) => {
@@ -315,7 +355,10 @@ export async function sendAnswer(
   });
   try {
     const first = await Promise.race([attempt.then(() => "sent" as const), wait]);
-    if (first === "sent") return "sent";
+    if (first === "sent") {
+      await removeQueuedAnswer(interaction.id).catch(() => {});
+      return "sent";
+    }
     lateAttempts.set(
       interaction.id,
       attempt.then(
@@ -327,14 +370,16 @@ export async function sendAnswer(
       () => lateAttemptArrived(interaction.id),
       () => {},
     );
-    await queueInteractionResponse(interaction.id, input);
+    leaveAnswerToQueue(interaction.id);
     return "slow";
   } catch (error) {
     // No HTTP response (an ApiError always has one): keep the answer.
     if (!(error instanceof ApiError)) {
-      await queueInteractionResponse(interaction.id, input);
+      leaveAnswerToQueue(interaction.id);
       return "offline";
     }
+    // Any response settles it here; the queue must not send it again.
+    await removeQueuedAnswer(interaction.id).catch(() => {});
     // 409 "already terminal" (the other 409 is a changed request, an error).
     const taken = error.status === 404 || (error.status === 409 && /terminal/i.test(error.message));
     if (taken) return "taken";

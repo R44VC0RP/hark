@@ -39,6 +39,17 @@ interface QueuedResponse {
 let queueMutation = Promise.resolve();
 let flushing: Promise<void> | null = null;
 let flushRequested = false;
+/**
+ * Answers given in the app whose own first attempt is still out: already
+ * in the queue (so they survive the app being closed or killed), but no
+ * flush sends them until that attempt settles or is given up on.
+ */
+const answering = new Set<string>();
+/**
+ * Responses taken out of the queue since the current flush pass read it:
+ * the pass skips them, so it never sends one that already settled.
+ */
+let removedSinceRead = new Set<string>();
 
 function withQueueLock<T>(operation: () => Promise<T>): Promise<T> {
   const result = queueMutation.then(operation, operation);
@@ -107,28 +118,69 @@ export async function submitInteractionResponse(
 }
 
 /**
- * An answer given in the app that got no response from the server (no
- * connection, or it timed out): stored in the same queue, which sends it
- * when the connection is back (on launch, on return to the app, every 30 s).
- * Resolves once it is stored; the first retry runs in the background.
+ * An answer given in the app, saved in the queue before it is sent (as
+ * before the redesign), so it survives the app being closed or killed while
+ * the request is out (R4-02). It replaces any answer queued earlier for the
+ * same request: the newest one is what the person sees. Flushes leave it
+ * alone until `leaveAnswerToQueue` or `removeQueuedAnswer`.
  */
-export async function queueInteractionResponse(
+export async function saveAnswerBeforeSending(
   interactionId: string,
   input: InteractionActionInput,
 ): Promise<void> {
-  await enqueue({ interactionId, input });
+  answering.add(interactionId);
+  try {
+    await withQueueLock(async () => {
+      const queue = await readQueue();
+      const rest = queue.filter((item) => item.interactionId !== interactionId);
+      await writeQueue([...rest, { interactionId, input }]);
+    });
+  } catch (error) {
+    answering.delete(interactionId);
+    throw error;
+  }
+}
+
+/**
+ * The app's own attempt got no response (no connection, or none in time):
+ * the saved answer is the queue's to send now (on launch, on return to the
+ * app, every 30 s), starting at once.
+ */
+export function leaveAnswerToQueue(interactionId: string): void {
+  answering.delete(interactionId);
+  flushRequested = true;
   void flushInteractionResponses();
 }
 
 /**
- * Takes a response out of the queue (its first attempt arrived late, so
- * the retry isn't needed). The queue's stored shape is unchanged.
+ * The server settled the answer (took it, or refused it and the person was
+ * told): it leaves the queue, and a flush pass that read it before is told
+ * to skip it. The queue's stored shape is unchanged.
  */
-export async function dropQueuedResponse(interactionId: string): Promise<void> {
+export async function removeQueuedAnswer(interactionId: string): Promise<void> {
+  try {
+    await withQueueLock(async () => {
+      const queue = await readQueue();
+      const rest = queue.filter((item) => item.interactionId !== interactionId);
+      if (rest.length !== queue.length) await writeQueue(rest);
+      removedSinceRead.add(interactionId);
+    });
+  } finally {
+    answering.delete(interactionId);
+  }
+}
+
+/**
+ * Calls `visit` with the answers waiting in the queue (not the ones the app
+ * is still sending itself), inside the queue's lock: anything `visit`
+ * marks happens before the queue can deliver one and report it.
+ */
+export async function visitQueuedAnswers(
+  visit: (answers: readonly { interactionId: string; input: InteractionActionInput }[]) => void,
+): Promise<void> {
   await withQueueLock(async () => {
     const queue = await readQueue();
-    const rest = queue.filter((item) => item.interactionId !== interactionId);
-    if (rest.length !== queue.length) await writeQueue(rest);
+    visit(queue.filter((item) => !answering.has(item.interactionId)));
   });
 }
 
@@ -157,7 +209,10 @@ export async function flushInteractionResponses(): Promise<void> {
       flushRequested = false;
       const deviceId = await SecureStore.getItemAsync(DEVICE_ID_KEY);
       if (!deviceId) return;
-      const queue = await withQueueLock(readQueue);
+      const queue = await withQueueLock(() => {
+        removedSinceRead = new Set();
+        return readQueue();
+      });
       if (queue.length === 0) {
         if (flushRequested) continue;
         return;
@@ -165,6 +220,9 @@ export async function flushInteractionResponses(): Promise<void> {
       const completed = new Set<string>();
       const delivered = new Set<string>();
       for (const response of queue) {
+        // The app's own attempt is still out, or the answer already settled.
+        if (answering.has(response.interactionId)) continue;
+        if (removedSinceRead.has(response.interactionId)) continue;
         try {
           if (response.responseToken) {
             await api.respondToInteractionWithToken(response.interactionId, {

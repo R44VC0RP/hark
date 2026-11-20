@@ -40,6 +40,7 @@ import {
   type SettledRequest,
   sendAnswer,
   settleRequests,
+  showQueuedAnswers,
   useHandledInteractionIds,
   useSettledRequests,
 } from "../../../src/lib/inbox-cache";
@@ -193,6 +194,11 @@ export default function InboxScreen() {
             })
           : Promise.resolve(null),
       ]);
+      if (!refreshSequence.isCurrent(token)) return;
+      // A request whose answer already waits in the retry queue (the app was
+      // closed or killed while sending it) says so instead of offering its
+      // buttons again (R4-02).
+      await showQueuedAnswers(interactionResult.interactions);
       if (!refreshSequence.isCurrent(token)) return;
       next = {
         pending: interactionResult.interactions,
