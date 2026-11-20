@@ -1,6 +1,9 @@
 import type { AppDto, TeamDto } from "@hark/contracts";
+import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
-import { useSyncExternalStore } from "react";
+import { usePathname } from "expo-router";
+import { useEffect, useSyncExternalStore } from "react";
+import { AppState } from "react-native";
 import { api, type OncallMeDto } from "./api";
 import {
   previewApps,
@@ -9,12 +12,14 @@ import {
   previewProjects,
   previewTeams,
 } from "./inbox-preview";
+import { onPageClaimed } from "./teams";
 import { cacheApps, cachedApp } from "./web-apps";
 
 /**
- * What the launcher and the iPad sidebar show: the account's web apps, its
- * teams and on-call state, and the inbox counts. Both read one snapshot so
- * they never disagree; whoever loads last publishes it.
+ * What the tab bar badges, the pages accessory, the Apps and Teams tabs and
+ * the keyboard shortcuts show: the account's web apps, its teams and on-call
+ * state, and the inbox counts. Everything reads one snapshot so nothing
+ * disagrees; `refreshDirectory` replaces it.
  */
 export interface Directory {
   apps: AppDto[];
@@ -26,57 +31,247 @@ export interface Directory {
   waiting: number;
 }
 
+/** Reloads at most this often while navigating. */
+const NAVIGATION_REFRESH_MS = 5000;
+
+const simulatorPreview = __DEV__ && !Device.isDevice;
+
 let current: Directory | null = null;
+let currentJson = "";
+/** The last load failed; cleared by the next successful one. */
+let failed = false;
+let inflight: Promise<Directory> | null = null;
+/** The follow-up load requested while `inflight` runs. */
+let queued: Promise<Directory> | null = null;
+let lastRefreshAt = 0;
+/** Loads started so far; numbers each load. */
+let loadsStarted = 0;
 const listeners = new Set<() => void>();
+
+/**
+ * A read-state change the counts already show (`changeUnreadCount`). Loads
+ * started before the server made the change don't include it yet, so it is
+ * added on top of them until a load that started after it arrives.
+ */
+interface UnreadChange {
+  delta: number;
+  /** The first load that includes it; `Infinity` while its request runs. */
+  includedFrom: number;
+}
+const unreadChanges = new Set<UnreadChange>();
+
+function unreadNotYetLoaded(): number {
+  let total = 0;
+  for (const change of unreadChanges) total += change.delta;
+  return total;
+}
+
+/** The app icon badge: the same number as the Inbox tab badge. */
+function setAppBadge(directory: Directory): void {
+  void Notifications.setBadgeCountAsync(directory.waiting + directory.unread).catch(() => {});
+}
 
 function subscribe(listener: () => void) {
   listeners.add(listener);
-  return () => listeners.delete(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 }
 
-export function publishDirectory(directory: Directory): void {
-  current = directory;
+function notify() {
   for (const listener of listeners) listener();
+}
+
+/** Publishes a snapshot; an identical one keeps the old object, so nothing re-renders. */
+export function publishDirectory(directory: Directory): void {
+  const json = JSON.stringify(directory);
+  const changed = json !== currentJson || failed;
+  failed = false;
+  if (json !== currentJson) {
+    current = directory;
+    currentJson = json;
+  }
+  if (changed) notify();
+}
+
+/**
+ * The Inbox refreshes more often than the directory; its counts keep the
+ * Inbox tab badge and the app icon badge current between directory loads.
+ * The one place besides directory loads that sets the app icon badge.
+ */
+export function publishInboxCounts(counts: { unread: number; waiting: number }): void {
+  if (!current) return;
+  // The Inbox may have loaded before a read-state change reached the server:
+  // its unread count waits for the directory load that includes the change.
+  const unread = unreadChanges.size > 0 ? current.unread : counts.unread;
+  if (current.unread === unread && current.waiting === counts.waiting) return;
+  const next = { ...current, unread, waiting: counts.waiting };
+  publishDirectory(next);
+  setAppBadge(next);
+}
+
+/**
+ * Shows a read-state change (read, unread, mark all as read) in the Inbox tab
+ * badge and the app icon badge at once, and keeps showing it until a load
+ * that includes it: `request` makes the change on the server, and if it
+ * fails the counts go back. Every screen that changes read state uses this,
+ * so the badges never wait for the next poll.
+ */
+export function changeUnreadCount<T>(delta: number, request: Promise<T>): Promise<T> {
+  const change: UnreadChange = { delta, includedFrom: Number.POSITIVE_INFINITY };
+  unreadChanges.add(change);
+  shiftUnread(delta);
+  return request.then(
+    (result) => {
+      change.includedFrom = loadsStarted + 1;
+      void refreshDirectory().catch(() => {});
+      return result;
+    },
+    (error: unknown) => {
+      unreadChanges.delete(change);
+      shiftUnread(-delta);
+      throw error;
+    },
+  );
+}
+
+function shiftUnread(delta: number): void {
+  if (!current || delta === 0) return;
+  const next = { ...current, unread: Math.max(0, current.unread + delta) };
+  publishDirectory(next);
+  setAppBadge(next);
 }
 
 export function useDirectory(): Directory | null {
   return useSyncExternalStore(subscribe, () => current);
 }
 
-/** Loads a fresh snapshot (demo data in the simulator) without publishing it. */
-export async function loadDirectory(simulatorPreview: boolean): Promise<Directory> {
-  if (simulatorPreview) {
+/** True while the most recent load failed (screens show `ErrorState` when they have no data). */
+export function useDirectoryLoadFailed(): boolean {
+  return useSyncExternalStore(subscribe, () => failed);
+}
+
+/**
+ * Loads a fresh snapshot (demo data in the simulator) without publishing it.
+ * `countsLoaded` is false when the inbox counts couldn't be loaded (they read 0).
+ */
+async function loadDirectory(
+  preview: boolean,
+): Promise<{ directory: Directory; countsLoaded: boolean }> {
+  if (preview) {
     // Keep consent granted earlier in this preview session.
     const apps = previewApps.map((app) => cachedApp(app.id) ?? app);
     cacheApps(apps);
     return {
-      apps,
-      teams: [...previewTeams],
-      oncall: previewOncallMe,
-      unread: previewProjects.totalUnread,
-      waiting: previewPending.length,
+      directory: {
+        apps,
+        teams: [...previewTeams],
+        oncall: previewOncallMe,
+        unread: previewProjects.totalUnread,
+        waiting: previewPending.length,
+      },
+      countsLoaded: false,
     };
   }
   const [appResult, pendingResult, projectResult, teamResult, oncallResult] = await Promise.all([
     api.listApps(),
     api.listPendingInteractions().catch(() => null),
     api.listInboxProjects().catch(() => null),
-    // Older servers 404 here; team sections and the on-call strip stay hidden.
+    // Older servers 404 here; team sections and on-call stay hidden.
     api.listTeams().catch(() => null),
     api.getMyOncall().catch(() => null),
   ]);
   cacheApps(appResult.apps);
-  const waiting = pendingResult?.interactions.length ?? 0;
-  const unread = projectResult?.totalUnread ?? 0;
-  // Same badge rule as the inbox: pending requests plus unread notifications.
-  if (pendingResult && projectResult) {
-    void Notifications.setBadgeCountAsync(waiting + unread).catch(() => {});
-  }
   return {
-    apps: appResult.apps,
-    teams: teamResult?.teams ?? null,
-    oncall: oncallResult,
-    unread,
-    waiting,
+    directory: {
+      apps: appResult.apps,
+      teams: teamResult?.teams ?? null,
+      oncall: oncallResult,
+      unread: projectResult?.totalUnread ?? 0,
+      waiting: pendingResult?.interactions.length ?? 0,
+    },
+    countsLoaded: pendingResult !== null && projectResult !== null,
   };
+}
+
+/**
+ * Loads and publishes a fresh snapshot. A call made while one is loading gets
+ * one more load that starts after it, shared by every such call: the running
+ * load may have started before the caller's change (an app moved, a page
+ * acknowledged) and would publish what was true before it. Loads never
+ * overlap, so responses arrive in order. Rejects when the load fails (pull to
+ * refresh shows that; background callers ignore it).
+ */
+export function refreshDirectory(): Promise<Directory> {
+  if (queued) return queued;
+  if (inflight) {
+    queued = inflight
+      .catch(() => undefined)
+      .then(() => {
+        queued = null;
+        return startLoad();
+      });
+    return queued;
+  }
+  return startLoad();
+}
+
+function startLoad(): Promise<Directory> {
+  lastRefreshAt = Date.now();
+  const loadNumber = ++loadsStarted;
+  const task = loadDirectory(simulatorPreview)
+    .then(({ directory: loaded, countsLoaded }) => {
+      for (const change of unreadChanges) {
+        if (change.includedFrom <= loadNumber) unreadChanges.delete(change);
+      }
+      const directory = {
+        ...loaded,
+        unread: Math.max(0, loaded.unread + unreadNotYetLoaded()),
+      };
+      publishDirectory(directory);
+      // Same badge rule as the Inbox: pending requests plus unread notifications.
+      if (countsLoaded) setAppBadge(directory);
+      return directory;
+    })
+    .catch((error: unknown) => {
+      if (!failed) {
+        failed = true;
+        notify();
+      }
+      throw error;
+    })
+    .finally(() => {
+      inflight = null;
+    });
+  inflight = task;
+  return task;
+}
+
+/**
+ * Keeps the directory fresh while the signed-in app is open (mounted once,
+ * in the tabs layout): on mount, when the app becomes active, when a push
+ * arrives or a page is claimed, and at most every 5 seconds on navigation.
+ */
+export function useDirectoryRefresh(): void {
+  const pathname = usePathname();
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: navigating is the refresh signal.
+  useEffect(() => {
+    if (Date.now() - lastRefreshAt < NAVIGATION_REFRESH_MS) return;
+    void refreshDirectory().catch(() => {});
+  }, [pathname]);
+
+  useEffect(() => {
+    const refresh = () => void refreshDirectory().catch(() => {});
+    const received = Notifications.addNotificationReceivedListener(refresh);
+    const claimed = onPageClaimed(refresh);
+    const appState = AppState.addEventListener("change", (state) => {
+      if (state === "active") refresh();
+    });
+    return () => {
+      received.remove();
+      claimed();
+      appState.remove();
+    };
+  }, []);
 }

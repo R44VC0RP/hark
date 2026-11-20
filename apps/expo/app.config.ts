@@ -20,6 +20,9 @@ export default ({ config: _config }: ConfigContext): ExpoConfig => ({
   platforms: ["ios"],
   ios: {
     bundleIdentifier: "ceo.ryan.hark",
+    // iOS 26 is the minimum: the app is built on the system's Liquid Glass
+    // controls. The widget extension reads this value too (it links pods).
+    deploymentTarget: "26.0",
     usesAppleSignIn: true,
     icon: "./assets/icon.png",
     supportsTablet: true,
@@ -148,7 +151,7 @@ export default ({ config: _config }: ConfigContext): ExpoConfig => ({
       "expo-build-properties",
       {
         ios: {
-          deploymentTarget: "16.4",
+          deploymentTarget: "26.0",
         },
       },
     ],

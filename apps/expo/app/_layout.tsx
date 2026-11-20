@@ -4,28 +4,54 @@ import {
   InterTight_600SemiBold,
   useFonts,
 } from "@expo-google-fonts/inter-tight";
-import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
-import { router, Stack, usePathname, useSegments } from "expo-router";
+import {
+  Stack,
+  ThemeProvider,
+  usePathname,
+  useRootNavigationState,
+  useSegments,
+} from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import * as SplashScreen from "expo-splash-screen";
-import { useEffect } from "react";
-import { AppState, Pressable, StyleSheet, View } from "react-native";
-import { KeyboardShortcuts, Sidebar } from "../src/components/sidebar";
+import { useEffect, useRef } from "react";
+import { AppState, Settings } from "react-native";
 import { trackAppEvent } from "../src/lib/analytics";
 import { useSession } from "../src/lib/auth";
+import { setHourCycle } from "../src/lib/dates";
 import {
   flushInteractionResponses,
   flushPageAcknowledgements,
   handleNotificationResponse,
   registerInteractionCategories,
+  setNotificationNavigation,
 } from "../src/lib/interactions";
-import { SidebarProvider, useSidebar } from "../src/lib/layout";
 import { startLiveActivityTokenSync } from "../src/lib/live-activities";
+import {
+  goTo,
+  rootTransitionEnded,
+  setCurrentPath,
+  useNavigationForLinks,
+} from "../src/lib/navigation";
 import { PENDING_JOIN_CODE_KEY } from "../src/lib/teams";
-import { colors } from "../src/lib/theme";
+import { useLargeText } from "../src/ui/list";
+import { navigationTheme, palette, sheetOptions, stackScreenOptions } from "../src/ui/tokens";
 
 void SplashScreen.preventAutoHideAsync();
+
+// iOS keeps the 24-Hour Time switch outside the locale Hermes formats with
+// ("3:29 AM" stayed with it on), so times read it from the global defaults.
+setHourCycle(
+  Settings.get("AppleICUForce24HourTime")
+    ? "h23"
+    : Settings.get("AppleICUForce12HourTime")
+      ? "h12"
+      : undefined,
+);
+// Notification taps open screens the one way everything outside the
+// current screen does (src/lib/navigation.ts `goTo`): never inside or
+// under a sheet, and tab routes in their tab with Back (R4-01).
+setNotificationNavigation({ open: goTo });
 void registerInteractionCategories().catch((error) => {
   console.warn("Could not register notification actions", error);
 });
@@ -55,18 +81,16 @@ export default function RootLayout() {
     InterTight_600SemiBold,
   });
 
+  const navigatorReady = fontsLoaded || Boolean(fontError);
+  useNavigationForLinks();
+  const largeText = useLargeText();
   useEffect(() => {
-    if (fontsLoaded || fontError) void SplashScreen.hideAsync();
-  }, [fontsLoaded, fontError]);
+    if (navigatorReady) void SplashScreen.hideAsync();
+  }, [navigatorReady]);
 
   useEffect(() => {
     void trackAppEvent("app_open");
-    // Handle both a cold launch from a notification and taps while the app is running.
-    const initialResponse = Notifications.getLastNotificationResponse();
-    if (initialResponse) {
-      void handleNotificationResponse(initialResponse);
-      void Notifications.clearLastNotificationResponseAsync();
-    }
+    // Taps while the app is running.
     void flushInteractionResponses();
     void flushPageAcknowledgements();
 
@@ -91,6 +115,10 @@ export default function RootLayout() {
     };
   }, []);
 
+  useEffect(() => {
+    setCurrentPath(pathname);
+  }, [pathname]);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: each navigation is a view, even within one pattern.
   useEffect(() => {
     void trackAppEvent("screen_view", { path: routePattern });
@@ -110,7 +138,7 @@ export default function RootLayout() {
       await SecureStore.deleteItemAsync(PENDING_JOIN_CODE_KEY);
       setTimeout(() => {
         try {
-          router.push({ pathname: "/join/[code]", params: { code } });
+          goTo({ pathname: "/join/[code]", params: { code } });
         } catch {
           // The invite link can be opened again.
         }
@@ -118,70 +146,107 @@ export default function RootLayout() {
     });
   }, [signedIn]);
 
-  if (!fontsLoaded && !fontError) return null;
-
-  // The iPad sidebar belongs to the signed-in app, not sign-in or setup.
-  const simulatorPreview = __DEV__ && !Device.isDevice;
-  const sidebarRoute = !["/", "/home", "/la-lab"].includes(pathname);
-  const inApp = Boolean(session || simulatorPreview) && sidebarRoute;
+  if (!navigatorReady) return null;
 
   return (
-    <SidebarProvider enabled={inApp}>
-      {inApp ? <KeyboardShortcuts /> : null}
-      <Shell />
-    </SidebarProvider>
-  );
-}
-
-/** The stack, with the sidebar beside it when the window is wide enough. */
-function Shell() {
-  const { open, docked, dismiss } = useSidebar();
-  return (
-    <View style={{ flex: 1, flexDirection: "row", backgroundColor: colors.paper }}>
-      {docked ? <Sidebar /> : null}
-      <View style={{ flex: 1 }}>
-        <Stack
-          screenOptions={({ route }) => ({
-            headerShown: false,
-            contentStyle: { backgroundColor: colors.paper },
-            // Switching from the sidebar swaps the screen in place, like a tab.
-            animation:
-              (route.params as { via?: string } | undefined)?.via === "sidebar"
-                ? "none"
-                : "default",
-          })}
+    <ThemeProvider value={navigationTheme}>
+      <LaunchNotificationResponse />
+      <Stack
+        screenListeners={{
+          // A link waits for the sheet it closed to be gone (navigation.ts).
+          transitionEnd: (event) => rootTransitionEnded(event.target, event.data.closing),
+        }}
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: palette.background },
+        }}
+      >
+        <Stack.Screen name="index" />
+        <Stack.Screen
+          name="home"
+          options={{ ...stackScreenOptions, headerShown: true, title: "" }}
         />
-      </View>
-      {open && !docked ? (
-        // Too narrow to dock: the sidebar slides over the content until a
-        // choice is made or the dimmed content is tapped.
-        <View style={StyleSheet.absoluteFill}>
-          <Pressable
-            accessibilityLabel="Hide sidebar"
-            onPress={dismiss}
-            style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(23, 23, 19, 0.24)" }]}
-          />
-          <View
-            style={{
-              position: "absolute",
-              top: 0,
-              bottom: 0,
-              left: 0,
-              flexDirection: "row",
-              ...overlayShadow,
-            }}
-          >
-            <Sidebar />
-          </View>
-        </View>
-      ) : null}
-    </View>
+        {/*
+          Nothing belongs behind the tabs, so the edge swipe never pops them
+          (it popped a second tab bar that a launch-chain link had stacked).
+          They replace Sign In or Set Up without a slide: a launch opens
+          straight into them.
+        */}
+        <Stack.Screen name="(tabs)" options={{ gestureEnabled: false, animation: "none" }} />
+        <Stack.Screen name="web/[id]" />
+        <Stack.Screen name="apps/[id]" options={sheetOptions} />
+        {/*
+          A page sheet, not a form sheet: on iPad a form sheet is about
+          570 × 650 pt, which put the toolbar over the details and the
+          timeline below the fold.
+        */}
+        <Stack.Screen name="pages/[id]" options={{ ...sheetOptions, presentation: "pageSheet" }} />
+        <Stack.Screen name="join/[code]" options={sheetOptions} />
+        <Stack.Screen name="critical-alerts" options={sheetOptions} />
+        <Stack.Screen
+          name="reply/[id]"
+          options={{
+            ...sheetOptions,
+            sheetAllowedDetents: [0.5, 1],
+            // From xxxLarge up the request and the focused field don't fit
+            // at half height: iOS scrolls the caret into view and
+            // the title ends up under the header (checked in the simulator).
+            sheetInitialDetentIndex: largeText ? 1 : 0,
+            sheetGrabberVisible: true,
+            // The sheets' warm grey (from `sheetOptions`) at both heights: on
+            // glass at half height the composer sat on blurred thumbnails and
+            // green buttons, and at full height the sheet turned white.
+          }}
+        />
+        <Stack.Screen
+          name="settings"
+          options={{ presentation: "formSheet", sheetAllowedDetents: [1], headerShown: false }}
+        />
+        <Stack.Screen name="la-lab" />
+      </Stack>
+    </ThemeProvider>
   );
 }
 
-const overlayShadow = {
-  shadowColor: "#000000",
-  shadowOpacity: 0.18,
-  shadowRadius: 24,
-  shadowOffset: { width: 8, height: 0 },
-} as const;
+/** The parts of a navigator state this file reads. */
+type StackState = { index?: number; routes?: { name: string; state?: unknown }[] } | undefined;
+
+/**
+ * True once whatever is on top of the root stack can take a push: the tabs
+ * mount their navigators only after their gate passes, and a push into the
+ * Inbox stack before that would add a second copy of the tabs.
+ */
+function rootReady(stack: StackState): boolean {
+  const top = stack?.routes?.[stack.index ?? 0];
+  if (!top) return false;
+  return top.name !== "(tabs)" || Boolean(top.state);
+}
+
+/**
+ * A cold launch from a notification tap, delivered once there is somewhere
+ * to deliver it (each step checked in the simulator): after the Stack has
+ * mounted (earlier navigation re-mounts the root layout in a loop), after
+ * Sign In's redirects to Set Up and the Inbox (their queued `replace` would
+ * replace the pushed screen), and after the tabs' navigators exist. Signed
+ * out it goes at once; those screens handle it. Taps while running use the
+ * listener in the root layout.
+ */
+function LaunchNotificationResponse() {
+  const { data: session, isPending } = useSession();
+  const pathname = usePathname();
+  const stack = useRootNavigationState()?.routes?.[0]?.state as StackState;
+  const pending = useRef<Notifications.NotificationResponse | null | undefined>(undefined);
+  if (pending.current === undefined) {
+    pending.current = Notifications.getLastNotificationResponse() ?? null;
+    if (pending.current) void Notifications.clearLastNotificationResponseAsync();
+  }
+  const signedOut = !isPending && !session;
+  const ready = signedOut || (pathname !== "/" && pathname !== "/home" && rootReady(stack));
+  useEffect(() => {
+    const response = pending.current;
+    if (!ready || !response) return;
+    pending.current = null;
+    void handleNotificationResponse(response);
+  }, [ready]);
+  return null;
+}

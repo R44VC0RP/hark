@@ -39,6 +39,17 @@ interface QueuedResponse {
 let queueMutation = Promise.resolve();
 let flushing: Promise<void> | null = null;
 let flushRequested = false;
+/**
+ * Answers given in the app whose own first attempt is still out: already
+ * in the queue (so they survive the app being closed or killed), but no
+ * flush sends them until that attempt settles or is given up on.
+ */
+const answering = new Set<string>();
+/**
+ * Responses taken out of the queue since the current flush pass read it:
+ * the pass skips them, so it never sends one that already settled.
+ */
+let removedSinceRead = new Set<string>();
 
 function withQueueLock<T>(operation: () => Promise<T>): Promise<T> {
   const result = queueMutation.then(operation, operation);
@@ -106,6 +117,88 @@ export async function submitInteractionResponse(
   await submitOrQueue({ interactionId, input });
 }
 
+/**
+ * An answer given in the app, saved in the queue before it is sent (as
+ * before the redesign), so it survives the app being closed or killed while
+ * the request is out (R4-02). It replaces any answer queued earlier for the
+ * same request: the newest one is what the person sees. Flushes leave it
+ * alone until `leaveAnswerToQueue` or `removeQueuedAnswer`.
+ */
+export async function saveAnswerBeforeSending(
+  interactionId: string,
+  input: InteractionActionInput,
+): Promise<void> {
+  answering.add(interactionId);
+  try {
+    await withQueueLock(async () => {
+      const queue = await readQueue();
+      const rest = queue.filter((item) => item.interactionId !== interactionId);
+      await writeQueue([...rest, { interactionId, input }]);
+    });
+  } catch (error) {
+    answering.delete(interactionId);
+    throw error;
+  }
+}
+
+/**
+ * The app's own attempt got no response (no connection, or none in time):
+ * the saved answer is the queue's to send now (on launch, on return to the
+ * app, every 30 s), starting at once.
+ */
+export function leaveAnswerToQueue(interactionId: string): void {
+  answering.delete(interactionId);
+  flushRequested = true;
+  void flushInteractionResponses();
+}
+
+/**
+ * The server settled the answer (took it, or refused it and the person was
+ * told): it leaves the queue, and a flush pass that read it before is told
+ * to skip it. The queue's stored shape is unchanged.
+ */
+export async function removeQueuedAnswer(interactionId: string): Promise<void> {
+  try {
+    await withQueueLock(async () => {
+      const queue = await readQueue();
+      const rest = queue.filter((item) => item.interactionId !== interactionId);
+      if (rest.length !== queue.length) await writeQueue(rest);
+      removedSinceRead.add(interactionId);
+    });
+  } finally {
+    answering.delete(interactionId);
+  }
+}
+
+/**
+ * Calls `visit` with the answers waiting in the queue (not the ones the app
+ * is still sending itself), inside the queue's lock: anything `visit`
+ * marks happens before the queue can deliver one and report it.
+ */
+export async function visitQueuedAnswers(
+  visit: (answers: readonly { interactionId: string; input: InteractionActionInput }[]) => void,
+): Promise<void> {
+  await withQueueLock(async () => {
+    const queue = await readQueue();
+    visit(queue.filter((item) => !answering.has(item.interactionId)));
+  });
+}
+
+/**
+ * In memory only: the queue's verdict on each response it finishes, the
+ * server took it (`delivered`) or refused it for good (400/404/409), so the
+ * Inbox can show what happened to an answer it queued.
+ */
+type QueuedResponseListener = (interactionId: string, delivered: boolean) => void;
+const queuedResponseListeners = new Set<QueuedResponseListener>();
+
+export function onQueuedResponseDone(listener: QueuedResponseListener): () => void {
+  queuedResponseListeners.add(listener);
+  return () => {
+    queuedResponseListeners.delete(listener);
+  };
+}
+
 export async function flushInteractionResponses(): Promise<void> {
   if (flushing) {
     flushRequested = true;
@@ -116,13 +209,20 @@ export async function flushInteractionResponses(): Promise<void> {
       flushRequested = false;
       const deviceId = await SecureStore.getItemAsync(DEVICE_ID_KEY);
       if (!deviceId) return;
-      const queue = await withQueueLock(readQueue);
+      const queue = await withQueueLock(() => {
+        removedSinceRead = new Set();
+        return readQueue();
+      });
       if (queue.length === 0) {
         if (flushRequested) continue;
         return;
       }
       const completed = new Set<string>();
+      const delivered = new Set<string>();
       for (const response of queue) {
+        // The app's own attempt is still out, or the answer already settled.
+        if (answering.has(response.interactionId)) continue;
+        if (removedSinceRead.has(response.interactionId)) continue;
         try {
           if (response.responseToken) {
             await api.respondToInteractionWithToken(response.interactionId, {
@@ -136,6 +236,7 @@ export async function flushInteractionResponses(): Promise<void> {
             await api.respondToInteraction(response.interactionId, input);
           }
           completed.add(response.interactionId);
+          delivered.add(response.interactionId);
         } catch (error) {
           if (isTerminalApiError(error)) completed.add(response.interactionId);
         }
@@ -145,6 +246,11 @@ export async function flushInteractionResponses(): Promise<void> {
         const current = await readQueue();
         await writeQueue(current.filter((response) => !completed.has(response.interactionId)));
       });
+      for (const interactionId of completed) {
+        for (const listener of queuedResponseListeners) {
+          listener(interactionId, delivered.has(interactionId));
+        }
+      }
       // Continue immediately so work enqueued during this pass cannot be stranded.
     }
   })();
@@ -301,6 +407,32 @@ export async function registerInteractionCategories(): Promise<void> {
   ]);
 }
 
+/** Where a notification tap goes: a route in the router's object form. */
+export interface NotificationDestination {
+  pathname: "/pages/[id]" | "/join/[code]" | "/notification/[id]" | "/web/[id]";
+  params: Record<string, string>;
+}
+
+/**
+ * How a notification tap navigates: every destination (page, invite,
+ * notification detail, web app) goes through `open`. The root layout
+ * installs `src/lib/navigation.ts`'s `goTo`, the one way into the app from
+ * outside the current screen, so a tap never opens inside or under a sheet
+ * and never pushes a second copy of the tabs over a web app (R4-01). Until
+ * then (and in tests) it pushes the route.
+ */
+export interface NotificationNavigation {
+  open(destination: NotificationDestination): void;
+}
+
+let notificationNavigation: NotificationNavigation = {
+  open: (destination) => router.push(destination),
+};
+
+export function setNotificationNavigation(navigation: NotificationNavigation): void {
+  notificationNavigation = navigation;
+}
+
 /** Best-effort push navigation that tolerates a not-yet-mounted router on cold start. */
 function navigateSoon(navigate: () => void): void {
   try {
@@ -318,12 +450,15 @@ function navigateSoon(navigate: () => void): void {
 
 function openPage(pageId: string, intent?: "escalate"): void {
   navigateSoon(() =>
-    router.push({ pathname: "/pages/[id]", params: { id: pageId, ...(intent ? { intent } : {}) } }),
+    notificationNavigation.open({
+      pathname: "/pages/[id]",
+      params: { id: pageId, ...(intent ? { intent } : {}) },
+    }),
   );
 }
 
 function openJoin(code: string): void {
-  navigateSoon(() => router.push({ pathname: "/join/[code]", params: { code } }));
+  navigateSoon(() => notificationNavigation.open({ pathname: "/join/[code]", params: { code } }));
 }
 
 /** Handles taps and actions on on-call pages; returns false for other pushes. */
@@ -351,40 +486,19 @@ async function handlePageResponse(response: Notifications.NotificationResponse):
   return true;
 }
 
-/** Best-effort navigation that tolerates a not-yet-mounted router on cold start. */
 function openNotificationDetail(compositeId: string): void {
-  const navigate = () => {
-    router.push({ pathname: "/notification/[id]", params: { id: compositeId } });
-  };
-  try {
-    navigate();
-  } catch {
-    setTimeout(() => {
-      try {
-        navigate();
-      } catch {
-        // The inbox remains one tap away; navigation is best effort.
-      }
-    }, 500);
-  }
+  navigateSoon(() =>
+    notificationNavigation.open({ pathname: "/notification/[id]", params: { id: compositeId } }),
+  );
 }
 
-/** Opens a Hark web app, retrying once if the router is not mounted yet. */
 function openWebApp(appId: string, url: string | undefined): void {
-  const navigate = () => {
-    router.push({ pathname: "/web/[id]", params: { id: appId, ...(url ? { url } : {}) } });
-  };
-  try {
-    navigate();
-  } catch {
-    setTimeout(() => {
-      try {
-        navigate();
-      } catch {
-        // The app stays one tap away on the home screen.
-      }
-    }, 500);
-  }
+  navigateSoon(() =>
+    notificationNavigation.open({
+      pathname: "/web/[id]",
+      params: { id: appId, ...(url ? { url } : {}) },
+    }),
+  );
 }
 
 export async function handleNotificationResponse(

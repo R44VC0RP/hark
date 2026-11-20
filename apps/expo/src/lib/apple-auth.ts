@@ -2,6 +2,8 @@ import * as AppleAuthentication from "expo-apple-authentication";
 import * as Crypto from "expo-crypto";
 import { API_URL, authClient, getCookie } from "./auth";
 
+const APPLE_SIGN_IN_FAILED = "Couldn’t sign in with Apple. Try again.";
+
 function randomHex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
@@ -36,9 +38,10 @@ export async function signInWithApple(): Promise<"signed-in" | "cancelled"> {
     throw error;
   }
 
-  if (credential.state !== state) throw new Error("Apple sign-in state did not match");
+  // Shown on Sign In as they are: one plain sentence, like its other errors.
+  if (credential.state !== state) throw new Error(APPLE_SIGN_IN_FAILED);
   if (!credential.identityToken || !credential.authorizationCode) {
-    throw new Error("Apple did not return the credentials needed to sign in");
+    throw new Error(APPLE_SIGN_IN_FAILED);
   }
 
   const firstName = credential.fullName?.givenName ?? undefined;
@@ -58,7 +61,7 @@ export async function signInWithApple(): Promise<"signed-in" | "cancelled"> {
           : undefined,
     },
   });
-  if (result.error) throw new Error(result.error.message ?? "Apple sign-in failed");
+  if (result.error) throw new Error(result.error.message ?? APPLE_SIGN_IN_FAILED);
 
   try {
     const response = await fetch(`${API_URL}/api/apple-auth/native-token`, {
@@ -74,7 +77,7 @@ export async function signInWithApple(): Promise<"signed-in" | "cancelled"> {
     });
     if (!response.ok) {
       const body = (await response.json().catch(() => null)) as { error?: string } | null;
-      throw new Error(body?.error ?? "Could not secure Apple account deletion access");
+      throw new Error(body?.error ?? APPLE_SIGN_IN_FAILED);
     }
   } catch (error) {
     await authClient.signOut().catch(() => undefined);

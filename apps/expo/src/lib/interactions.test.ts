@@ -146,7 +146,7 @@ describe("notification tap destinations", () => {
         buttons?.find((button) => button.text === "Cancel")?.onPress?.();
       });
       await handleNotificationResponse(defaultResponse(url));
-      expect(Alert.alert).toHaveBeenCalledWith("Open in another app?", url, expect.any(Array));
+      expect(Alert.alert).toHaveBeenCalledWith("Open in Another App?", url, expect.any(Array));
       expect(Linking.openURL).not.toHaveBeenCalled();
 
       vi.mocked(Alert.alert).mockImplementationOnce((_title, _message, buttons) => {

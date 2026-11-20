@@ -13,6 +13,7 @@ import {
   type TeamSummaryDto,
 } from "@hark/contracts";
 import { ApiError } from "./api-error";
+import { formatTimeUntil } from "./dates";
 
 /**
  * Pure helpers for teams and on-call. Kept free of React Native imports so
@@ -99,37 +100,6 @@ export function currentShift<T extends OncallShiftDto>(shifts: T[], now = Date.n
   );
 }
 
-const DAY_MS = 86_400_000;
-
-function startOfDay(time: number): number {
-  const date = new Date(time);
-  date.setHours(0, 0, 0, 0);
-  return date.getTime();
-}
-
-/**
- * Compact handoff time: "9:00 AM" today, "Mon 9:00 AM" within the week, and
- * "Oct 14, 9:00 AM" further out.
- */
-export function formatHandoff(value: string, now = Date.now(), locale?: string): string {
-  const time = Date.parse(value);
-  const clock = new Date(time).toLocaleTimeString(locale, { hour: "numeric", minute: "2-digit" });
-  const days = Math.round((startOfDay(time) - startOfDay(now)) / DAY_MS);
-  if (days === 0) return clock;
-  if (days > 0 && days < 7) {
-    return `${new Date(time).toLocaleDateString(locale, { weekday: "short" })} ${clock}`;
-  }
-  return `${new Date(time).toLocaleDateString(locale, { month: "short", day: "numeric" })}, ${clock}`;
-}
-
-export function onCallSummary(
-  shift: OncallShiftDto & { groupName: string },
-  now = Date.now(),
-  locale?: string,
-): string {
-  return `On call for ${shift.groupName} until ${formatHandoff(shift.endsAt, now, locale)}`;
-}
-
 /** Pages nobody has acknowledged yet. */
 export function pagesNeedingResponse(pages: OncallPageDto[]): OncallPageDto[] {
   return pages.filter((page) => page.status === "triggered");
@@ -147,14 +117,6 @@ export function pageStatusLabel(page: Pick<OncallPageDto, "status">): string {
       : "Resolved";
 }
 
-function relativeMinutes(target: number, now: number): string {
-  const minutes = Math.max(0, Math.round((target - now) / 60_000));
-  if (minutes < 1) return "now";
-  if (minutes < 60) return `in ${minutes} min`;
-  const hours = Math.round(minutes / 60);
-  return `in ${hours} hr`;
-}
-
 export function escalationLabel(
   page: Pick<
     OncallPageDto,
@@ -170,22 +132,29 @@ export function escalationLabel(
   }
   const step = page.escalationStep > 0 ? `Escalated ${page.escalationStep}×` : "Not escalated";
   if (!page.nextEscalationAt) return `${step} · no further steps`;
-  return `${step} · next ${relativeMinutes(Date.parse(page.nextEscalationAt), now)}`;
+  return `${step} · next ${formatTimeUntil(page.nextEscalationAt, now)}`;
 }
 
-/** One timeline line: "Paged Ana · level 0", "Cal escalated · paged Ben · level 1", "Claimed by Ben". */
+/** Keeps a phrase on one line ("Priya Shah"), so wrapped text breaks between phrases. */
+export function unbroken(text: string): string {
+  return text.replace(/ /g, "\u00A0");
+}
+
+/**
+ * One timeline line in plain words: "Paged Ana", "Escalated to Ben",
+ * "Cal escalated to Ben", "Paged Ana again" (the policy started over),
+ * "Acknowledged by Ben". No "level 1, loop 2" jargon (V-17).
+ */
 export function timelineLabel(event: OncallPageEventDto): string {
-  const names = event.people.map((person) => person.name).join(", ");
-  if (event.kind === "acknowledged") return `Claimed by ${names}`;
+  // A name never breaks across lines (no-break spaces); a list wraps between names.
+  const names = event.people.map((person) => unbroken(person.name)).join(", ");
+  if (event.kind === "acknowledged") return `Acknowledged by ${names}`;
   if (event.kind === "resolved") return `Resolved by ${names}`;
-  const where = [
-    event.level !== null ? `level ${event.level}` : null,
-    event.loop ? `loop ${event.loop + 1}` : null,
-  ]
-    .filter(Boolean)
-    .join(", ");
-  const paged = `Paged ${names || "nobody"}${where ? ` · ${where}` : ""}`;
-  return event.escalatedBy ? `${event.escalatedBy.name} escalated · ${paged}` : paged;
+  const who = names || "nobody";
+  const again = event.loop ? " again" : "";
+  if (event.escalatedBy) return `${event.escalatedBy.name} escalated to ${who}${again}`;
+  if (event.level) return `Escalated to ${who}${again}`;
+  return `Paged ${who}${again}`;
 }
 
 /** Readable escalation policy: "On call → 5 min → Next in rotation → 10 min → Everyone in the group". */
@@ -219,17 +188,6 @@ export function escalationPolicySummary(
   if (group.escalationFinal === "team") summary += " · then everyone in the team";
   if (group.escalationMode === "hand_off") summary += " · hands off";
   return summary;
-}
-
-/** "Just now", "3 min ago", "2 hr ago", "4 days ago". */
-export function timeAgo(value: string, now = Date.now()): string {
-  const minutes = Math.round((now - Date.parse(value)) / 60_000);
-  if (minutes < 1) return "Just now";
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} hr ago`;
-  const days = Math.round(hours / 24);
-  return days === 1 ? "1 day ago" : `${days} days ago`;
 }
 
 /** Pulls the join code out of `hark://join/<code>` or `https://…/join/<code>`. */

@@ -1,9 +1,14 @@
 import { useState } from "react";
-import { Image, StyleSheet, Text, View } from "react-native";
-import { fonts } from "../lib/theme";
+import { Image, StyleSheet, View } from "react-native";
 import { fallbackTint } from "../lib/web-apps";
+import { Text } from "../ui/text";
 
-/** Rounded app tile: the registered icon, or a deterministic letter tile. */
+/**
+ * Rounded app tile (DESIGN.md 3.4): the registered icon, or a deterministic
+ * letter tile. The corner is the Home Screen's continuous curve at
+ * `size × 0.225`; the letter is the system font and keeps its size at every
+ * text size, like the icon around it.
+ */
 export function AppIcon({
   name,
   iconUrl,
@@ -14,27 +19,29 @@ export function AppIcon({
   size: number;
 }) {
   const [failed, setFailed] = useState(false);
-  const radius = Math.round(size * 0.27);
+  const frame = { width: size, height: size, borderRadius: size * 0.225 };
   if (iconUrl && !failed) {
     return (
       <Image
         accessibilityIgnoresInvertColors
         onError={() => setFailed(true)}
         source={{ uri: iconUrl }}
-        style={[styles.tile, { width: size, height: size, borderRadius: radius }]}
+        style={[styles.tile, frame]}
       />
     );
   }
   const tint = fallbackTint(name);
   return (
-    <View
-      style={[
-        styles.tile,
-        styles.fallback,
-        { width: size, height: size, borderRadius: radius, backgroundColor: tint.background },
-      ]}
-    >
-      <Text style={[styles.letter, { color: tint.foreground, fontSize: Math.round(size * 0.4) }]}>
+    <View style={[styles.tile, styles.fallback, frame, { backgroundColor: tint.background }]}>
+      <Text
+        allowFontScaling={false}
+        style={{
+          color: tint.foreground,
+          fontSize: Math.round(size * 0.4),
+          lineHeight: Math.round(size * 0.5),
+        }}
+        weight="600"
+      >
         {Array.from(name.trim())[0]?.toUpperCase() ?? "?"}
       </Text>
     </View>
@@ -44,14 +51,12 @@ export function AppIcon({
 const styles = StyleSheet.create({
   tile: {
     flexShrink: 0,
+    borderCurve: "continuous",
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "#0000001A",
   },
   fallback: {
     alignItems: "center",
     justifyContent: "center",
-  },
-  letter: {
-    fontFamily: fonts.semibold,
   },
 });

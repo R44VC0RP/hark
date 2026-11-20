@@ -1,43 +1,22 @@
 import { API_ERROR_CODE_CONSENT_REQUIRED, type AppDto } from "@hark/contracts";
 import * as Device from "expo-device";
-import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
-import * as SecureStore from "expo-secure-store";
+import { Stack, useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { SymbolView } from "expo-symbols";
-import {
-  type ComponentProps,
-  type ReactNode,
-  type RefObject,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import {
-  ActionSheetIOS,
-  ActivityIndicator,
-  Alert,
-  Animated,
-  findNodeHandle,
-  Linking,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  View,
-} from "react-native";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ActionSheetIOS, Alert, Linking, Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 import type { ShouldStartLoadRequest } from "react-native-webview/lib/WebViewTypes";
-import { AppIcon } from "../../src/components/app-icon";
+import { ConsentView } from "../../src/components/web/consent-view";
+import { HoldHint } from "../../src/components/web/hold-hint";
+import { LaunchErrorView, SigningInView } from "../../src/components/web/launch-state";
+import { WebBarItems, type WebChrome, webHeaderOptions } from "../../src/components/web/web-header";
 import { ApiError, api } from "../../src/lib/api";
 import { isHttpUrl, openExternalLink } from "../../src/lib/inbox-body";
 import { previewApps } from "../../src/lib/inbox-preview";
 import { onKeyCommand } from "../../src/lib/key-commands";
-import { deviceNoun, readableColumn, useHover, useLayout, useSidebar } from "../../src/lib/layout";
-import { colors, fonts, tightTracking } from "../../src/lib/theme";
+import { deviceNoun, useLayout } from "../../src/lib/layout";
+import { backOr } from "../../src/lib/navigation";
 import {
   buildBridgeScript,
   buildResolveScript,
@@ -50,6 +29,7 @@ import {
   resolveLaunchUrl,
 } from "../../src/lib/web-apps";
 import { clearWebsiteDataForOrigin } from "../../src/lib/website-data";
+import { palette } from "../../src/ui/tokens";
 
 type Phase = "loading" | "consent" | "ready" | "error";
 
@@ -58,8 +38,6 @@ interface Pass {
   expiresAt: number;
 }
 
-const HINT_COUNT_KEY = "hark.webApps.hintCount";
-const HINT_SHOWS = 3;
 /** Reuse a prefetched pass only while it has comfortable validity left. */
 const PASS_REUSE_MARGIN_MS = 30_000;
 
@@ -69,6 +47,25 @@ const PASS_REUSE_MARGIN_MS = 30_000;
  */
 const edgeToEdgeApps = new Set<string>();
 
+/**
+ * Each app's last reported theme colour, so reopening it paints the strip,
+ * the iPad bar and the page background in its colour from the first frame
+ * instead of flashing paper first.
+ */
+const stripColors = new Map<string, string>();
+
+/**
+ * A web app, signed in with a Hark pass (DESIGN.md 5.11).
+ *
+ * iPhone and compact windows keep the chromeless contract web-app authors
+ * build for: no header, a status strip in the page's colour, a two-finger
+ * hold for the Hark menu, the left-edge swipe walking page history first.
+ * The first opens teach the gesture with a Liquid Glass hint.
+ *
+ * iPad regular windows get the native navigation bar in the page's colour
+ * with glass items: Close, Back, Forward, Reload; Open in Safari, App Info,
+ * Switch App and More (Stop Signing In).
+ */
 export default function WebAppScreen() {
   const params = useLocalSearchParams<{ id: string; url?: string }>();
   const id = String(params.id);
@@ -77,28 +74,30 @@ export default function WebAppScreen() {
   const insets = useSafeAreaInsets();
   const simulatorPreview = __DEV__ && !Device.isDevice;
   const webView = useRef<WebView>(null);
-  const prefetched = useRef<Pass | null>(null);
+  // The pass requested while the page starts loading; the page's first
+  // getToken() takes it (or a fresh one when it failed or is about to expire).
+  const prefetched = useRef<Promise<Pass> | null>(null);
   const currentUrl = useRef<string | null>(null);
   const [app, setApp] = useState<AppDto | null>(() => cachedApp(id) ?? null);
   const [phase, setPhase] = useState<Phase>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // The app is gone (404): trying again can't help, only Back to Hark.
+  const [removed, setRemoved] = useState(false);
+  // "Signing you in…" stays over the web view until its first page has
+  // loaded, so opening an app never shows a blank page.
+  const [pageLoaded, setPageLoaded] = useState(false);
   const [canGoBack, setCanGoBack] = useState(false);
   const [canGoForward, setCanGoForward] = useState(false);
-  // iPad-sized windows get a toolbar instead of the hidden two-finger menu.
-  const { regular: toolbar } = useLayout();
-  const sidebar = useSidebar();
-  const menuButton = useRef<View>(null);
-  const [stripColor, setStripColor] = useState("#FFFFFF");
+  // iPad-sized windows get the native bar instead of the hidden two-finger menu.
+  const { regular } = useLayout();
+  const [stripColor, setStripColor] = useState(() => stripColors.get(id) ?? palette.background);
   const [reloadKey, setReloadKey] = useState(0);
   // Safari's rule: a page that sets viewport-fit=cover draws under the status
   // bar and home indicator and handles the edges with env(safe-area-inset-*).
   // Other pages keep Hark's status strip and the system's insets.
   const [edgeToEdge, setEdgeToEdge] = useState(() => edgeToEdgeApps.has(id));
 
-  const close = useCallback(() => {
-    if (router.canGoBack()) router.back();
-    else router.replace("/apps");
-  }, [router]);
+  const close = useCallback(() => backOr("/apps"), []);
 
   const issuePass = useCallback(
     async (input: Parameters<typeof api.getAppPass>[1] = {}): Promise<Pass> => {
@@ -119,24 +118,34 @@ export default function WebAppScreen() {
   const start = useCallback(async () => {
     setPhase("loading");
     setErrorMessage(null);
+    setRemoved(false);
+    setPageLoaded(false);
     try {
       let current = cachedApp(id) ?? null;
       if (simulatorPreview) current = current ?? previewApps.find((item) => item.id === id) ?? null;
       else if (!current) current = (await api.getApp(id)).app;
-      if (!current) throw new Error("This app is no longer available.");
+      if (!current) {
+        setRemoved(true);
+        throw new Error("This app is no longer available.");
+      }
       cacheApps([current]);
       setApp(current);
       if (!current.consentedAt) {
         setPhase("consent");
         return;
       }
-      prefetched.current = await issuePass();
+      // The page starts loading while its pass is issued; a failure still
+      // ends in consent or the error view below.
+      const pass = issuePass();
+      prefetched.current = pass;
       setPhase("ready");
+      await pass;
     } catch (error) {
       if (error instanceof ApiError && error.code === API_ERROR_CODE_CONSENT_REQUIRED) {
         setPhase("consent");
         return;
       }
+      if (error instanceof ApiError && error.status === 404) setRemoved(true);
       setErrorMessage(
         error instanceof ApiError && error.status === 404
           ? "This app was removed."
@@ -152,19 +161,34 @@ export default function WebAppScreen() {
     void start();
   }, [start]);
 
+  // Stable page actions, shared by the iPad bar, the Hark menu and ⌘ keys.
+  const goBack = useCallback(() => webView.current?.goBack(), []);
+  const goForward = useCallback(() => webView.current?.goForward(), []);
+  const reload = useCallback(() => webView.current?.reload(), []);
+  const appId = app?.id;
+  const appUrlForSafari = app?.url;
+  // Safari never receives a pass, so the page opens signed out there.
+  const openInSafari = useCallback(() => {
+    const target = currentUrl.current ?? appUrlForSafari;
+    if (target) void Linking.openURL(target).catch(() => {});
+  }, [appUrlForSafari]);
+  const showAppInfo = useCallback(() => {
+    if (appId) router.push({ pathname: "/apps/[id]", params: { id: appId, from: "web" } });
+  }, [appId, router]);
+
   // ⌘R, ⌘[, ⌘] and ⌘W from a hardware keyboard, while this app is in front.
   useFocusEffect(
     useCallback(() => {
       const subscriptions = [
-        onKeyCommand("reload", () => webView.current?.reload()),
-        onKeyCommand("back", () => webView.current?.goBack()),
-        onKeyCommand("forward", () => webView.current?.goForward()),
+        onKeyCommand("reload", reload),
+        onKeyCommand("back", goBack),
+        onKeyCommand("forward", goForward),
         onKeyCommand("close", close),
       ];
       return () => {
         for (const unsubscribe of subscriptions) unsubscribe();
       };
-    }, [close]),
+    }, [close, goBack, goForward, reload]),
   );
 
   // The left-edge swipe walks back through the page's history first and only
@@ -197,7 +221,9 @@ export default function WebAppScreen() {
         cacheApps([approved]);
         setApp(approved);
       }
-      prefetched.current = await issuePass({ consent: true, ...sharing });
+      const pass = issuePass({ consent: true, ...sharing });
+      prefetched.current = pass;
+      await pass;
       setPhase("ready");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Couldn’t sign in.");
@@ -206,10 +232,67 @@ export default function WebAppScreen() {
   };
 
   const takePass = async (): Promise<string> => {
-    const cached = prefetched.current;
+    const pending = prefetched.current;
     prefetched.current = null;
+    const cached = pending ? await pending.catch(() => null) : null;
     if (cached && cached.expiresAt - Date.now() > PASS_REUSE_MARGIN_MS) return cached.token;
     return (await issuePass()).token;
+  };
+
+  const stopSigningIn = useCallback(() => {
+    if (!app) return;
+    Alert.alert(
+      `Stop Signing In to ${app.name}?`,
+      `Hark will stop sending passes to ${new URL(app.origin).host}. Its saved data on this ${deviceNoun} is cleared too.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Stop Signing In",
+          style: "destructive",
+          onPress: () => {
+            const done = () => close();
+            if (simulatorPreview) return done();
+            void Promise.all([
+              api
+                .revokeApp(app.id)
+                .then((result) => cacheApps([result.app]))
+                .catch(() => {}),
+              clearWebsiteDataForOrigin(app.origin),
+            ]).finally(done);
+          },
+        },
+      ],
+    );
+  }, [app, close, simulatorPreview]);
+
+  // The Hark menu: a two-finger hold on the page (or VoiceOver's action on
+  // the status strip). On iPad the same actions live in the bar; a hold there
+  // shows this sheet as a centred popover.
+  const showMenu = () => {
+    if (!app) return;
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        title: app.name,
+        message: `Signed in with Hark on ${new URL(app.origin).host}`,
+        options: [
+          "Back to Hark",
+          "Reload",
+          "Open in Safari",
+          "App Info",
+          "Stop Signing In",
+          "Cancel",
+        ],
+        destructiveButtonIndex: 4,
+        cancelButtonIndex: 5,
+      },
+      (index) => {
+        if (index === 0) close();
+        else if (index === 1) reload();
+        else if (index === 2) openInSafari();
+        else if (index === 3) showAppInfo();
+        else if (index === 4) stopSigningIn();
+      },
+    );
   };
 
   const onMessage = (event: WebViewMessageEvent) => {
@@ -232,7 +315,10 @@ export default function WebAppScreen() {
     if (message.type === "theme") {
       if (!fromAppOrigin) return;
       const color = pickStripColor(message.color, message.background);
-      if (color) setStripColor(color);
+      if (color) {
+        stripColors.set(id, color);
+        setStripColor(color);
+      }
       return;
     }
     if (message.type === "close") {
@@ -273,7 +359,7 @@ export default function WebAppScreen() {
           new Promise((resolve) => {
             const web = isHttpUrl(target);
             Alert.alert(
-              web ? `This link leaves ${appName}` : "Open in another app?",
+              web ? `This Link Leaves ${appName}` : "Open in Another App?",
               web
                 ? `It opens ${label} in Safari. Your Hark sign-in stays with ${signInHost}.`
                 : `${appName} wants to open ${target}`,
@@ -297,470 +383,143 @@ export default function WebAppScreen() {
     return false;
   };
 
-  const stopSigningIn = () => {
-    if (!app) return;
-    Alert.alert(
-      `Stop signing in to ${app.name}?`,
-      `Hark will stop sending passes to ${new URL(app.origin).host}. Its saved data on this ${deviceNoun} is cleared too.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Stop signing in",
-          style: "destructive",
-          onPress: () => {
-            const done = () => close();
-            if (simulatorPreview) return done();
-            void Promise.all([
-              api
-                .revokeApp(app.id)
-                .then((result) => cacheApps([result.app]))
-                .catch(() => {}),
-              clearWebsiteDataForOrigin(app.origin),
-            ]).finally(done);
-          },
-        },
-      ],
-    );
-  };
+  const failed = phase === "error" || (phase === "ready" && !launchUrl);
+  const ready = phase === "ready" && app !== null && launchUrl !== null;
+  const chrome: WebChrome = phase === "consent" ? "close" : regular ? "bar" : "none";
+  const appName = app?.name ?? "";
+  // One options object per change: in-page options re-apply whenever it changes.
+  const headerOptions = useMemo(
+    () => webHeaderOptions(chrome, { color: stripColor, title: appName }),
+    [appName, chrome, stripColor],
+  );
 
-  const showMenu = () => {
-    if (!app) return;
-    const options = [
-      "Back to Hark",
-      "Reload",
-      "Open in Safari",
-      "App info",
-      "Stop signing in",
-      "Cancel",
-    ];
-    const anchor = menuButton.current ? findNodeHandle(menuButton.current) : null;
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        // On iPad the sheet is a popover pointing at the toolbar's menu button.
-        ...(anchor ? { anchor } : {}),
-        title: app.name,
-        message: `Signed in with Hark on ${new URL(app.origin).host}`,
-        options,
-        destructiveButtonIndex: 4,
-        cancelButtonIndex: 5,
-      },
-      (index) => {
-        if (index === 0) close();
-        else if (index === 1) webView.current?.reload();
-        else if (index === 2) {
-          // Safari never receives a pass, so the page opens signed out there.
-          void Linking.openURL(currentUrl.current ?? app.url).catch(() => {});
-        } else if (index === 3) router.push({ pathname: "/apps/[id]", params: { id: app.id } });
-        else if (index === 4) stopSigningIn();
-      },
-    );
-  };
-
+  let content: ReactNode;
   if (phase === "consent" && app) {
-    return <ConsentView app={app} onApprove={approve} onCancel={close} />;
-  }
-
-  if (phase === "error" || (phase === "ready" && !launchUrl)) {
-    return (
-      <View style={[styles.center, { paddingTop: insets.top }]}>
+    content = <ConsentView app={app} onApprove={approve} onCancel={close} />;
+  } else if (failed) {
+    content = (
+      <>
         <StatusBar style="dark" />
-        {app ? <AppIcon iconUrl={app.iconUrl} name={app.name} size={56} /> : null}
-        <Text style={styles.centerTitle}>Couldn’t open {app?.name ?? "this app"}</Text>
-        <Text style={styles.centerBody}>{errorMessage ?? "Something went wrong."}</Text>
-        <View style={styles.centerActions}>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => void start()}
-            style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}
-          >
-            <Text style={styles.primaryButtonText}>Try again</Text>
-          </Pressable>
-          <Pressable accessibilityRole="button" onPress={close} style={styles.textButton}>
-            <Text style={styles.textButtonLabel}>Back to Hark</Text>
-          </Pressable>
-        </View>
-      </View>
+        <LaunchErrorView
+          app={app}
+          message={errorMessage ?? "Something went wrong."}
+          onClose={close}
+          onRetry={removed ? undefined : () => void start()}
+        />
+      </>
     );
-  }
-
-  if (phase !== "ready" || !app || !launchUrl) {
-    return (
-      <View style={[styles.center, { paddingTop: insets.top }]}>
+  } else if (!ready || !app || !launchUrl) {
+    content = (
+      <>
         <StatusBar style="dark" />
-        {app ? <AppIcon iconUrl={app.iconUrl} name={app.name} size={64} /> : null}
-        <Text style={styles.centerTitle}>Signing you in…</Text>
-        <Text style={styles.centerBody}>
-          {app ? `Getting your Hark pass for ${new URL(app.origin).host}` : "Opening app"}
-        </Text>
-        <ActivityIndicator color={colors.accent} style={styles.spinner} />
+        <SigningInView app={app} />
+      </>
+    );
+  } else {
+    content = (
+      <View style={[styles.container, { backgroundColor: stripColor }]}>
+        <StatusBar style={isDarkColor(stripColor) ? "light" : "dark"} />
+        {chrome === "bar" ? null : edgeToEdge ? (
+          // Edge to edge, nothing native may sit on the page: the menu button is
+          // for VoiceOver only (an action on an element that takes no touches).
+          // Everyone else opens the menu with a two-finger hold on the page.
+          <View
+            accessibilityActions={[{ name: "activate" }]}
+            accessibilityHint="Shows Hark options"
+            accessibilityLabel="Hark menu"
+            accessibilityRole="button"
+            accessible
+            onAccessibilityAction={(event) => {
+              if (event.nativeEvent.actionName === "activate") showMenu();
+            }}
+            pointerEvents="none"
+            style={[styles.menuOverlay, { height: insets.top }]}
+          />
+        ) : (
+          /*
+            iOS keeps status-bar touches for itself, so this strip mainly serves
+            VoiceOver; people open the menu with a two-finger hold on the page.
+          */
+          <Pressable
+            accessibilityHint="Shows Hark options"
+            accessibilityLabel="Hark menu"
+            accessibilityRole="button"
+            delayLongPress={400}
+            onLongPress={showMenu}
+            onPress={showMenu}
+            style={{ height: insets.top, backgroundColor: stripColor }}
+          />
+        )}
+        <WebView
+          allowsBackForwardNavigationGestures={canGoBack}
+          allowsInlineMediaPlayback
+          applicationNameForUserAgent="Hark"
+          // Edge to edge, WebKit gets the real safe area, so the page's
+          // env(safe-area-inset-*) values are the device's, not 0.
+          automaticallyAdjustContentInsets={!edgeToEdge}
+          contentInsetAdjustmentBehavior={edgeToEdge ? "never" : "automatic"}
+          injectedJavaScriptBeforeContentLoaded={bridgeScript}
+          injectedJavaScriptBeforeContentLoadedForMainFrameOnly
+          key={reloadKey}
+          onContentProcessDidTerminate={() => setReloadKey((key) => key + 1)}
+          onLoadEnd={() => setPageLoaded(true)}
+          onError={(event) => {
+            setErrorMessage(event.nativeEvent.description || "The page couldn’t be loaded.");
+            setPhase("error");
+          }}
+          onMessage={onMessage}
+          onNavigationStateChange={(state) => {
+            currentUrl.current = state.url;
+            setCanGoBack(state.canGoBack);
+            setCanGoForward(state.canGoForward);
+          }}
+          onOpenWindow={(event) => {
+            const target = event.nativeEvent.targetUrl;
+            if (isAppOrigin(target, app.origin)) {
+              webView.current?.injectJavaScript(
+                `window.location.assign(${JSON.stringify(target)}); true;`,
+              );
+            } else openOutside(target);
+          }}
+          onShouldStartLoadWithRequest={onShouldStartLoad}
+          originWhitelist={["*"]}
+          ref={webView}
+          source={{ uri: launchUrl }}
+          // Matches the page so the home-indicator inset never shows a white band.
+          style={[styles.webView, { backgroundColor: stripColor }]}
+          webviewDebuggingEnabled={__DEV__}
+        />
+        {chrome === "bar" ? null : <HoldHint top={insets.top} />}
+        {pageLoaded ? null : (
+          <View style={styles.cover}>
+            <StatusBar style="dark" />
+            <SigningInView app={app} />
+          </View>
+        )}
       </View>
     );
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: stripColor }]}>
-      <StatusBar style={isDarkColor(stripColor) ? "light" : "dark"} />
-      {toolbar ? (
-        <WebToolbar
+    <>
+      <Stack.Screen options={headerOptions} />
+      {chrome === "bar" ? (
+        <WebBarItems
           app={app}
           canGoBack={canGoBack}
           canGoForward={canGoForward}
-          color={stripColor}
-          menuButton={menuButton}
-          onBack={() => webView.current?.goBack()}
-          onClose={sidebar.docked ? undefined : close}
-          onForward={() => webView.current?.goForward()}
-          onInfo={() => router.push({ pathname: "/apps/[id]", params: { id: app.id } })}
-          onMenu={showMenu}
-          onReload={() => webView.current?.reload()}
-          onSafari={() => void Linking.openURL(currentUrl.current ?? app.url).catch(() => {})}
-          onToggleSidebar={sidebar.fits ? sidebar.toggle : undefined}
-          sidebarOpen={sidebar.docked}
-          top={insets.top}
+          onBack={goBack}
+          onClose={close}
+          onForward={goForward}
+          onInfo={showAppInfo}
+          onReload={reload}
+          onSafari={openInSafari}
+          onStopSigningIn={stopSigningIn}
+          ready={ready}
         />
-      ) : edgeToEdge ? (
-        // Edge to edge, nothing native may sit on the page: the menu button is
-        // for VoiceOver only (an action on an element that takes no touches).
-        // Everyone else opens the menu with a two-finger hold on the page.
-        <View
-          accessibilityActions={[{ name: "activate" }]}
-          accessibilityHint="Shows Hark options"
-          accessibilityLabel="Hark menu"
-          accessibilityRole="button"
-          accessible
-          onAccessibilityAction={(event) => {
-            if (event.nativeEvent.actionName === "activate") showMenu();
-          }}
-          pointerEvents="none"
-          style={[styles.menuOverlay, { height: insets.top }]}
-        />
-      ) : (
-        /*
-          iOS keeps status-bar touches for itself, so this strip mainly serves
-          VoiceOver; people open the menu with a two-finger hold on the page.
-        */
-        <Pressable
-          accessibilityHint="Shows Hark options"
-          accessibilityLabel="Hark menu"
-          accessibilityRole="button"
-          delayLongPress={400}
-          onLongPress={showMenu}
-          onPress={showMenu}
-          style={{ height: insets.top, backgroundColor: stripColor }}
-        />
-      )}
-      <WebView
-        allowsBackForwardNavigationGestures={canGoBack}
-        allowsInlineMediaPlayback
-        applicationNameForUserAgent="Hark"
-        // Edge to edge, WebKit gets the real safe area, so the page's
-        // env(safe-area-inset-*) values are the device's, not 0.
-        automaticallyAdjustContentInsets={!edgeToEdge}
-        contentInsetAdjustmentBehavior={edgeToEdge ? "never" : "automatic"}
-        injectedJavaScriptBeforeContentLoaded={bridgeScript}
-        injectedJavaScriptBeforeContentLoadedForMainFrameOnly
-        key={reloadKey}
-        onContentProcessDidTerminate={() => setReloadKey((key) => key + 1)}
-        onError={(event) => {
-          setErrorMessage(event.nativeEvent.description || "The page couldn’t be loaded.");
-          setPhase("error");
-        }}
-        onMessage={onMessage}
-        onNavigationStateChange={(state) => {
-          currentUrl.current = state.url;
-          setCanGoBack(state.canGoBack);
-          setCanGoForward(state.canGoForward);
-        }}
-        onOpenWindow={(event) => {
-          const target = event.nativeEvent.targetUrl;
-          if (isAppOrigin(target, app.origin)) {
-            webView.current?.injectJavaScript(
-              `window.location.assign(${JSON.stringify(target)}); true;`,
-            );
-          } else openOutside(target);
-        }}
-        onShouldStartLoadWithRequest={onShouldStartLoad}
-        originWhitelist={["*"]}
-        ref={webView}
-        source={{ uri: launchUrl }}
-        // Matches the page so the home-indicator inset never shows a white band.
-        style={[styles.webView, { backgroundColor: stripColor }]}
-        webviewDebuggingEnabled={__DEV__}
-      />
-      {toolbar ? null : <HoldHint top={insets.top} />}
-    </View>
-  );
-}
-
-/**
- * The iPad toolbar over a web app: history, reload, which site you're signed
- * in to, and Hark's actions, tinted to the page's own theme color.
- */
-function WebToolbar({
-  app,
-  color,
-  top,
-  canGoBack,
-  canGoForward,
-  sidebarOpen,
-  menuButton,
-  onBack,
-  onForward,
-  onReload,
-  onSafari,
-  onInfo,
-  onMenu,
-  onClose,
-  onToggleSidebar,
-}: {
-  app: AppDto;
-  color: string;
-  top: number;
-  canGoBack: boolean;
-  canGoForward: boolean;
-  sidebarOpen: boolean;
-  menuButton: RefObject<View | null>;
-  onBack: () => void;
-  onForward: () => void;
-  onReload: () => void;
-  onSafari: () => void;
-  onInfo: () => void;
-  onMenu: () => void;
-  onClose?: () => void;
-  onToggleSidebar?: () => void;
-}) {
-  const dark = isDarkColor(color);
-  const ink = dark ? "#FFFFFF" : colors.ink;
-  const faint = dark ? "rgba(255, 255, 255, 0.62)" : colors.muted;
-  const host = new URL(app.origin).host;
-  return (
-    <View
-      style={[
-        styles.toolbar,
-        { paddingTop: top, backgroundColor: color },
-        dark ? styles.toolbarDark : styles.toolbarLight,
-      ]}
-    >
-      <View style={styles.toolbarSide}>
-        {onToggleSidebar ? (
-          <ToolbarButton
-            color={ink}
-            icon="sidebar.left"
-            label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
-            onPress={onToggleSidebar}
-          />
-        ) : null}
-        {onClose ? (
-          <ToolbarButton color={ink} icon="xmark" label="Back to Hark" onPress={onClose} />
-        ) : null}
-        <ToolbarButton
-          color={ink}
-          disabled={!canGoBack}
-          icon="chevron.left"
-          label="Back"
-          onPress={onBack}
-        />
-        <ToolbarButton
-          color={ink}
-          disabled={!canGoForward}
-          icon="chevron.right"
-          label="Forward"
-          onPress={onForward}
-        />
-        <ToolbarButton color={ink} icon="arrow.clockwise" label="Reload" onPress={onReload} />
-      </View>
-      <View
-        accessible
-        accessibilityLabel={`${app.name}, signed in on ${host}`}
-        style={styles.toolbarTitle}
-      >
-        <AppIcon iconUrl={app.iconUrl} name={app.name} size={22} />
-        <Text numberOfLines={1} style={[styles.toolbarName, { color: ink }]}>
-          {app.name}
-        </Text>
-        <Text numberOfLines={1} style={[styles.toolbarHost, { color: faint }]}>
-          {host}
-        </Text>
-      </View>
-      <View style={[styles.toolbarSide, styles.toolbarSideEnd]}>
-        <ToolbarButton color={ink} icon="safari" label="Open in Safari" onPress={onSafari} />
-        <ToolbarButton color={ink} icon="info.circle" label="App info" onPress={onInfo} />
-        <View collapsable={false} ref={menuButton}>
-          <ToolbarButton color={ink} icon="ellipsis.circle" label="Hark menu" onPress={onMenu} />
-        </View>
-      </View>
-    </View>
-  );
-}
-
-function ToolbarButton({
-  icon,
-  label,
-  color,
-  disabled,
-  onPress,
-}: {
-  icon: ComponentProps<typeof SymbolView>["name"];
-  label: string;
-  color: string;
-  disabled?: boolean;
-  onPress: () => void;
-}): ReactNode {
-  const { hovered, hoverProps } = useHover();
-  return (
-    <Pressable
-      {...hoverProps}
-      accessibilityLabel={label}
-      accessibilityRole="button"
-      accessibilityState={{ disabled: Boolean(disabled) }}
-      disabled={disabled}
-      hitSlop={4}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.toolbarButton,
-        hovered && !disabled && styles.toolbarButtonPressed,
-        disabled && styles.toolbarButtonDisabled,
-        pressed && styles.toolbarButtonPressed,
-      ]}
-    >
-      <SymbolView name={icon} size={18} tintColor={color} weight="medium" />
-    </Pressable>
-  );
-}
-
-/** Briefly teaches the hidden gesture on the first few opens. */
-function HoldHint({ top }: { top: number }) {
-  const opacity = useRef(new Animated.Value(0)).current;
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    void SecureStore.getItemAsync(HINT_COUNT_KEY).then((value) => {
-      const count = Number(value ?? 0);
-      if (cancelled || count >= HINT_SHOWS) return;
-      void SecureStore.setItemAsync(HINT_COUNT_KEY, String(count + 1));
-      setVisible(true);
-      Animated.sequence([
-        Animated.delay(600),
-        Animated.timing(opacity, { toValue: 1, duration: 220, useNativeDriver: true }),
-        Animated.delay(2600),
-        Animated.timing(opacity, { toValue: 0, duration: 260, useNativeDriver: true }),
-      ]).start(() => {
-        if (!cancelled) setVisible(false);
-      });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [opacity]);
-
-  if (!visible) return null;
-  return (
-    <Animated.View pointerEvents="none" style={[styles.hint, { top: top + 8, opacity }]}>
-      <View style={styles.hintDot} />
-      <Text style={styles.hintText}>
-        Hold two fingers for Hark · swipe from the left edge to go back
-      </Text>
-    </Animated.View>
-  );
-}
-
-function ConsentView({
-  app,
-  onApprove,
-  onCancel,
-}: {
-  app: AppDto;
-  onApprove: (sharing: { shareName: boolean; shareEmail: boolean }) => void;
-  onCancel: () => void;
-}) {
-  const insets = useSafeAreaInsets();
-  const [shareName, setShareName] = useState(app.shareName);
-  const [shareEmail, setShareEmail] = useState(app.shareEmail);
-  const host = new URL(app.origin).host;
-
-  return (
-    <View style={[styles.consent, { paddingTop: insets.top, paddingBottom: insets.bottom + 12 }]}>
-      <StatusBar style="dark" />
-      <View style={styles.consentHeader}>
-        <Pressable
-          accessibilityLabel="Close"
-          accessibilityRole="button"
-          onPress={onCancel}
-          style={({ pressed }) => [styles.closeButton, pressed && styles.pressed]}
-        >
-          <SymbolView name="xmark" size={13} tintColor={colors.ink} weight="semibold" />
-        </Pressable>
-      </View>
-      <ScrollView contentContainerStyle={styles.consentScroll}>
-        <View style={styles.identity}>
-          <AppIcon iconUrl={app.iconUrl} name={app.name} size={56} />
-          <View style={styles.identityCopy}>
-            <Text style={styles.consentTitle}>Sign in to {app.name}?</Text>
-            <Text style={styles.consentHost}>{host}</Text>
-          </View>
-        </View>
-        <Text style={styles.consentBody}>
-          Hark gives {app.name} a one-time pass that proves it’s you. It only works on this site and
-          expires in 2 minutes.
-        </Text>
-        <Text style={styles.sectionLabel}>Shared with {app.name}</Text>
-        <View style={styles.shareRow}>
-          <View style={styles.shareCopy}>
-            <Text style={styles.shareLabel}>Hark ID</Text>
-            <Text style={styles.shareValue}>A private ID made just for this app</Text>
-          </View>
-          <Text style={styles.always}>Always</Text>
-        </View>
-        <SharingSwitch label="Name" onChange={setShareName} value={shareName} />
-        <SharingSwitch label="Email" onChange={setShareEmail} value={shareEmail} />
-      </ScrollView>
-      <View style={styles.consentActions}>
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => onApprove({ shareName, shareEmail })}
-          style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}
-        >
-          <Text style={styles.primaryButtonText}>Continue</Text>
-        </Pressable>
-        <Pressable accessibilityRole="button" onPress={onCancel} style={styles.textButton}>
-          <Text style={styles.textButtonLabel}>Not now</Text>
-        </Pressable>
-        {app.team ? (
-          <Text style={styles.footnote}>
-            Shared with {app.team.name}
-            {app.addedBy ? ` · ${app.addedBy} added this` : ""}
-          </Text>
-        ) : app.createdBy ? (
-          <Text style={styles.footnote}>Added by {app.createdBy}</Text>
-        ) : null}
-      </View>
-    </View>
-  );
-}
-
-function SharingSwitch({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: boolean;
-  onChange: (value: boolean) => void;
-}) {
-  return (
-    <View style={styles.shareRow}>
-      <View style={styles.shareCopy}>
-        <Text style={styles.shareLabel}>{label}</Text>
-        <Text style={styles.shareValue}>{value ? "Shared" : "Not shared"}</Text>
-      </View>
-      <Switch
-        accessibilityLabel={`Share ${label.toLowerCase()}`}
-        onValueChange={onChange}
-        trackColor={{ true: colors.accent, false: colors.line }}
-        value={value}
-      />
-    </View>
+      ) : null}
+      {content}
+    </>
   );
 }
 
@@ -771,61 +530,13 @@ const styles = StyleSheet.create({
   webView: {
     flex: 1,
   },
-  toolbar: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    paddingHorizontal: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  toolbarLight: {
-    borderBottomColor: "rgba(23, 23, 19, 0.12)",
-  },
-  toolbarDark: {
-    borderBottomColor: "rgba(255, 255, 255, 0.14)",
-  },
-  toolbarSide: {
-    minWidth: 220,
-    height: 52,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 2,
-  },
-  toolbarSideEnd: {
-    justifyContent: "flex-end",
-  },
-  toolbarTitle: {
-    minWidth: 0,
-    height: 52,
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  },
-  toolbarName: {
-    flexShrink: 1,
-    fontFamily: fonts.semibold,
-    fontSize: 15,
-    letterSpacing: tightTracking(15),
-  },
-  toolbarHost: {
-    flexShrink: 2,
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    letterSpacing: tightTracking(13),
-  },
-  toolbarButton: {
-    width: 40,
-    height: 40,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 20,
-  },
-  toolbarButtonDisabled: {
-    opacity: 0.3,
-  },
-  toolbarButtonPressed: {
-    backgroundColor: "rgba(127, 127, 127, 0.18)",
+  cover: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 5,
   },
   menuOverlay: {
     position: "absolute",
@@ -833,199 +544,5 @@ const styles = StyleSheet.create({
     right: 0,
     left: 0,
     zIndex: 1,
-  },
-  center: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    paddingHorizontal: 32,
-    backgroundColor: colors.paper,
-  },
-  centerTitle: {
-    marginTop: 8,
-    color: colors.ink,
-    fontFamily: fonts.semibold,
-    fontSize: 17,
-    textAlign: "center",
-    letterSpacing: tightTracking(17),
-  },
-  centerBody: {
-    color: colors.muted,
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    lineHeight: 18,
-    textAlign: "center",
-    letterSpacing: tightTracking(13),
-  },
-  centerActions: {
-    width: "100%",
-    maxWidth: 400,
-    gap: 4,
-    marginTop: 18,
-  },
-  spinner: {
-    marginTop: 8,
-  },
-  hint: {
-    position: "absolute",
-    alignSelf: "center",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 7,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 16,
-    backgroundColor: "rgba(23, 23, 19, 0.88)",
-  },
-  hintDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: "#5ED8B7",
-  },
-  hintText: {
-    color: "#FFFFFF",
-    fontFamily: fonts.medium,
-    fontSize: 12,
-    letterSpacing: tightTracking(12),
-  },
-  consent: {
-    flex: 1,
-    backgroundColor: colors.paper,
-  },
-  consentHeader: {
-    ...readableColumn,
-    maxWidth: 560,
-    minHeight: 52,
-    justifyContent: "center",
-    paddingHorizontal: 16,
-  },
-  closeButton: {
-    width: 34,
-    height: 34,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 17,
-    backgroundColor: "#F2F1ED",
-  },
-  consentScroll: {
-    ...readableColumn,
-    maxWidth: 560,
-    paddingHorizontal: 24,
-    paddingTop: 20,
-    paddingBottom: 24,
-  },
-  identity: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 14,
-  },
-  identityCopy: {
-    minWidth: 0,
-    flex: 1,
-    gap: 3,
-  },
-  consentTitle: {
-    color: colors.ink,
-    fontFamily: fonts.semibold,
-    fontSize: 22,
-    lineHeight: 27,
-    letterSpacing: tightTracking(22),
-  },
-  consentHost: {
-    color: colors.muted,
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    letterSpacing: tightTracking(13),
-  },
-  consentBody: {
-    marginTop: 20,
-    color: colors.ink,
-    fontFamily: fonts.regular,
-    fontSize: 15,
-    lineHeight: 22,
-    letterSpacing: tightTracking(15),
-  },
-  sectionLabel: {
-    marginTop: 26,
-    paddingBottom: 8,
-    color: colors.muted,
-    fontFamily: fonts.semibold,
-    fontSize: 12,
-    letterSpacing: 0.5,
-    textTransform: "uppercase",
-  },
-  shareRow: {
-    minHeight: 56,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.line,
-  },
-  shareCopy: {
-    minWidth: 0,
-    flex: 1,
-    gap: 1,
-  },
-  shareLabel: {
-    color: colors.ink,
-    fontFamily: fonts.medium,
-    fontSize: 14,
-    letterSpacing: tightTracking(14),
-  },
-  shareValue: {
-    color: colors.muted,
-    fontFamily: fonts.regular,
-    fontSize: 12,
-    letterSpacing: tightTracking(12),
-  },
-  always: {
-    color: colors.soft,
-    fontFamily: fonts.regular,
-    fontSize: 12,
-  },
-  consentActions: {
-    ...readableColumn,
-    maxWidth: 560,
-    gap: 4,
-    paddingHorizontal: 24,
-  },
-  primaryButton: {
-    minHeight: 52,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 26,
-    backgroundColor: colors.accent,
-  },
-  primaryButtonText: {
-    color: "#FFFFFF",
-    fontFamily: fonts.medium,
-    fontSize: 16,
-    letterSpacing: tightTracking(16),
-  },
-  pressed: {
-    opacity: 0.85,
-    transform: [{ scale: 0.98 }],
-  },
-  textButton: {
-    minHeight: 44,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  textButtonLabel: {
-    color: colors.muted,
-    fontFamily: fonts.medium,
-    fontSize: 14,
-    letterSpacing: tightTracking(14),
-  },
-  footnote: {
-    color: colors.soft,
-    fontFamily: fonts.regular,
-    fontSize: 12,
-    lineHeight: 17,
-    textAlign: "center",
-    letterSpacing: tightTracking(12),
   },
 });

@@ -24,6 +24,15 @@ export function originOf(url: string): string | null {
   }
 }
 
+/** "grafana.example.com": the host every app row shows for an app or its link. */
+export function hostOf(url: string): string {
+  try {
+    return new URL(url).host || url;
+  } catch {
+    return url;
+  }
+}
+
 export function isAppOrigin(url: string, origin: string): boolean {
   return originOf(url) === origin;
 }

@@ -1,83 +1,128 @@
-import type { TeamInvitePreviewDto } from "@hark/contracts";
+import type { TeamInvitePreviewDto, TeamJoinResponse } from "@hark/contracts";
 import * as Device from "expo-device";
-import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
+import { Redirect, Stack, useLocalSearchParams, useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
-import { StatusBar } from "expo-status-bar";
-import { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import {
-  MetaRow,
-  PersonAvatar,
-  PrimaryButton,
-  ScreenHeader,
-  SeatLimitNotice,
-  ui,
-} from "../../src/components/screen-parts";
+import { useCallback, useEffect, useState } from "react";
+import { StyleSheet, useWindowDimensions, View } from "react-native";
+import { SeatLimitNotice } from "../../src/components/teams/seat-limit-notice";
 import { ApiError, api } from "../../src/lib/api";
+import { refreshDirectory } from "../../src/lib/app-directory";
 import { useSession } from "../../src/lib/auth";
+import { haptic } from "../../src/lib/haptics";
 import { PREVIEW_TEAM_ID, previewInvite } from "../../src/lib/inbox-preview";
-import { readableColumn } from "../../src/lib/layout";
+import { backOr } from "../../src/lib/navigation";
 import {
   isSeatLimitError,
   memberCountLabel,
   PENDING_JOIN_CODE_KEY,
   roleLabel,
 } from "../../src/lib/teams";
-import { colors } from "../../src/lib/theme";
+import { Avatar } from "../../src/ui/avatar";
+import { EmptyState, ErrorState, isNetworkError, LoadingState } from "../../src/ui/empty-state";
+import { LabeledRow, List, Row, Section } from "../../src/ui/list";
+import { Text } from "../../src/ui/text";
+import { metrics, palette, space } from "../../src/ui/tokens";
 
-export default function JoinTeamScreen() {
+const simulatorPreview = __DEV__ && !Device.isDevice;
+const AVATAR = 64;
+/**
+ * Short iPhones (SE, 667 pt): a smaller avatar, title and message, tighter
+ * and with no space above, so the details and their footnote end above the
+ * Join button at rest instead of under it (SS-05, the rule V-01 set for the
+ * Page sheet).
+ */
+const SHORT_SCREEN = 700;
+const SHORT_AVATAR = 40;
+
+type LoadFailure = { kind: "unavailable" | "network" | "other"; message?: string };
+
+/**
+ * Join a team from an invite link (DESIGN.md 5.19): who invited you, to
+ * what, and one prominent Join in the sheet's bottom toolbar. Signed out,
+ * the code is saved and the invite reopens right after sign-in.
+ */
+export default function JoinTeamSheet() {
   const { data: session, isPending } = useSession();
   const router = useRouter();
   const { code: rawCode } = useLocalSearchParams<{ code: string }>();
   const code = String(rawCode ?? "");
-  const simulatorPreview = __DEV__ && !Device.isDevice;
   const [invite, setInvite] = useState<TeamInvitePreviewDto | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<LoadFailure | null>(null);
   const [joining, setJoining] = useState(false);
   const [seatLimit, setSeatLimit] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
+  const [alreadyMember, setAlreadyMember] = useState<{ id: string; name: string } | null>(null);
   const signedOut = !isPending && !session && !simulatorPreview;
+  const short = useWindowDimensions().height < SHORT_SCREEN;
 
   useEffect(() => {
     // Remember the invite so it reopens right after sign-in.
     if (signedOut && code) void SecureStore.setItemAsync(PENDING_JOIN_CODE_KEY, code);
   }, [signedOut, code]);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     if (simulatorPreview) {
       setInvite(previewInvite);
       return;
     }
     void api
       .previewTeamInvite(code)
-      .then(setInvite)
+      .then((result) => {
+        setInvite(result);
+        setFailure(null);
+      })
       .catch((cause: unknown) =>
-        setLoadError(
+        setFailure(
           cause instanceof ApiError && (cause.status === 404 || cause.status === 410)
-            ? "This invite has expired or was already used. Ask your teammate for a new link."
-            : cause instanceof Error
-              ? cause.message
-              : "Couldn’t load this invite.",
+            ? {
+                kind: "unavailable",
+                message:
+                  "This invite has expired or was already used. Ask your teammate for a new link.",
+              }
+            : isNetworkError(cause)
+              ? { kind: "network" }
+              : {
+                  kind: "other",
+                  message: cause instanceof Error ? cause.message : undefined,
+                },
         ),
       );
-  }, [code, simulatorPreview]);
+  }, [code]);
+
+  useEffect(() => {
+    if (!signedOut) load();
+  }, [load, signedOut]);
 
   if (signedOut) return <Redirect href="/" />;
 
-  const close = () => (router.canGoBack() ? router.back() : router.replace("/apps"));
+  /** Apps shows and highlights the team. */
+  const showTeamApps = (teamId: string) => {
+    void refreshDirectory().catch(() => {});
+    router.dismissTo({ pathname: "/apps", params: { team: teamId } });
+  };
 
   const join = async () => {
-    if (joining) return;
+    if (joining || !invite) return;
     setJoining(true);
     setJoinError(null);
     setSeatLimit(false);
     try {
-      const teamId = simulatorPreview
-        ? PREVIEW_TEAM_ID
-        : (await api.acceptTeamInvite(code)).team.id;
-      router.dismissTo({ pathname: "/apps", params: { team: teamId } });
+      const result: Pick<TeamJoinResponse, "joined"> & { team: { id: string; name: string } } =
+        simulatorPreview
+          ? { joined: true, team: { id: PREVIEW_TEAM_ID, name: invite.teamName } }
+          : await api.acceptTeamInvite(code);
+      if (!result.joined) {
+        // The server leaves the invite unused when you're already a member.
+        // Said in the sheet, not in an alert: leaving the sheet from an
+        // alert's button while the alert is still going away froze both on
+        // screen (checked in the simulator).
+        setAlreadyMember(result.team);
+        return;
+      }
+      haptic.success();
+      showTeamApps(result.team.id);
     } catch (cause) {
+      haptic.error();
       if (isSeatLimitError(cause)) setSeatLimit(true);
       else setJoinError(cause instanceof Error ? cause.message : "Couldn’t join this team.");
     } finally {
@@ -86,73 +131,117 @@ export default function JoinTeamScreen() {
   };
 
   return (
-    <SafeAreaView edges={["top", "bottom"]} style={ui.container}>
-      <StatusBar style="dark" />
-      <ScreenHeader />
-      {!invite ? (
-        loadError ? (
-          <View style={[readableColumn, { paddingHorizontal: 24, gap: 16 }]}>
-            <Text style={ui.title}>Invite unavailable</Text>
-            <Text style={ui.muted}>{loadError}</Text>
-          </View>
+    <>
+      <Stack.Toolbar placement="right">
+        <Stack.Toolbar.Button
+          accessibilityLabel="Close"
+          icon="xmark"
+          onPress={() => backOr("/apps")}
+        />
+      </Stack.Toolbar>
+      <List reading>
+        {!invite ? (
+          failure?.kind === "unavailable" ? (
+            <EmptyState message={failure.message} symbol="link" title="Invite Unavailable" />
+          ) : failure ? (
+            <ErrorState
+              network={failure.kind === "network"}
+              onRetry={() => {
+                setFailure(null);
+                load();
+              }}
+              title="Couldn’t Load Invite"
+            />
+          ) : (
+            <LoadingState />
+          )
         ) : (
-          <ActivityIndicator color={colors.accent} style={ui.loading} />
-        )
-      ) : (
-        <View
-          style={[
-            readableColumn,
-            { flex: 1, justifyContent: "space-between", paddingHorizontal: 24 },
-          ]}
-        >
-          <View>
-            <View style={{ alignItems: "flex-start", gap: 16, paddingTop: 16 }}>
-              <PersonAvatar name={invite.teamName} size={60} />
-              <Text style={[ui.title, { fontSize: 26, lineHeight: 32 }]}>
-                Join {invite.teamName} on Hark
+          <>
+            <View style={[styles.hero, short && styles.heroShort]}>
+              <Avatar name={invite.teamName} size={short ? SHORT_AVATAR : AVATAR} />
+              <Text accessibilityRole="header" align="center" variant={short ? "title2" : "title1"}>
+                {`Join ${invite.teamName} on Hark`}
               </Text>
-              <Text style={ui.body}>
-                {invite.invitedBy} invited you. You’ll see {invite.teamName}’s apps on your home
-                screen and can be added to its on-call rotations.
+              <Text align="center" color="secondaryLabel" variant={short ? "subheadline" : "body"}>
+                {`${invite.invitedBy} invited you. You’ll see ${invite.teamName}’s apps in Hark and can be added to its on-call rotations.`}
               </Text>
             </View>
-            <View style={ui.metaBlock}>
-              <MetaRow label="Team" value={invite.teamName} />
-              <MetaRow label="Invited by" value={invite.invitedBy} />
-              <MetaRow label="Role" value={roleLabel(invite.role)} />
-              <MetaRow label="Members" value={memberCountLabel(invite.memberCount)} />
-            </View>
-            <Text style={[ui.muted, { marginTop: 12 }]}>
-              Each team app still asks before signing you in, and you choose what it sees.
-            </Text>
+            <Section
+              footer="Each team app still asks before signing you in, and you choose what it sees."
+              title="Details"
+            >
+              <LabeledRow label="Team" value={invite.teamName} />
+              <LabeledRow label="Invited By" value={invite.invitedBy} />
+              <LabeledRow label="Role" value={roleLabel(invite.role)} />
+              <LabeledRow label="Members" value={memberCountLabel(invite.memberCount)} />
+            </Section>
+            {alreadyMember ? (
+              <Section>
+                <Row
+                  subtitle="Nothing changed, and the invite still works for someone else."
+                  symbol="checkmark.circle.fill"
+                  symbolColor="accent"
+                  title={`You’re already on ${alreadyMember.name}`}
+                />
+              </Section>
+            ) : null}
             {seatLimit ? <SeatLimitNotice owner={false} teamName={invite.teamName} /> : null}
             {joinError ? (
               <Text
                 accessibilityLiveRegion="polite"
-                style={[ui.muted, { color: colors.danger, marginTop: 12 }]}
+                color="danger"
+                style={styles.error}
+                variant="footnote"
               >
                 {joinError}
               </Text>
             ) : null}
-          </View>
-          <View style={{ gap: 4, paddingBottom: 12 }}>
-            <PrimaryButton
-              accessibilityHint={`Adds you to ${invite.teamName}`}
-              busy={joining}
-              label={`Join ${invite.teamName}`}
-              onPress={() => void join()}
-            />
-            <Pressable
-              accessibilityLabel="Not now"
-              accessibilityRole="button"
-              onPress={close}
-              style={{ minHeight: 44, alignItems: "center", justifyContent: "center" }}
+          </>
+        )}
+      </List>
+      {invite ? (
+        <Stack.Toolbar placement="bottom">
+          <Stack.Toolbar.Spacer />
+          {alreadyMember ? (
+            <Stack.Toolbar.Button
+              accessibilityHint={`Shows ${alreadyMember.name}’s apps`}
+              onPress={() => showTeamApps(alreadyMember.id)}
+              tintColor={palette.accent}
+              variant="prominent"
             >
-              <Text style={ui.secondaryButtonText}>Not now</Text>
-            </Pressable>
-          </View>
-        </View>
-      )}
-    </SafeAreaView>
+              Show Apps
+            </Stack.Toolbar.Button>
+          ) : (
+            <Stack.Toolbar.Button
+              accessibilityHint={`Adds you to ${invite.teamName}`}
+              disabled={joining}
+              onPress={() => void join()}
+              tintColor={palette.accent}
+              variant="prominent"
+            >
+              {joining ? "Joining…" : `Join ${invite.teamName}`}
+            </Stack.Toolbar.Button>
+          )}
+          <Stack.Toolbar.Spacer />
+        </Stack.Toolbar>
+      ) : null}
+    </>
   );
 }
+
+const styles = StyleSheet.create({
+  hero: {
+    alignItems: "center",
+    gap: space.s,
+    marginTop: space.l,
+    paddingHorizontal: metrics.rowPaddingHorizontal,
+  },
+  heroShort: {
+    gap: space.xxs,
+    marginTop: 0,
+  },
+  error: {
+    marginTop: space.s,
+    paddingHorizontal: metrics.rowPaddingHorizontal,
+  },
+});
